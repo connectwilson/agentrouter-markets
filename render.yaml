@@ -2,6 +2,7 @@ services:
   - type: web
     name: agentrouter-markets
     runtime: docker
+    plan: free
     repo: https://github.com/connectwilson/agentrouter-markets
     branch: main
     dockerfilePath: ./Dockerfile
