@@ -235,6 +235,26 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/agent-router/observations") {
+    const serviceId = url.searchParams.get("service_id");
+    const capability = url.searchParams.get("capability");
+    const status = url.searchParams.get("status");
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") || 50)));
+    const observations = (store.routeObservations || [])
+      .filter((event) => !serviceId || event.selected_service_id === serviceId)
+      .filter((event) => !capability || event.request?.capability === capability)
+      .filter((event) => !status || event.status === status)
+      .slice(-limit);
+    sendJson(res, 200, {
+      observation_feed_version: "agent_router_route_observations_v1",
+      storage: "offchain_memory_db",
+      note: "Route observations are lightweight training/evaluation records for future learned routing.",
+      count: observations.length,
+      observations
+    });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/agent-router/trust") {
     const serviceId = url.searchParams.get("service_id");
     const services = [...store.services.values()]

@@ -6,6 +6,7 @@
 - Registry: stores service manifests, provider metadata, validation status, and feedback events.
 - Connector API: agent-facing primitives for search, manifest, preview, paid invocation, and feedback.
 - AgentRouter: higher-level routing endpoint that accepts a natural-language task and performs search -> selection -> invocation -> summary.
+- Route Observations: lightweight offchain records of structured routing decisions, candidate scores, selected service, verification outcome, and feedback hashes for future ranking improvements.
 - Provider Runtime: local provider endpoints that return preview or paid agent data envelopes.
 - Wallet/Payment: dev-mode x402-style challenge and signed proof.
 

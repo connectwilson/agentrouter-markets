@@ -214,11 +214,18 @@ export async function routeCapabilityRequest(store, {
   const normalizedConstraints = normalizeRequestConstraints(constraints, budget);
   const candidates = rankCandidates(store, intent, normalizedConstraints);
   if (!candidates.length) {
+    const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
+    const observation = recordRouteObservation(store, {
+      status: ROUTER_STATUSES.NO_MATCH,
+      request,
+      candidates
+    });
     return {
       ok: false,
       status: ROUTER_STATUSES.NO_MATCH,
-      request: { capability, params, constraints: normalizedConstraints },
+      request,
       candidates_considered: 0,
+      observation,
       message: "No verified service matched the structured capability request and constraints."
     };
   }
@@ -238,14 +245,26 @@ export async function routeCapabilityRequest(store, {
     { max_amount: normalizedConstraints.max_price_usdc || "0.05", currency: budget.currency || "USDC" }
   );
   if (invocation.statusCode >= 400) {
+    const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
+    const error = invocation.body.error || invocation.body.result?.error || invocation.body;
+    const observation = recordRouteObservation(store, {
+      status: "route_failed",
+      request,
+      candidates,
+      selected,
+      quote,
+      invocation,
+      error
+    });
     return {
       ok: false,
       status: "route_failed",
-      request: { capability, params, constraints: normalizedConstraints },
+      request,
       selected_service: selected,
       input,
       quote,
-      error: invocation.body.error || invocation.body.result?.error || invocation.body
+      observation,
+      error
     };
   }
 
@@ -267,6 +286,16 @@ export async function routeCapabilityRequest(store, {
     verification
   });
   store.evidenceEvents.push(evidence);
+  const observation = recordRouteObservation(store, {
+    status: "routed",
+    request,
+    candidates,
+    selected,
+    quote,
+    invocation,
+    verification,
+    evidence
+  });
 
   return {
     ok: true,
@@ -285,7 +314,8 @@ export async function routeCapabilityRequest(store, {
     result: invocation.body.result,
     feedback: invocation.body.feedback,
     verification,
-    evidence
+    evidence,
+    observation
   };
 }
 
@@ -600,6 +630,55 @@ function summarizeCandidates(candidates) {
     routing_score,
     selection_reason
   }));
+}
+
+function recordRouteObservation(store, {
+  status,
+  request,
+  candidates = [],
+  selected = null,
+  quote = null,
+  invocation = null,
+  verification = null,
+  evidence = null,
+  error = null
+}) {
+  if (!store.routeObservations) store.routeObservations = [];
+  const observation = {
+    observation_version: "agent_router_route_observation_v1",
+    observation_id: `route_obs_${Date.now()}_${store.routeObservations.length + 1}`,
+    created_at: new Date().toISOString(),
+    route_type: "structured_capability_request",
+    status,
+    request,
+    score_model: {
+      name: "heuristic_weighted_ranker",
+      version: "2026-05-20",
+      features: ["capability_fit", "asset_fit", "trust_score", "freshness_fit", "price_fit", "text_match"]
+    },
+    candidates_considered: candidates.length,
+    candidates: summarizeCandidates(candidates),
+    selected_service_id: selected?.service_id || null,
+    selected_routing_score: selected?.routing_score ?? null,
+    quote: quote ? {
+      quote_version: quote.quote_version,
+      would_pay: quote.would_pay,
+      price: quote.price,
+      guard: quote.guard,
+      payment_backend: quote.payment_backend
+    } : null,
+    outcome: {
+      invocation_status_code: invocation?.statusCode ?? null,
+      feedback_status: invocation?.body?.feedback?.status || null,
+      schema_valid: verification?.schema_valid ?? invocation?.body?.feedback?.schema_valid ?? null,
+      agent_friendly_score: verification?.agent_friendly_score ?? null,
+      evidence_trace_hash: evidence?.trace_hash || null,
+      result_hash: evidence?.result_hash || null,
+      error
+    }
+  };
+  store.routeObservations.push(observation);
+  return observation;
 }
 
 function buildInput(manifest, intent) {

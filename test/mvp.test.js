@@ -168,6 +168,11 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.match(routed.evidence.result_hash, /^0x[0-9a-f]{64}$/);
     assert.equal(routed.evidence.arc_anchor.network, "arc");
     assert.equal(routed.evidence.arc_anchor.status, "simulated_anchor");
+    assert.equal(routed.observation.observation_version, "agent_router_route_observation_v1");
+    assert.equal(routed.observation.status, "routed");
+    assert.equal(routed.observation.selected_service_id, "btc_liquidation_max_pain_demo");
+    assert.equal(routed.observation.score_model.name, "heuristic_weighted_ranker");
+    assert.equal(routed.observation.outcome.evidence_trace_hash, routed.evidence.trace_hash);
 
     const evidenceResponse = await fetch(`${baseUrl}/agent-router/evidence?service_id=btc_liquidation_max_pain_demo`);
     assert.equal(evidenceResponse.status, 200);
@@ -182,6 +187,14 @@ test("AgentRouter capability catalog and structured request route deterministica
     const trust = await trustResponse.json();
     assert.equal(trust.trust_snapshot_version, "agent_router_trust_snapshot_v1");
     assert.equal(trust.services[0].provider_id, "provider_derivatives_bob");
+
+    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?service_id=btc_liquidation_max_pain_demo`);
+    assert.equal(observationsResponse.status, 200);
+    const observations = await observationsResponse.json();
+    assert.equal(observations.observation_feed_version, "agent_router_route_observations_v1");
+    assert.equal(observations.storage, "offchain_memory_db");
+    assert.equal(observations.count, 1);
+    assert.equal(observations.observations[0].observation_id, routed.observation.observation_id);
   });
 });
 
@@ -839,6 +852,15 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     const routed = await routeResponse.json();
     assert.equal(routed.ok, false);
     assert.equal(routed.status, "no_match");
+    assert.equal(routed.observation.observation_version, "agent_router_route_observation_v1");
+    assert.equal(routed.observation.status, "no_match");
+    assert.equal(routed.observation.request.capability, "smart_money_holdings");
+    assert.equal(routed.observation.candidates_considered, 0);
+
+    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=no_match`);
+    assert.equal(observationsResponse.status, 200);
+    const observations = await observationsResponse.json();
+    assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));
   });
 });
 

@@ -5,7 +5,8 @@ export function createMemoryStore() {
     validationRuns: [],
     invocationLogs: [],
     feedbackEvents: [],
-    evidenceEvents: []
+    evidenceEvents: [],
+    routeObservations: []
   };
 }
 

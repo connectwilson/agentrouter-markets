@@ -33,6 +33,7 @@ Last updated: 2026-05-18
 - Tightened protocol boundaries: `/agent-router/request` and MCP `agentrouter_request` are the preferred production-like paths; `/agent-router/ask` is only a demo/fallback natural-language wrapper.
 - Structured requests now return `agent_router_evidence_v1`, including `trace_hash`, `result_hash`, `verification_hash`, payment receipt metadata, and a simulated Arc anchor.
 - Added `GET /agent-router/evidence` and `GET /agent-router/trust` so the MVP shows where offchain trust state lives and what can later be anchored on Arc.
+- Added lightweight `agent_router_route_observation_v1` records and `GET /agent-router/observations` so structured routing accumulates candidate, score, selection, verification, and feedback data for future learned routing without adding a heavy training system.
 - Added Claude Desktop Extension package source in `mcpb/agentrouter` and generated `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` for no-command local installation.
 - `mcpb validate mcpb/agentrouter` passes and `mcpb pack mcpb/agentrouter` succeeds.
 - Added publish-ready npm/npx MCP package source in `packages/agentrouter-mcp` with target package name `@agentrouter/mcp`.
@@ -62,6 +63,7 @@ The Matrixport address demo depends on the upstream Lookonchain-style API at `12
 ## Next Decisions
 
 - Keep heuristic natural-language handling only as `/agent-router/ask` demo/fallback logic.
+- Use route observations as the first lightweight dataset for improving provider ranking before considering graph models or learned rankers.
 - Decide whether provider trust is registry-local first or anchored to ERC-8004-style attestations in the MVP.
 - Decide how much payment UX to keep in dev x402 mode before integrating a real facilitator.
 - Add a one-command provider onboarding path after the GUI stabilizes.
