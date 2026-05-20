@@ -226,7 +226,8 @@ function shouldPublishToRemote({ body, baseUrl, remoteUrl }) {
 }
 
 function normalizedRemoteRegistryUrl(value) {
-  const raw = value || process.env.ADN_REMOTE_REGISTRY_URL || process.env.AGENT_ROUTER_PUBLIC_URL || "https://agentrouter-markets-production.up.railway.app";
+  const renderUrl = process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "";
+  const raw = value || process.env.ADN_REMOTE_REGISTRY_URL || process.env.AGENT_ROUTER_PUBLIC_URL || renderUrl || "https://agentrouter-markets-production.up.railway.app";
   if (!raw) return "";
   return normalizeEndpoint(raw, "https://agentrouter.local").replace(/\/$/, "");
 }
