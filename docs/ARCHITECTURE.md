@@ -1,0 +1,31 @@
+# Architecture
+
+## Components
+
+- Provider Studio: human-facing service onboarding GUI.
+- Registry: stores service manifests, provider metadata, validation status, and feedback events.
+- Connector API: agent-facing primitives for search, manifest, preview, paid invocation, and feedback.
+- AgentRouter: higher-level routing endpoint that accepts a natural-language task and performs search -> selection -> invocation -> summary.
+- Provider Runtime: local provider endpoints that return preview or paid agent data envelopes.
+- Wallet/Payment: dev-mode x402-style challenge and signed proof.
+
+## Trust Boundaries
+
+- Demand agents should not choose payment target or amount directly. Invocation derives those from the service manifest and provider challenge.
+- Provider secrets stay server-side in provider config/runtime. They should not be exposed to demand agents or Skill files.
+- AgentRouter returns routing metadata so the main agent can inspect which service was selected, what input was used, and whether schema validation passed.
+- Public Skills should call an HTTP endpoint, not a local filesystem path, when used from hosted Claude-like environments.
+
+## Agent-Friendly Response Shape
+
+Paid results should return an `agent_data_envelope_v1`-style object:
+
+- `status`
+- `service_id`
+- `request_id`
+- `query`
+- `data`
+- `metadata`
+- `limitations`
+
+The exact provider data can vary by service, but the envelope gives the calling agent stable places to inspect freshness, confidence, limitations, and source metadata.

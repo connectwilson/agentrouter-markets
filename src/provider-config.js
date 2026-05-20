@@ -1,0 +1,314 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { writeProviderSecret } from "./provider-secrets.js";
+
+export const PROVIDER_DIR = path.resolve(process.env.ADN_PROVIDER_DIR || "providers");
+
+export async function ensureProviderDir() {
+  await fs.mkdir(PROVIDER_DIR, { recursive: true });
+}
+
+export function providerConfigPath(serviceId) {
+  return path.join(PROVIDER_DIR, `${serviceId}.json`);
+}
+
+export async function writeProviderConfig(config) {
+  await ensureProviderDir();
+  const sanitized = await sanitizeProviderConfig(config);
+  await fs.writeFile(providerConfigPath(config.manifest.service_id), `${JSON.stringify(sanitized, null, 2)}\n`);
+  return providerConfigPath(config.manifest.service_id);
+}
+
+export async function readProviderConfig(serviceId) {
+  const content = await fs.readFile(providerConfigPath(serviceId), "utf8");
+  return JSON.parse(content);
+}
+
+export async function listProviderConfigs() {
+  try {
+    await ensureProviderDir();
+    const files = await fs.readdir(PROVIDER_DIR);
+    const configs = [];
+    for (const file of files.filter((name) => name.endsWith(".json"))) {
+      const content = await fs.readFile(path.join(PROVIDER_DIR, file), "utf8");
+      configs.push(JSON.parse(content));
+    }
+    return configs;
+  } catch {
+    return [];
+  }
+}
+
+export function createStaticProviderConfig({
+  baseUrl,
+  serviceId,
+  providerId,
+  title,
+  description,
+  capabilities,
+  price,
+  sampleRequest,
+  sampleData,
+  liveData,
+  summary
+}) {
+  const manifest = {
+    manifest_version: "agent_data_service_manifest_v1",
+    service_id: serviceId,
+    provider: {
+      provider_id: providerId,
+      agent_identity: {
+        standard: "erc-8004-compatible",
+        agent_registry: "optional",
+        agent_id: "optional",
+        agent_uri: "optional"
+      }
+    },
+    title,
+    description_for_agent: description,
+    capabilities,
+    not_for: [],
+    input_schema: {
+      type: "object",
+      properties: {}
+    },
+    output_schema: {
+      type: "object",
+      required: ["schema_version", "service_id", "request_id", "status", "query", "data", "metadata"],
+      properties: {
+        schema_version: { type: "string" },
+        service_id: { type: "string" },
+        request_id: { type: "string" },
+        status: { type: "string" },
+        query: { type: "object" },
+        data: { type: "object" },
+        metadata: { type: "object" }
+      }
+    },
+    sample_request: sampleRequest,
+    sample_response: createEnvelope({
+      serviceId,
+      input: sampleRequest,
+      data: sampleData,
+      sampleType: "mock",
+      isEstimated: true,
+      confidence: 0.7,
+      summary: `${summary} (sample response)`
+    }),
+    pricing: {
+      amount: price,
+      currency: "USDC",
+      network: "base",
+      protocol: "x402"
+    },
+    endpoint: {
+      url: `${baseUrl.replace(/\/$/, "")}/provider/custom/${serviceId}`,
+      method: "POST"
+    },
+    data_source_claim: {
+      source_type: "static_dataset",
+      authorization_status: "provider_declared",
+      redistribution_status: "provider_declared",
+      credential_custody: "none",
+      platform_stores_credentials: false
+    },
+    freshness: {
+      update_frequency: "manual",
+      max_data_lag_seconds: 86400
+    },
+    registration: {
+      source_fingerprint: createSourceFingerprint({
+        type: "static_json",
+        provider_id: providerId,
+        summary,
+        sample_request: sampleRequest,
+        sample_data: sampleData
+      }),
+      duplicate_policy: "same_provider_source_is_idempotent"
+    }
+  };
+
+  return {
+    provider_config_version: "adn_provider_config_v1",
+    source: {
+      type: "static_json",
+      live_data: liveData,
+      summary
+    },
+    manifest
+  };
+}
+
+export function createHostedHttpProviderConfig({
+  baseUrl,
+  serviceId,
+  providerId,
+  title,
+  description,
+  capabilities,
+  price,
+  sampleRequest,
+  sampleData,
+  upstreamUrl,
+  upstreamMethod = "POST",
+  secretName = "PROVIDER_SECRET",
+  secretValue = "",
+  authHeader = "authorization",
+  summary
+}) {
+  const manifest = {
+    manifest_version: "agent_data_service_manifest_v1",
+    service_id: serviceId,
+    provider: {
+      provider_id: providerId,
+      agent_identity: {
+        standard: "erc-8004-compatible",
+        agent_registry: "optional",
+        agent_id: "optional",
+        agent_uri: "optional"
+      }
+    },
+    title,
+    description_for_agent: description,
+    capabilities,
+    not_for: [],
+    input_schema: {
+      type: "object",
+      properties: {}
+    },
+    output_schema: {
+      type: "object",
+      required: ["schema_version", "service_id", "request_id", "status", "query", "data", "metadata"],
+      properties: {
+        schema_version: { type: "string" },
+        service_id: { type: "string" },
+        request_id: { type: "string" },
+        status: { type: "string" },
+        query: { type: "object" },
+        data: { type: "object" },
+        metadata: { type: "object" }
+      }
+    },
+    sample_request: sampleRequest,
+    sample_response: createEnvelope({
+      serviceId,
+      input: sampleRequest,
+      data: sampleData,
+      sourceType: "hosted_http",
+      sampleType: "mock",
+      isEstimated: true,
+      confidence: 0.7,
+      summary: `${summary} (sample response)`
+    }),
+    pricing: {
+      amount: price,
+      currency: "USDC",
+      network: "base",
+      protocol: "x402"
+    },
+    endpoint: {
+      url: `${baseUrl.replace(/\/$/, "")}/provider/custom/${serviceId}`,
+      method: "POST"
+    },
+    runtime_secrets: {
+      required: Boolean(secretValue),
+      custody: "hosted_runtime_config",
+      public: false
+    },
+    data_source_claim: {
+      source_type: "provider_declared_data_service",
+      authorization_status: "provider_declared",
+      redistribution_status: "provider_declared",
+      credential_custody: secretValue ? "hosted_runtime_config" : "none",
+      platform_stores_credentials: Boolean(secretValue)
+    },
+    freshness: {
+      update_frequency: "on_request",
+      max_data_lag_seconds: 300
+    },
+    registration: {
+      source_fingerprint: createSourceFingerprint({
+        type: "hosted_http",
+        provider_id: providerId,
+        upstream_url: canonicalizeUrl(upstreamUrl),
+        upstream_method: String(upstreamMethod || "POST").toUpperCase()
+      }),
+      duplicate_policy: "same_provider_source_is_idempotent"
+    }
+  };
+
+  return {
+    provider_config_version: "adn_provider_config_v1",
+    source: {
+      type: "hosted_http",
+      upstream_url: upstreamUrl,
+      upstream_method: upstreamMethod,
+      auth: {
+        mode: secretValue ? "header" : "none",
+        header: authHeader,
+        secret_name: secretName,
+        secret_value: secretValue
+      },
+      summary
+    },
+    manifest
+  };
+}
+
+function createSourceFingerprint(value) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function canonicalizeUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return String(rawUrl || "").trim();
+  }
+}
+
+async function sanitizeProviderConfig(config) {
+  const next = structuredClone(config);
+  const auth = next.source?.auth;
+  if (auth?.secret_value) {
+    const secretRef = await writeProviderSecret({
+      serviceId: next.manifest.service_id,
+      secretName: auth.secret_name || "PROVIDER_SECRET",
+      secretValue: auth.secret_value
+    });
+    auth.secret_ref = secretRef;
+    delete auth.secret_value;
+  }
+  return next;
+}
+
+export function createEnvelope({ serviceId, input, data, sampleType, isEstimated, confidence, summary, sourceType = "static_json" }) {
+  const now = new Date().toISOString();
+  const envelope = {
+    schema_version: "agent_data_envelope_v1",
+    service_id: serviceId,
+    request_id: sampleType ? "sample_req" : `req_${Date.now()}`,
+    status: "success",
+    query: input || {},
+    data,
+    metadata: {
+      data_sources: [`provider_config_${sourceType}`],
+      generated_at: now,
+      freshness_seconds: sampleType ? 86400 : 60,
+      is_estimated: isEstimated,
+      confidence,
+      limitations: sampleType ? ["Sample response is mock/static and not a live paid response."] : [`${sourceType} provider for MVP onboarding.`]
+    },
+    agent_hints: {
+      good_for: ["MVP validation", "Agent response parsing"],
+      warnings: sampleType ? ["Use paid invocation for the full response."] : [],
+      suggested_followups: []
+    },
+    summary
+  };
+  if (sampleType) envelope.sample_type = sampleType;
+  return envelope;
+}

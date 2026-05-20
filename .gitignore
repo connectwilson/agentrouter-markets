@@ -1,0 +1,7 @@
+.adn/
+agentrouter-skill-export/
+providers/*.json
+providers/*.local.json
+providers/*secret*.json
+node_modules/
+.DS_Store

@@ -1,0 +1,7 @@
+.adn
+node_modules
+.git
+agentrouter-skill-export/.git
+coverage
+.DS_Store
+*.log

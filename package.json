@@ -1,0 +1,23 @@
+{
+  "name": "agent-native-data-network-mvp",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "adn": "./bin/adn.js",
+    "agent-router": "./bin/agent-router.js",
+    "agent-router-mcp": "./bin/agent-router-mcp.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "PORT=8800 node src/server.js",
+    "demo": "node src/demo.js",
+    "test": "node --test",
+    "test:mvp": "node --test",
+    "router:ask": "node bin/agent-router.js ask",
+    "mcpb:check": "node --check mcpb/agentrouter/server/index.js",
+    "mcpb:pack": "mcpb pack mcpb/agentrouter",
+    "mcp:npm:check": "node --check packages/agentrouter-mcp/server/index.js",
+    "mcp:npm:pack": "npm pack ./packages/agentrouter-mcp --dry-run"
+  }
+}

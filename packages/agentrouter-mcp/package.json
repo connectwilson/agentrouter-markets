@@ -1,0 +1,38 @@
+{
+  "name": "@agentrouter/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for AgentRouter: route AI agents to paid API/data services and return verified evidence.",
+  "type": "module",
+  "bin": {
+    "agentrouter-mcp": "./bin/agentrouter-mcp.js"
+  },
+  "files": [
+    "bin",
+    "server",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "agent",
+    "api",
+    "data",
+    "routing",
+    "x402",
+    "usdc",
+    "arc"
+  ],
+  "author": "AgentRouter",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/connectwilson/agentrouter-skill.git"
+  },
+  "homepage": "https://github.com/connectwilson/agentrouter-skill#readme",
+  "bugs": {
+    "url": "https://github.com/connectwilson/agentrouter-skill/issues"
+  }
+}
