@@ -850,13 +850,13 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ drafts: discovered.drafts, publish_scope: "local_only" })
     });
-    assert.equal(publishResponse.status, 207);
+    assert.equal(publishResponse.status, 201);
     const published = await publishResponse.json();
-    assert.equal(published.ok, false);
-    assert.equal(published.published.length, 0);
-    assert.equal(published.failed[0].service_id, "post_api_v1_smart_money_holdings");
-    assert.equal(published.failed[0].error, "VALIDATION_FAILED");
-    assert.equal(published.failed[0].validation.ok, false);
+    assert.equal(published.ok, true);
+    assert.equal(published.published.length, 1);
+    assert.equal(published.published[0].service_id, "post_api_v1_smart_money_holdings");
+    assert.equal(published.published[0].warning, "VALIDATION_FAILED_SERVICE_REGISTERED_UNVERIFIED");
+    assert.equal(published.published[0].validation.ok, false);
 
     const routeResponse = await fetch(`${baseUrl}/agent-router/request`, {
       method: "POST",
@@ -873,13 +873,15 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     assert.equal(routeResponse.status, 200);
     const routed = await routeResponse.json();
     assert.equal(routed.ok, false);
-    assert.equal(routed.status, "no_match");
+    assert.equal(routed.status, "route_failed");
+    assert.equal(routed.selected_service.service_id, "post_api_v1_smart_money_holdings");
+    assert.equal(routed.error.code, "UPSTREAM_ERROR");
     assert.equal(routed.observation.observation_version, "agent_router_route_observation_v1");
-    assert.equal(routed.observation.status, "no_match");
+    assert.equal(routed.observation.status, "route_failed");
     assert.equal(routed.observation.request.capability, "smart_money_holdings");
-    assert.equal(routed.observation.candidates_considered, 0);
+    assert.equal(routed.observation.candidates_considered, 1);
 
-    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=no_match`);
+    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=route_failed`);
     assert.equal(observationsResponse.status, 200);
     const observations = await observationsResponse.json();
     assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));

@@ -226,7 +226,7 @@ export async function routeCapabilityRequest(store, {
       request,
       candidates_considered: 0,
       observation,
-      message: "No verified service matched the structured capability request and constraints."
+      message: "No registered service matched the structured capability request and constraints."
     };
   }
 
@@ -349,7 +349,7 @@ export function quoteCapabilityRequest(store, {
       status: ROUTER_STATUSES.NO_MATCH,
       request: { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext },
       candidates_considered: 0,
-      message: "No verified service matched the structured capability request and constraints."
+      message: "No registered service matched the structured capability request and constraints."
     };
   }
 
@@ -386,7 +386,7 @@ export function resolveRoute(store, { task = "", intent: providedIntent, constra
       status: ROUTER_STATUSES.NO_MATCH,
       candidates_considered: 0,
       candidates: [],
-      message: "No verified service matched the normalized intent and constraints."
+      message: "No registered service matched the normalized intent and constraints."
     };
   }
 
@@ -430,7 +430,7 @@ export function rankCandidates(store, intent, constraints = {}) {
     query: buildSearchQuery(intent),
     capabilities: [],
     maxPrice: constraints.max_price_usdc,
-    verifiedOnly: true
+    verifiedOnly: false
   });
 
   return searchResults

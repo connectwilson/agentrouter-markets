@@ -141,21 +141,13 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const duplicate = store.services.get(config.manifest.service_id) || findDuplicateService(store, config.manifest);
       if (duplicate) {
         const validation = duplicate.validation_runs?.at(-1) || { ok: duplicate.verification_status === "verified" };
-        if (!validation.ok || duplicate.verification_status !== "verified") {
-          failed.push({
-            service_id: config.manifest.service_id,
-            existing_service_id: duplicate.manifest.service_id,
-            error: "EXISTING_SERVICE_NOT_VERIFIED",
-            validation
-          });
-          continue;
-        }
         published.push({
-          ok: true,
+          ok: validation.ok === true,
           service_id: duplicate.manifest.service_id,
           requested_service_id: config.manifest.service_id,
           already_registered: true,
           duplicate_reason: duplicate.manifest.service_id === config.manifest.service_id ? "service_id" : "same_provider_source",
+          warning: validation.ok === true ? null : "EXISTING_SERVICE_NOT_VERIFIED",
           registration: publicServiceRecord(duplicate),
           validation
         });
@@ -164,19 +156,10 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const configPath = await writeProviderConfig(config);
       const record = registerService(store, config.manifest, baseUrl);
       const validation = await validateService(store, config.manifest.service_id);
-      if (!validation.ok) {
-        unregisterService(store, config.manifest.service_id);
-        failed.push({
-          service_id: config.manifest.service_id,
-          error: "VALIDATION_FAILED",
-          provider_config_path: configPath,
-          validation
-        });
-        continue;
-      }
       published.push({
         ok: validation.ok,
         service_id: config.manifest.service_id,
+        warning: validation.ok ? null : "VALIDATION_FAILED_SERVICE_REGISTERED_UNVERIFIED",
         provider_config_path: configPath,
         registration: publicServiceRecord(record),
         validation
@@ -185,19 +168,11 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const existing = store.services.get(draft.service_id);
       if (existing && /already registered/i.test(error.message)) {
         const validation = existing.validation_runs?.at(-1) || { ok: existing.verification_status === "verified" };
-        if (!validation.ok || existing.verification_status !== "verified") {
-          failed.push({
-            service_id: draft.service_id,
-            existing_service_id: existing.manifest.service_id,
-            error: "EXISTING_SERVICE_NOT_VERIFIED",
-            validation
-          });
-          continue;
-        }
         published.push({
-          ok: true,
+          ok: validation.ok === true,
           service_id: draft.service_id,
           already_registered: true,
+          warning: validation.ok === true ? null : "EXISTING_SERVICE_NOT_VERIFIED",
           registration: publicServiceRecord(existing),
           validation
         });
@@ -211,7 +186,7 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
   }
 
   return {
-    ok: failed.length === 0,
+    ok: published.length > 0 && failed.length === 0,
     published,
     failed
   };
