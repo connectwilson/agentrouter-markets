@@ -3,8 +3,8 @@ import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, publicServiceRecord } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
-import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { invokePaidService, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
+import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamBtcEtf, handleMockUpstreamSentiment } from "./provider-runtime.js";
+import { invokePaidService, registerService, searchServices, validateService, loadProviderConfigs, unregisterService } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
@@ -302,6 +302,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/mock/upstream/app-error") {
     await handleMockUpstreamApplicationError(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/mock/upstream/btc-etf") {
+    await handleMockUpstreamBtcEtf(req, res);
     return;
   }
 
@@ -666,9 +671,56 @@ export async function bootstrapServer(server, baseUrl) {
 
 export async function seedEnvProviderServices(baseUrl, store) {
   const nansenApiKey = process.env.NANSEN_API_KEY || process.env.ADN_NANSEN_API_KEY;
-  if (!nansenApiKey) return [];
+  const blockbeatsApiKey = process.env.BLOCKBEATS_API_KEY || process.env.ADN_BLOCKBEATS_API_KEY;
 
   const price = process.env.NANSEN_PRICE_USDC || "0.01";
+  const seeded = [];
+  if (blockbeatsApiKey) {
+    const serviceId = "get_v1_data_btc_etf";
+    const config = createHostedHttpProviderConfig({
+      baseUrl,
+      serviceId,
+      providerId: "api_pro_theblockbeats_info",
+      title: "GET v1 data btc etf",
+      description: "Use this service to query BlockBeats BTC ETF daily net inflow and total net inflow data.",
+      capabilities: ["data_service", "market_data", "etf_data", "btc_etf"],
+      price: process.env.BLOCKBEATS_PRICE_USDC || "0.01",
+      sampleRequest: {},
+      sampleData: {
+        status: 0,
+        message: "",
+        data: [
+          {
+            date: "2026-05-20",
+            day_net_inflow_million: "-70.50",
+            total_net_inflow_million: "106875.00"
+          }
+        ]
+      },
+      upstreamUrl: process.env.BLOCKBEATS_BTC_ETF_URL || "https://api-pro.theblockbeats.info/v1/data/btc_etf",
+      upstreamMethod: "GET",
+      secretName: "BLOCKBEATS_API_KEY",
+      secretValue: blockbeatsApiKey,
+      authHeader: "api-key",
+      summary: "BlockBeats BTC ETF daily net inflow data."
+    });
+    await writeProviderConfig(config);
+    if (!store.services.has(serviceId)) {
+      const record = registerService(store, config.manifest, baseUrl);
+      let validation = null;
+      try {
+        validation = await validateService(store, record.manifest.service_id);
+        if (!validation.ok) unregisterService(store, record.manifest.service_id);
+      } catch (error) {
+        validation = { ok: false, error: "VALIDATION_REQUEST_FAILED", message: error.message };
+        unregisterService(store, record.manifest.service_id);
+      }
+      seeded.push({ service_id: record.manifest.service_id, verification_status: record.verification_status, validation });
+    }
+  }
+
+  if (!nansenApiKey) return seeded;
+
   const services = [
     {
       serviceId: "nansen_smart_money_netflow",
@@ -719,7 +771,6 @@ export async function seedEnvProviderServices(baseUrl, store) {
     }
   ];
 
-  const seeded = [];
   for (const service of services) {
     if (store.services.has(service.serviceId)) continue;
     const config = createHostedHttpProviderConfig({

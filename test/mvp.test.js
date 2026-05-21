@@ -714,6 +714,60 @@ test("bootstrap can seed Nansen services from environment without validation", a
   }
 });
 
+test("bootstrap can seed and validate BlockBeats BTC ETF service from environment", async () => {
+  const previousKey = process.env.BLOCKBEATS_API_KEY;
+  const previousUrl = process.env.BLOCKBEATS_BTC_ETF_URL;
+  process.env.BLOCKBEATS_API_KEY = "demo-blockbeats-key";
+  try {
+    await withServer(async ({ server, baseUrl }) => {
+      process.env.BLOCKBEATS_BTC_ETF_URL = `${baseUrl}/mock/upstream/btc-etf`;
+      const seeded = await seedEnvProviderServices(baseUrl, server.store);
+      assert.ok(seeded.some((service) => service.service_id === "get_v1_data_btc_etf"));
+
+      const search = searchServices(server.store, { query: "btc_etf", verifiedOnly: true });
+      assert.equal(search.some((service) => service.service_id === "get_v1_data_btc_etf"), true);
+
+      const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          task: "用 AgentRouter 查询 BTC ETF 数据",
+          max_price: "0.05"
+        })
+      });
+      assert.equal(askResponse.status, 200);
+      const routed = await askResponse.json();
+      assert.equal(routed.ok, true);
+      assert.equal(routed.request.capability, "btc_etf");
+      assert.equal(routed.selected_service.service_id, "get_v1_data_btc_etf");
+      assert.equal(routed.result.data.data[0].date, "2026-05-20");
+    });
+  } finally {
+    if (previousKey === undefined) delete process.env.BLOCKBEATS_API_KEY;
+    else process.env.BLOCKBEATS_API_KEY = previousKey;
+    if (previousUrl === undefined) delete process.env.BLOCKBEATS_BTC_ETF_URL;
+    else process.env.BLOCKBEATS_BTC_ETF_URL = previousUrl;
+  }
+});
+
+test("AgentRouter ask does not route BTC ETF requests to unrelated BTC demo services", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "用 AgentRouter 查询 BTC ETF 数据",
+        max_price: "0.05"
+      })
+    });
+    assert.equal(askResponse.status, 200);
+    const routed = await askResponse.json();
+    assert.equal(routed.ok, false);
+    assert.equal(routed.status, "no_match");
+    assert.equal(routed.request.capability, "btc_etf");
+  });
+});
+
 test("Provider Studio imports OpenAPI data endpoints into multiple services", async () => {
   await withServer(async ({ server, baseUrl }) => {
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {

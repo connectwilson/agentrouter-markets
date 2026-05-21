@@ -129,6 +129,7 @@ export function inferIntent(task) {
   const wantsSmartMoneyHoldings = /smart[\s_-]?money/i.test(task) && /holdings?|持仓/i.test(task);
   const wantsSmartMoneyNetflow = /smart[\s_-]?money/i.test(task) && /net[\s_-]?flow|netflow|净流入|净流出|资金流/i.test(task);
   const wantsNetflow = !wantsSmartMoneyNetflow && /net[\s_-]?flow|netflow|净流入|净流出/i.test(task);
+  const wantsBtcEtf = /\bbtc\b/i.test(task) && /\betf\b/i.test(task);
   const limit = detectLimit(task, wantsSingle);
   const input = {
     limit,
@@ -171,6 +172,7 @@ export function inferIntent(task) {
     wants_smart_money_holdings: wantsSmartMoneyHoldings,
     wants_smart_money_netflow: wantsSmartMoneyNetflow,
     wants_netflow: wantsNetflow,
+    wants_btc_etf: wantsBtcEtf,
     tag: input.tag,
     token: input.token || input.asset,
     input,
@@ -184,6 +186,9 @@ export function inferIntent(task) {
       wantsSmartMoneyNetflow ? "nansen smart money netflow" : "",
       wantsNetflow ? `${input.asset || input.chain || ""} netflow` : "",
       wantsNetflow ? "netflow" : "",
+      wantsBtcEtf ? "btc etf" : "",
+      wantsBtcEtf ? "btc_etf" : "",
+      wantsBtcEtf ? "etf_data" : "",
       wantsAddress ? "Lookonchain address wallet" : "",
       wantsAddress ? "address wallet" : "",
       wantsAddress ? "wallet_profile" : ""
@@ -223,6 +228,16 @@ function detectClarification(task) {
 }
 
 function intentToCapabilityRequest(intent, { max_price: maxPrice } = {}) {
+  if (intent.wants_btc_etf) {
+    return {
+      capability: "btc_etf",
+      params: {},
+      constraints: {
+        max_price_usdc: maxPrice || "0.05",
+        freshness_seconds: 86400
+      }
+    };
+  }
   if (intent.wants_smart_money_netflow) {
     return {
       capability: "smart_money_netflow",
