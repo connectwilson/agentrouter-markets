@@ -37,6 +37,11 @@ export function suggestCapabilities(text) {
     tags.add("perp_liquidation_max_pain");
   }
   if (/price|价格|ticker|行情/.test(value)) tags.add("market_data");
+  if (/etf|exchange traded fund/.test(value)) {
+    tags.add("market_data");
+    tags.add("etf_data");
+    if (/btc|bitcoin/.test(value)) tags.add("btc_etf");
+  }
   if (/wallet|address|地址/.test(value)) tags.add("wallet_profile");
   return [...tags].join(",");
 }

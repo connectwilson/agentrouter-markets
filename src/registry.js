@@ -125,7 +125,8 @@ export async function validateService(store, serviceId) {
   const responseBody = await paidResponse.json();
   const schemaErrors = validateJsonSchema(responseBody, manifest.output_schema);
   const envelopeErrors = validateEnvelope(responseBody);
-  const ok = paidResponse.ok && schemaErrors.length === 0 && envelopeErrors.length === 0;
+  const resultErrors = validateRealResultFeedback(responseBody);
+  const ok = paidResponse.ok && schemaErrors.length === 0 && envelopeErrors.length === 0 && resultErrors.length === 0;
 
   return storeValidation(record, {
     ok,
@@ -134,6 +135,8 @@ export async function validateService(store, serviceId) {
     provider_error: responseBody?.error || null,
     schema_errors: schemaErrors,
     envelope_errors: envelopeErrors,
+    result_errors: resultErrors,
+    result_preview: previewResultData(responseBody?.data),
     created_at: new Date().toISOString()
   });
 }
@@ -319,6 +322,81 @@ function storeValidation(record, result) {
 function decodePaymentTx(proof) {
   try {
     return JSON.parse(Buffer.from(proof, "base64url").toString("utf8")).tx_hash;
+  } catch {
+    return null;
+  }
+}
+
+function validateRealResultFeedback(envelope) {
+  const errors = [];
+  if (envelope?.status !== "success") {
+    errors.push({ code: "RESULT_STATUS_NOT_SUCCESS", message: "Provider envelope status is not success." });
+  }
+  const data = envelope?.data;
+  if (isEmptyData(data)) {
+    errors.push({ code: "RESULT_DATA_EMPTY", message: "Provider returned no usable data." });
+    return errors;
+  }
+  if (looksLikePlaceholderData(data)) {
+    errors.push({ code: "RESULT_DATA_PLACEHOLDER", message: "Provider returned placeholder data instead of a real result." });
+  }
+  const applicationError = detectApplicationErrorData(data);
+  if (applicationError) errors.push(applicationError);
+  return errors;
+}
+
+function isEmptyData(data) {
+  if (data === undefined || data === null) return true;
+  if (Array.isArray(data)) return data.length === 0;
+  if (typeof data === "object") {
+    const keys = Object.keys(data);
+    if (!keys.length) return true;
+    if (Object.prototype.hasOwnProperty.call(data, "data") && data.data === null) return true;
+    if (Array.isArray(data.data) && data.data.length === 0) return true;
+  }
+  return data === "";
+}
+
+function looksLikePlaceholderData(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const keys = Object.keys(data);
+  return keys.length === 1 && data.ok === true;
+}
+
+function detectApplicationErrorData(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const message = String(data.message || data.error || data.msg || "").toLowerCase();
+  if (/missing api key|api key missing|invalid api key|unauthorized|forbidden|token|auth/.test(message)) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "auth_or_permission_error",
+      message: data.message || data.error || data.msg || "Upstream API reported an authentication or permission error."
+    };
+  }
+  const status = data.status ?? data.code;
+  const normalizedStatus = typeof status === "string" ? status.toLowerCase() : status;
+  const successStatuses = new Set([0, 1, 200, "0", "1", "200", "ok", "success", "succeeded"]);
+  if (status !== undefined && !successStatuses.has(normalizedStatus) && (data.message || data.error || data.data === null)) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "non_success_status",
+      message: data.message || data.error || `Upstream API returned non-success status ${status}.`
+    };
+  }
+  if (data.data === null && (data.message || data.error)) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "empty_error_payload",
+      message: data.message || data.error || "Upstream API returned null data with an error-like message."
+    };
+  }
+  return null;
+}
+
+function previewResultData(data) {
+  if (data === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(data).slice(0, 2000));
   } catch {
     return null;
   }

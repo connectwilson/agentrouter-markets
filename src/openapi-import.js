@@ -428,6 +428,7 @@ function inferMethodForEndpoint(apiUrl) {
 function inferAuthHeader(apiUrl) {
   try {
     const url = new URL(apiUrl);
+    if (url.hostname.endsWith("theblockbeats.info")) return "api-key";
     if (url.hostname.endsWith("nansen.ai") || /\/api\/v\d+\/smart-money\//i.test(url.pathname)) return "apikey";
   } catch {
     // Use default.
@@ -438,6 +439,7 @@ function inferAuthHeader(apiUrl) {
 function inferSecretName(apiUrl) {
   try {
     const url = new URL(apiUrl);
+    if (url.hostname.endsWith("theblockbeats.info")) return "BLOCKBEATS_API_KEY";
     if (url.hostname.endsWith("nansen.ai") || /\/api\/v\d+\/smart-money\//i.test(url.pathname)) return "NANSEN_API_KEY";
   } catch {
     // Use default.

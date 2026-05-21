@@ -213,7 +213,7 @@ export function studioHtml({ draft } = {}) {
             <input name="import_secret_value" value="" />
           </label>
           <label>Header name
-            <input name="import_auth_header" value="authorization" />
+            <input name="import_auth_header" value="" placeholder="auto-detect" />
           </label>
         </details>
         <div class="actions">
