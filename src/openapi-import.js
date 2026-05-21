@@ -416,98 +416,22 @@ function looksLikeCallableEndpoint(apiUrl) {
 }
 
 function inferMethodForEndpoint(apiUrl) {
-  try {
-    const url = new URL(apiUrl);
-    if (/\/api\/v\d+\/smart-money\//i.test(url.pathname)) return "post";
-  } catch {
-    // Use default.
-  }
   return "post";
 }
 
-function inferAuthHeader(apiUrl) {
-  try {
-    const url = new URL(apiUrl);
-    if (url.hostname.endsWith("theblockbeats.info")) return "api-key";
-    if (url.hostname.endsWith("nansen.ai") || /\/api\/v\d+\/smart-money\//i.test(url.pathname)) return "apikey";
-  } catch {
-    // Use default.
-  }
+function inferAuthHeader(_apiUrl) {
   return "authorization";
 }
 
-function inferSecretName(apiUrl) {
-  try {
-    const url = new URL(apiUrl);
-    if (url.hostname.endsWith("theblockbeats.info")) return "BLOCKBEATS_API_KEY";
-    if (url.hostname.endsWith("nansen.ai") || /\/api\/v\d+\/smart-money\//i.test(url.pathname)) return "NANSEN_API_KEY";
-  } catch {
-    // Use default.
-  }
+function inferSecretName(_apiUrl) {
   return "PROVIDER_SECRET";
 }
 
-function sampleRequestForDirectEndpoint(apiUrl) {
-  try {
-    const url = new URL(apiUrl);
-    if (/\/api\/v\d+\/smart-money\/dex-trades$/i.test(url.pathname)) {
-      return {
-        chains: ["ethereum"],
-        filters: {
-          include_smart_money_labels: ["Fund", "Smart Trader"],
-          trade_value_usd: { min: 1000 }
-        },
-        pagination: { page: 1, per_page: 10 },
-        order_by: [{ field: "trade_value_usd", direction: "DESC" }]
-      };
-    }
-    if (/\/api\/v\d+\/smart-money\//i.test(url.pathname)) {
-      return {
-        chains: ["ethereum"],
-        pagination: { page: 1, per_page: 10 }
-      };
-    }
-  } catch {
-    // Use generic sample.
-  }
+function sampleRequestForDirectEndpoint(_apiUrl) {
   return {};
 }
 
-function previewDataForDirectEndpoint(apiUrl) {
-  try {
-    const url = new URL(apiUrl);
-    if (/\/api\/v\d+\/smart-money\/dex-trades$/i.test(url.pathname)) {
-      return {
-        data: [
-          {
-            chain: "ethereum",
-            block_timestamp: "sample",
-            transaction_hash: "0xsample",
-            trader_address: "0xsample",
-            trader_address_label: "Smart Trader",
-            token_bought_symbol: "ETH",
-            token_sold_symbol: "USDC",
-            trade_value_usd: 1000
-          }
-        ],
-        pagination: { page: 1, per_page: 10, is_last_page: true }
-      };
-    }
-    if (/\/api\/v\d+\/smart-money\//i.test(url.pathname)) {
-      return {
-        data: [
-          {
-            chain: "ethereum",
-            label: "Smart Trader",
-            value_usd: 1000
-          }
-        ],
-        pagination: { page: 1, per_page: 10, is_last_page: true }
-      };
-    }
-  } catch {
-    // Use generic sample.
-  }
+function previewDataForDirectEndpoint(_apiUrl) {
   return { ok: true };
 }
 

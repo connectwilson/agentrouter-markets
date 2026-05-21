@@ -270,28 +270,6 @@ export async function handleMockUpstreamApplicationError(_req, res) {
   });
 }
 
-export async function handleMockUpstreamBtcEtf(req, res) {
-  if (req.headers["api-key"] !== "demo-blockbeats-key") {
-    sendJson(res, 200, {
-      status: 100,
-      message: "Missing API key",
-      data: null
-    });
-    return;
-  }
-  sendJson(res, 200, {
-    status: 0,
-    message: "",
-    data: [
-      {
-        date: "2026-05-20",
-        day_net_inflow_million: "-70.50",
-        total_net_inflow_million: "106875.00"
-      }
-    ]
-  });
-}
-
 async function callHostedHttpSource(config, input) {
   const headers = { "content-type": "application/json" };
   const secretValue = config.source.auth?.secret_value || await readProviderSecret(config.source.auth?.secret_ref);

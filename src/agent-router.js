@@ -123,13 +123,14 @@ export async function askAgentRouterRemote({
 export function inferIntent(task) {
   const tagMatch = task.match(/matrixport|binance|jump|wintermute|amber|okx|bybit/i);
   const tokenMatch = task.match(/\$?(ETH|BTC|USDC|HYPE|SOL)\b/i);
+  const dynamicTerms = extractDynamicSearchTerms(task);
   const wantsSingle = /一个|一条|任意|first|\bone\b|single/i.test(task);
   const wantsAddress = /地址|钱包|address|wallet/i.test(task);
   const wantsLiquidation = /爆仓|清算|liquidation|max[\s-]?pain/i.test(task);
   const wantsSmartMoneyHoldings = /smart[\s_-]?money/i.test(task) && /holdings?|持仓/i.test(task);
   const wantsSmartMoneyNetflow = /smart[\s_-]?money/i.test(task) && /net[\s_-]?flow|netflow|净流入|净流出|资金流/i.test(task);
   const wantsNetflow = !wantsSmartMoneyNetflow && /net[\s_-]?flow|netflow|净流入|净流出/i.test(task);
-  const wantsBtcEtf = /\bbtc\b/i.test(task) && /\betf\b/i.test(task);
+  const hasKnownIntent = wantsAddress || wantsLiquidation || wantsSmartMoneyHoldings || wantsSmartMoneyNetflow || wantsNetflow;
   const limit = detectLimit(task, wantsSingle);
   const input = {
     limit,
@@ -172,28 +173,48 @@ export function inferIntent(task) {
     wants_smart_money_holdings: wantsSmartMoneyHoldings,
     wants_smart_money_netflow: wantsSmartMoneyNetflow,
     wants_netflow: wantsNetflow,
-    wants_btc_etf: wantsBtcEtf,
+    has_known_intent: hasKnownIntent,
+    dynamic_terms: dynamicTerms,
     tag: input.tag,
     token: input.token || input.asset,
     input,
     search_queries: [
+      dynamicTerms.length ? dynamicTerms.join(" ") : "",
       task,
       wantsLiquidation ? "perp liquidation max pain" : "",
       wantsLiquidation ? "liquidation heatmap crypto derivatives" : "",
       wantsSmartMoneyHoldings ? "smart money holdings" : "",
-      wantsSmartMoneyHoldings ? "nansen smart money holdings" : "",
       wantsSmartMoneyNetflow ? "smart money netflow" : "",
-      wantsSmartMoneyNetflow ? "nansen smart money netflow" : "",
       wantsNetflow ? `${input.asset || input.chain || ""} netflow` : "",
       wantsNetflow ? "netflow" : "",
-      wantsBtcEtf ? "btc etf" : "",
-      wantsBtcEtf ? "btc_etf" : "",
-      wantsBtcEtf ? "etf_data" : "",
       wantsAddress ? "Lookonchain address wallet" : "",
       wantsAddress ? "address wallet" : "",
       wantsAddress ? "wallet_profile" : ""
     ].filter(Boolean)
   };
+}
+
+function extractDynamicSearchTerms(task) {
+  const stopwords = new Set([
+    "agentrouter",
+    "agent",
+    "router",
+    "use",
+    "using",
+    "query",
+    "search",
+    "find",
+    "data",
+    "service",
+    "api",
+    "with",
+    "the",
+    "for",
+    "from"
+  ]);
+  return [...new Set(String(task || "").toLowerCase().match(/[a-z0-9][a-z0-9_-]{1,}/g) || [])]
+    .filter((term) => !stopwords.has(term))
+    .slice(0, 8);
 }
 
 function detectClarification(task) {
@@ -228,16 +249,6 @@ function detectClarification(task) {
 }
 
 function intentToCapabilityRequest(intent, { max_price: maxPrice } = {}) {
-  if (intent.wants_btc_etf) {
-    return {
-      capability: "btc_etf",
-      params: {},
-      constraints: {
-        max_price_usdc: maxPrice || "0.05",
-        freshness_seconds: 86400
-      }
-    };
-  }
   if (intent.wants_smart_money_netflow) {
     return {
       capability: "smart_money_netflow",
@@ -330,7 +341,7 @@ function searchCandidates(store, intent, maxPrice) {
     });
     for (const item of items) seen.set(item.service_id, item);
   }
-  return [...seen.values()];
+  return filterDynamicCandidates([...seen.values()], intent);
 }
 
 async function searchCandidatesRemote(baseUrl, intent, maxPrice) {
@@ -343,7 +354,22 @@ async function searchCandidatesRemote(baseUrl, intent, maxPrice) {
     });
     for (const item of items) seen.set(item.service_id, item);
   }
-  return [...seen.values()];
+  return filterDynamicCandidates([...seen.values()], intent);
+}
+
+function filterDynamicCandidates(candidates, intent) {
+  if (intent.has_known_intent) return candidates;
+  const terms = intent.dynamic_terms || [];
+  if (terms.length < 2) return candidates;
+  return candidates.filter((service) => {
+    const haystack = [
+      service.service_id,
+      service.title,
+      service.description_for_agent,
+      ...(service.capabilities || [])
+    ].join(" ").toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
 }
 
 export function selectService(candidates, intent) {

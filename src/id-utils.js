@@ -40,7 +40,6 @@ export function suggestCapabilities(text) {
   if (/etf|exchange traded fund/.test(value)) {
     tags.add("market_data");
     tags.add("etf_data");
-    if (/btc|bitcoin/.test(value)) tags.add("btc_etf");
   }
   if (/wallet|address|地址/.test(value)) tags.add("wallet_profile");
   return [...tags].join(",");

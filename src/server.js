@@ -3,13 +3,12 @@ import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, publicServiceRecord } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
-import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamBtcEtf, handleMockUpstreamSentiment } from "./provider-runtime.js";
+import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamSentiment } from "./provider-runtime.js";
 import { invokePaidService, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
 import { createProviderFromStudio, studioHtml } from "./studio.js";
-import { createHostedHttpProviderConfig, writeProviderConfig } from "./provider-config.js";
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -302,11 +301,6 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/mock/upstream/app-error") {
     await handleMockUpstreamApplicationError(req, res);
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/mock/upstream/btc-etf") {
-    await handleMockUpstreamBtcEtf(req, res);
     return;
   }
 
@@ -666,91 +660,6 @@ export async function seedDemoService(serverUrl, store) {
 export async function bootstrapServer(server, baseUrl) {
   await seedDemoService(baseUrl, server.store);
   await loadProviderConfigs(server.store, baseUrl, { validate: true });
-  await seedEnvProviderServices(baseUrl, server.store);
-}
-
-export async function seedEnvProviderServices(baseUrl, store) {
-  if (process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP !== "true") return [];
-  const nansenApiKey = process.env.NANSEN_API_KEY || process.env.ADN_NANSEN_API_KEY;
-
-  const price = process.env.NANSEN_PRICE_USDC || "0.01";
-  const seeded = [];
-  if (!nansenApiKey) return seeded;
-
-  const services = [
-    {
-      serviceId: "nansen_smart_money_netflow",
-      title: "Nansen Smart Money Netflow",
-      description: "Use this service to query Nansen Smart Money netflow data for supported chains.",
-      capabilities: ["data_service", "smart_money_netflow", "netflow", "smart_money", "onchain_data"],
-      upstreamUrl: "https://api.nansen.ai/api/v1/smart-money/netflow",
-      sampleRequest: {
-        chains: ["ethereum"],
-        pagination: { page: 1, per_page: 10 }
-      },
-      sampleData: {
-        data: [
-          {
-            chain: "ethereum",
-            label: "Smart Trader",
-            netflow_usd: 0,
-            note: "Shape-only sample. Paid calls query Nansen."
-          }
-        ],
-        pagination: { page: 1, per_page: 10 }
-      },
-      summary: "Nansen Smart Money netflow data."
-    },
-    {
-      serviceId: "nansen_smart_money_holdings",
-      title: "Nansen Smart Money Holdings",
-      description: "Use this service to query Nansen Smart Money holdings data for supported chains.",
-      capabilities: ["data_service", "smart_money_holdings", "smart_money", "onchain_data"],
-      upstreamUrl: "https://api.nansen.ai/api/v1/smart-money/holdings",
-      sampleRequest: {
-        chains: ["ethereum"],
-        pagination: { page: 1, per_page: 10 }
-      },
-      sampleData: {
-        data: [
-          {
-            chain: "ethereum",
-            label: "Smart Trader",
-            token_symbol: "ETH",
-            value_usd: 0,
-            note: "Shape-only sample. Paid calls query Nansen."
-          }
-        ],
-        pagination: { page: 1, per_page: 10 }
-      },
-      summary: "Nansen Smart Money holdings data."
-    }
-  ];
-
-  for (const service of services) {
-    if (store.services.has(service.serviceId)) continue;
-    const config = createHostedHttpProviderConfig({
-      baseUrl,
-      serviceId: service.serviceId,
-      providerId: "nansen",
-      title: service.title,
-      description: service.description,
-      capabilities: service.capabilities,
-      price,
-      sampleRequest: service.sampleRequest,
-      sampleData: service.sampleData,
-      upstreamUrl: service.upstreamUrl,
-      upstreamMethod: "POST",
-      secretName: "NANSEN_API_KEY",
-      secretValue: nansenApiKey,
-      authHeader: "apikey",
-      summary: service.summary
-    });
-    await writeProviderConfig(config);
-    const record = registerService(store, config.manifest, baseUrl);
-    seeded.push({ service_id: record.manifest.service_id, verification_status: record.verification_status });
-  }
-  return seeded;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

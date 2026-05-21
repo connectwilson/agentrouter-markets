@@ -10,7 +10,7 @@ process.env.ADN_DIR = path.join(runtimeRoot, ".adn");
 process.env.ADN_PROVIDER_DIR = path.join(runtimeRoot, "providers");
 process.env.ADN_WALLET_PASSPHRASE = "test-passphrase";
 
-const { createServer, seedDemoService, seedEnvProviderServices } = await import("../src/server.js");
+const { createServer, seedDemoService } = await import("../src/server.js");
 const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
@@ -89,8 +89,8 @@ test("consumer demo completes final analysis", async () => {
 
 test("endpoint normalization treats bare hostnames as HTTPS URLs", () => {
   assert.equal(
-    normalizeEndpoint("api.nansen.ai/api/v1/smart-money/netflow", "http://127.0.0.1:8800"),
-    "https://api.nansen.ai/api/v1/smart-money/netflow"
+    normalizeEndpoint("api.example.com/v1/data/market-flow", "http://127.0.0.1:8800"),
+    "https://api.example.com/v1/data/market-flow"
   );
   assert.equal(
     normalizeEndpoint("/mock/api", "http://127.0.0.1:8800"),
@@ -693,31 +693,6 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
   });
 });
 
-test("bootstrap can seed Nansen services from environment without validation", async () => {
-  const previous = process.env.NANSEN_API_KEY;
-  const previousFlag = process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP;
-  process.env.NANSEN_API_KEY = "test-nansen-key";
-  process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP = "true";
-  try {
-    const store = createMemoryStore();
-    const seeded = await seedEnvProviderServices("http://127.0.0.1:8800", store);
-    assert.equal(seeded.length, 2);
-    assert.ok(store.services.has("nansen_smart_money_netflow"));
-    assert.ok(store.services.has("nansen_smart_money_holdings"));
-
-    const netflow = searchServices(store, { query: "ETH netflow" });
-    assert.ok(netflow.some((service) => service.service_id === "nansen_smart_money_netflow"));
-    const manifest = store.services.get("nansen_smart_money_netflow").manifest;
-    assert.equal(manifest.endpoint.url, "http://127.0.0.1:8800/provider/custom/nansen_smart_money_netflow");
-    assert.equal(JSON.stringify(manifest).includes("test-nansen-key"), false);
-  } finally {
-    if (previous === undefined) delete process.env.NANSEN_API_KEY;
-    else process.env.NANSEN_API_KEY = previous;
-    if (previousFlag === undefined) delete process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP;
-    else process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP = previousFlag;
-  }
-});
-
 test("hosted publish requires persistent storage when the deployment requires it", async () => {
   const previousRequired = process.env.ADN_REQUIRE_PERSISTENT_REGISTRY;
   const previousDatabase = process.env.DATABASE_URL;
@@ -741,11 +716,11 @@ test("hosted publish requires persistent storage when the deployment requires it
           sample_request: "{}",
           sample_data: "{\"ok\":true}",
           summary: "Persistent required demo.",
-          upstream_url: "/mock/upstream/btc-etf",
-          upstream_method: "GET",
+          upstream_url: "/mock/upstream/sentiment",
+          upstream_method: "POST",
           secret_name: "PROVIDER_SECRET",
-          secret_value: "demo-blockbeats-key",
-          auth_header: "api-key"
+          secret_value: "provider-owned-secret",
+          auth_header: "authorization"
         })
       });
       assert.equal(response.status, 503);
@@ -762,21 +737,21 @@ test("hosted publish requires persistent storage when the deployment requires it
   }
 });
 
-test("AgentRouter ask does not route BTC ETF requests to unrelated BTC demo services", async () => {
+test("AgentRouter ask does not route partial token-only matches to unrelated services", async () => {
   await withServer(async ({ baseUrl }) => {
     const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        task: "用 AgentRouter 查询 BTC ETF 数据",
+        task: "用 AgentRouter 查询 BTC custom metric 数据",
         max_price: "0.05"
       })
     });
     assert.equal(askResponse.status, 200);
     const routed = await askResponse.json();
     assert.equal(routed.ok, false);
-    assert.equal(routed.status, "no_match");
-    assert.equal(routed.request.capability, "btc_etf");
+    assert.equal(routed.status, "no_service_found");
+    assert.equal(routed.selected_service, undefined);
   });
 });
 
@@ -885,7 +860,7 @@ test("Provider Studio imports OpenAPI data endpoints into multiple services", as
 
 test("Provider Studio imports a direct API endpoint when no OpenAPI document exists", async () => {
   await withServer(async ({ baseUrl }) => {
-    const endpointUrl = `${baseUrl}/api/v1/smart-money/holdings`;
+    const endpointUrl = `${baseUrl}/api/v1/data/market-snapshot`;
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -903,14 +878,11 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     const draft = discovered.drafts[0];
     assert.equal(draft.upstream_url, endpointUrl);
     assert.equal(draft.method, "POST");
-    assert.equal(draft.auth_header, "apikey");
-    assert.equal(draft.secret_name, "NANSEN_API_KEY");
-    assert.ok(draft.capabilities.includes("smart_money_holdings"));
-    assert.deepEqual(draft.sample_request, {
-      chains: ["ethereum"],
-      pagination: { page: 1, per_page: 10 }
-    });
-    assert.equal(draft.preview_data.pagination.per_page, 10);
+    assert.equal(draft.auth_header, "authorization");
+    assert.equal(draft.secret_name, "PROVIDER_SECRET");
+    assert.ok(draft.capabilities.includes("data_service"));
+    assert.deepEqual(draft.sample_request, {});
+    assert.deepEqual(draft.preview_data, { ok: true });
 
     const publishResponse = await fetch(`${baseUrl}/studio/import/publish`, {
       method: "POST",
@@ -921,7 +893,7 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     const published = await publishResponse.json();
     assert.equal(published.ok, false);
     assert.equal(published.published.length, 0);
-    assert.equal(published.failed[0].service_id, "post_api_v1_smart_money_holdings");
+    assert.equal(published.failed[0].service_id, "post_api_v1_data_market_snapshot");
     assert.equal(published.failed[0].error, "VALIDATION_FAILED");
     assert.equal(published.failed[0].validation.ok, false);
 
@@ -953,9 +925,9 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
   });
 });
 
-test("AgentRouter refuses to publish unreachable smart-money netflow services", async () => {
+test("AgentRouter refuses to publish unreachable direct endpoint services", async () => {
   await withServer(async ({ server, baseUrl }) => {
-    const endpointUrl = `${baseUrl}/api/v1/smart-money/netflow`;
+    const endpointUrl = `${baseUrl}/api/v1/data/market-flow`;
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -969,7 +941,7 @@ test("AgentRouter refuses to publish unreachable smart-money netflow services", 
     const discovered = await discoverResponse.json();
     assert.equal(discovered.ok, true);
     assert.equal(discovered.drafts.length, 1);
-    assert.ok(discovered.drafts[0].capabilities.includes("smart_money_netflow"));
+    assert.ok(discovered.drafts[0].capabilities.includes("data_service"));
 
     const publishResponse = await fetch(`${baseUrl}/studio/import/publish`, {
       method: "POST",
@@ -979,11 +951,11 @@ test("AgentRouter refuses to publish unreachable smart-money netflow services", 
     assert.equal(publishResponse.status, 422);
     const published = await publishResponse.json();
     assert.equal(published.ok, false);
-    assert.equal(published.failed[0].service_id, "post_api_v1_smart_money_netflow");
+    assert.equal(published.failed[0].service_id, "post_api_v1_data_market_flow");
     assert.equal(published.failed[0].error, "VALIDATION_FAILED");
 
-    const search = searchServices(server.store, { query: "smart money netflow", verifiedOnly: false });
-    assert.equal(search.some((service) => service.service_id === "post_api_v1_smart_money_netflow"), false);
+    const search = searchServices(server.store, { query: "market flow", verifiedOnly: false });
+    assert.equal(search.some((service) => service.service_id === "post_api_v1_data_market_flow"), false);
 
     const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
       method: "POST",

@@ -28,7 +28,7 @@ curl -sS -X POST "https://agentrouter-markets.onrender.com/agent-router/ask" \
 
 For production-like flows, call `agentrouter_capabilities` first if you need schemas, parse the user request yourself, then call `agentrouter_request`. AgentRouter should not be treated as the semantic parser.
 
-For API-specific terms that are not in the fixed catalog, use AgentRouter's dynamic capability path. For example, a request like "ETH 24h netflow" should be sent as capability `netflow` with params such as `{ "asset": "ETH", "window": "24h" }`; do not coerce it into `onchain_fund_flow` unless the user explicitly asks for chain-level fund flow.
+For requests outside the fixed capability catalog, search registered services or use `agentrouter_ask` rather than forcing the request into an unrelated fixed capability. Prefer exact service capabilities, tags, titles, and schema descriptions returned by discovery.
 
 Return the `answer` field first when present. Then include selected service, input, relevant result data, evidence trace hash, quote or settlement receipt, and verification/feedback status when present.
 
