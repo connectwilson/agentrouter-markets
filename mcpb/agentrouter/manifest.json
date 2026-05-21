@@ -71,7 +71,7 @@
       "type": "string",
       "title": "AgentRouter URL",
       "description": "AgentRouter registry URL. Use the hosted demo URL or your local AgentRouter server URL.",
-      "default": "https://agentrouter-markets-production.up.railway.app",
+      "default": "https://agentrouter-markets.onrender.com",
       "required": true
     },
     "max_price_usdc": {

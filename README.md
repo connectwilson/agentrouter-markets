@@ -251,7 +251,7 @@ Settings -> Extensions -> Install Extension -> choose agentrouter.mcpb
 When prompted, keep:
 
 ```text
-AgentRouter URL = https://agentrouter-markets-production.up.railway.app
+AgentRouter URL = https://agentrouter-markets.onrender.com
 Default Max Price = 0.05
 ```
 
@@ -271,7 +271,7 @@ Register the MCP server with Claude:
 
 ```bash
 claude mcp add AgentRouter \
-  -e AGENT_ROUTER_URL=https://agentrouter-markets-production.up.railway.app \
+  -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com \
   -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js
 ```
 
@@ -316,7 +316,7 @@ MCP config:
       "command": "npx",
       "args": ["-y", "@agentrouter/mcp"],
       "env": {
-        "AGENT_ROUTER_URL": "https://agentrouter-markets-production.up.railway.app",
+        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
       }
     }

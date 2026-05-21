@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter-markets-production.up.railway.app").replace(/\/$/, "");
+const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter-markets.onrender.com").replace(/\/$/, "");
 const defaultMaxPrice = process.env.AGENT_ROUTER_MAX_PRICE || "0.05";
 
 const tools = [

@@ -23,7 +23,7 @@ Last updated: 2026-05-18
 - Search results now expose `trust_score`; structured routing returns provider selection reasons.
 - Verified the full provider-to-demand flow: Provider Studio OpenAPI import publishes `get_liquidation_max_pain`; AgentRouter `/ask` compiles natural language into a structured `perp_liquidation_max_pain` request, selects the uploaded service, pays, validates, and returns data.
 - OpenAPI capability inference now enriches imported liquidation services with the standard `perp_liquidation`, `liquidation_heatmap`, and `perp_liquidation_max_pain` capabilities.
-- Deployed AgentRouter Markets to Railway at `https://agentrouter-markets-production.up.railway.app`.
+- Deployed AgentRouter Markets to Railway at `https://agentrouter-markets.onrender.com`.
 - Claude Skill now points to the Railway endpoint instead of the temporary Cloudflare tunnel.
 - Added payment backend abstraction: `dev`, `x402`, `omniagentpay`, and `circle_arc`.
 - Added `POST /agent-router/quote` so agents can inspect selected service, input, price, and guard result before paying.
@@ -52,7 +52,7 @@ For Claude or another agent client, prefer the MCP server:
 
 ```bash
 claude mcp add AgentRouter \
-  -e AGENT_ROUTER_URL=https://agentrouter-markets-production.up.railway.app \
+  -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com \
   -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js
 ```
 
