@@ -134,6 +134,7 @@ export function studioHtml({ draft } = {}) {
     code, .code-preview { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .code-preview { display: block; margin: 8px 0 14px; white-space: pre-wrap; word-break: break-word; background: #111814; color: #edf8f0; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.45; max-height: 260px; overflow: auto; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .quick-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 116px 132px; gap: 12px; align-items: end; }
     details { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfa; margin-bottom: 18px; }
     summary { cursor: pointer; font-weight: 700; }
     details .grid { margin-top: 12px; }
@@ -156,7 +157,7 @@ export function studioHtml({ draft } = {}) {
     .divider { height: 1px; background: var(--line); margin: 20px 0; }
     .draft-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
     .draft-list { display: grid; gap: 8px; margin: 12px 0; }
-    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 110px 112px; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
+    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 110px 112px; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
     .draft-row.selected { border-color: #81b7a7; background: #f4fbf8; }
     .draft-row.published { border-color: #cbd8d1; background: #f5f7f5; opacity: 0.78; }
     .draft-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 4px; }
@@ -178,7 +179,7 @@ export function studioHtml({ draft } = {}) {
     .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: 13px; }
     .kv div:nth-child(odd) { color: var(--muted); }
     .kv div:nth-child(even) { overflow-wrap: anywhere; font-weight: 650; }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 22px 16px 14px; } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 22px 16px 14px; } .grid, .quick-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -189,23 +190,34 @@ export function studioHtml({ draft } = {}) {
   <main>
     <form id="provider-form">
       <fieldset>
-        <legend>1. Import API</legend>
-        <p class="section-note">Paste an OpenAPI/Swagger URL or an API base URL. Studio will find data endpoints and make publishable service cards.</p>
-        <label>API or OpenAPI URL
+        <legend>Publish An API</legend>
+        <p class="section-note">Paste a real data endpoint or OpenAPI URL. AgentRouter will test it before publishing, so broken APIs cannot be registered.</p>
+        <div class="quick-grid">
+        <label>API URL
           <input name="import_api_url" value="/mock/api" />
         </label>
-        <label>Default price per call (USDC)
+        <label>Method
+          <select name="import_method">
+            <option value="GET">GET</option>
+            <option value="POST" selected>POST</option>
+          </select>
+        </label>
+        <label>Price (USDC)
           <input name="import_default_price" value="0.01" />
         </label>
+        </div>
         <details>
-          <summary>Optional endpoint authentication</summary>
-          <p class="hint">Use this only when your own endpoint requires a token. It is stored locally as a Provider Secret.</p>
-          <label>Access Token / Secret
+          <summary>API key / auth</summary>
+          <p class="hint">Optional. Stored as an encrypted Provider Secret and never exposed in the service manifest.</p>
+          <label>API key or token
             <input name="import_secret_value" value="" />
+          </label>
+          <label>Header name
+            <input name="import_auth_header" value="authorization" />
           </label>
         </details>
         <div class="actions">
-          <button type="button" class="secondary" id="discover-api">Discover Endpoints</button>
+          <button type="button" class="secondary" id="discover-api">Check API</button>
           <button type="button" class="ghost" id="publish-drafts">Publish Selected</button>
           <span class="status" id="status"></span>
         </div>
@@ -214,8 +226,8 @@ export function studioHtml({ draft } = {}) {
           <button type="button" class="tiny-button" id="clear-drafts">Clear Selection</button>
           <span class="hint" id="selected-drafts-status">0 selected</span>
         </div>
-        <p class="flow-note">Checked endpoint cards are published together by <strong>Publish Selected</strong>. <strong>Edit Details</strong> fills the single-service form below for one endpoint only.</p>
-        <p class="hint" id="import-status">Discovery supports OpenAPI/Swagger URLs and simple endpoint-index JSON.</p>
+        <p class="flow-note">Select endpoint cards and click <strong>Publish Selected</strong>. AgentRouter auto-generates service name, routing tags, data contract, and runtime wrapper.</p>
+        <p class="hint" id="import-status">Use a concrete endpoint for one API, or an OpenAPI/Swagger URL for many endpoints.</p>
         <div id="draft-list" class="draft-list"></div>
         <details>
           <summary>Developer debug JSON</summary>
@@ -226,10 +238,10 @@ export function studioHtml({ draft } = {}) {
         <div class="divider"></div>
       </fieldset>
       <details id="service-editor" class="editor-details">
-        <summary>Manual single-service editor</summary>
-        <p class="section-note">Use this only for pasted JSON data or when one discovered endpoint needs manual adjustment.</p>
+        <summary>Advanced manual editor</summary>
+        <p class="section-note">Most providers should not need this. Use it only to override generated names, routing tags, sample JSON, or endpoint details.</p>
         <fieldset>
-          <legend>2. Service</legend>
+          <legend>Service Metadata</legend>
           <div class="grid">
             <label>Data Source
               <select name="mode" id="mode">
@@ -267,7 +279,7 @@ export function studioHtml({ draft } = {}) {
           </div>
         </details>
         <fieldset>
-          <legend>3. Data Contract</legend>
+          <legend>Data Contract</legend>
           <label>Example input JSON
             <textarea name="sample_request">${html(formDefaults.sampleRequest)}</textarea>
           </label>
@@ -291,7 +303,7 @@ export function studioHtml({ draft } = {}) {
           </details>
         </fieldset>
         <fieldset id="hosted-http-fields" class="${formDefaults.mode === "hosted-http" ? "" : "hidden"}">
-          <legend>4. Endpoint</legend>
+          <legend>Endpoint</legend>
           <label>Endpoint URL
             <input name="upstream_url" value="${html(formDefaults.upstreamUrl)}" />
           </label>
@@ -358,8 +370,10 @@ export function studioHtml({ draft } = {}) {
     const selectedDraftsStatus = document.querySelector("#selected-drafts-status");
     const importStatus = document.querySelector("#import-status");
     const importApiUrl = form.elements.namedItem("import_api_url");
+    const importMethod = form.elements.namedItem("import_method");
     const importDefaultPrice = form.elements.namedItem("import_default_price");
     const importSecretValue = form.elements.namedItem("import_secret_value");
+    const importAuthHeader = form.elements.namedItem("import_auth_header");
     let discoveredDrafts = [];
     let lastImportMeta = null;
     const publishedServiceIds = new Set();
@@ -598,7 +612,9 @@ export function studioHtml({ draft } = {}) {
           body: JSON.stringify({
             api_url: importApiUrl.value,
             default_price: importDefaultPrice.value,
-            secret_value: importSecretValue.value
+            default_method: importMethod.value,
+            secret_value: importSecretValue.value,
+            auth_header: importAuthHeader.value
           })
         });
         const payload = await response.json();
@@ -711,6 +727,12 @@ export function studioHtml({ draft } = {}) {
         '<div class="draft-meta">' + escapeHtml((draft.capabilities || []).join(", ")) + "</div>",
         '<span class="draft-badge">' + draftBadge(draft) + "</span>",
         "</div>",
+        '<label class="draft-price">Method',
+        '<select class="draft-method-input" ' + (draft.published ? "disabled" : "") + '>',
+        methodOption("GET", draft.method),
+        methodOption("POST", draft.method),
+        "</select>",
+        "</label>",
         '<label class="draft-price">USDC',
         '<input class="draft-price-input" value="' + escapeHtml(draft.price || importDefaultPrice.value || "0.01") + '" ' + (draft.published ? "disabled" : "") + " />",
         "</label>",
@@ -737,6 +759,10 @@ export function studioHtml({ draft } = {}) {
       return draft.selected === false ? "Not selected" : "Selected for verification";
     }
 
+    function methodOption(method, current) {
+      return '<option value="' + method + '" ' + (String(current || "GET").toUpperCase() === method ? "selected" : "") + ">" + method + "</option>";
+    }
+
     draftList.addEventListener("change", (event) => {
       if (!event.target.classList.contains("draft-selected")) return;
       syncDraftsFromList();
@@ -745,7 +771,7 @@ export function studioHtml({ draft } = {}) {
     });
 
     draftList.addEventListener("input", (event) => {
-      if (!event.target.classList.contains("draft-price-input")) return;
+      if (!event.target.classList.contains("draft-price-input") && !event.target.classList.contains("draft-method-input")) return;
       syncDraftsFromList();
       updateDraftSelectionUi();
     });
@@ -806,6 +832,7 @@ export function studioHtml({ draft } = {}) {
         if (discoveredDrafts[index].published) continue;
         discoveredDrafts[index].selected = row.querySelector(".draft-selected").checked;
         discoveredDrafts[index].price = row.querySelector(".draft-price-input").value;
+        discoveredDrafts[index].method = row.querySelector(".draft-method-input").value;
       }
       importDrafts.value = JSON.stringify(discoveredDrafts, null, 2);
     }

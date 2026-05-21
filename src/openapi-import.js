@@ -23,8 +23,10 @@ const DATA_PATH_RE = /(data|market|price|funding|liquidation|wallet|onchain|sear
 export async function discoverApiServices(body, baseUrl) {
   const apiUrl = normalizeEndpoint(requireString(body.api_url, "api_url"), baseUrl).replace(/\/$/, "");
   const defaultPrice = String(body.default_price || "0.01");
+  const defaultMethod = String(body.default_method || "").toUpperCase();
   const providerName = body.provider_name || null;
   const secretValue = body.secret_value || "";
+  const authHeader = body.auth_header || "";
   const document = await fetchOpenApiDocument(apiUrl);
   if (document.directEndpoint) {
     const providerTitle = providerName || hostName(apiUrl);
@@ -34,7 +36,9 @@ export async function discoverApiServices(body, baseUrl) {
       providerId,
       providerTitle,
       defaultPrice,
-      secretValue
+      secretValue,
+      defaultMethod,
+      authHeader
     });
     return {
       ok: true,
@@ -369,10 +373,10 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
   };
 }
 
-function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultPrice, secretValue }) {
+function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultPrice, secretValue, defaultMethod, authHeader }) {
   const url = new URL(apiUrl);
   const routePath = url.pathname;
-  const method = inferMethodForEndpoint(apiUrl);
+  const method = defaultMethod || inferMethodForEndpoint(apiUrl);
   const title = titleFromPath(routePath, method);
   const description = `Use this service to call ${method.toUpperCase()} ${routePath} from ${providerTitle}.`;
   const sampleRequest = sampleRequestForDirectEndpoint(apiUrl);
@@ -389,7 +393,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
     method: method.toUpperCase(),
     path: routePath,
     upstream_url: apiUrl,
-    auth_header: inferAuthHeader(apiUrl),
+    auth_header: authHeader || inferAuthHeader(apiUrl),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
     sample_request: sampleRequest,
