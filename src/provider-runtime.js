@@ -262,6 +262,14 @@ export async function handleMockUpstreamSentiment(req, res) {
   });
 }
 
+export async function handleMockUpstreamApplicationError(_req, res) {
+  sendJson(res, 200, {
+    status: 100,
+    message: "Missing API key",
+    data: null
+  });
+}
+
 async function callHostedHttpSource(config, input) {
   const headers = { "content-type": "application/json" };
   const secretValue = config.source.auth?.secret_value || await readProviderSecret(config.source.auth?.secret_ref);
@@ -314,7 +322,49 @@ async function callHostedHttpSource(config, input) {
       payload
     };
   }
+  const applicationError = detectApplicationError(payload);
+  if (applicationError) {
+    return {
+      upstream_error: true,
+      status: response.status,
+      payload: applicationError
+    };
+  }
   return payload;
+}
+
+function detectApplicationError(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const message = String(payload.message || payload.error || payload.msg || "").toLowerCase();
+  const hasAuthError = /missing api key|api key missing|invalid api key|unauthorized|forbidden|token|auth/.test(message);
+  if (hasAuthError) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "auth_or_permission_error",
+      message: payload.message || payload.error || payload.msg || "Upstream API reported an authentication or permission error.",
+      upstream_payload: payload
+    };
+  }
+  const status = payload.status ?? payload.code;
+  const normalizedStatus = typeof status === "string" ? status.toLowerCase() : status;
+  const successStatuses = new Set([0, 1, 200, "0", "1", "200", "ok", "success", "succeeded"]);
+  if (status !== undefined && !successStatuses.has(normalizedStatus) && (payload.message || payload.error || payload.data === null)) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "non_success_status",
+      message: payload.message || payload.error || `Upstream API returned non-success status ${status}.`,
+      upstream_payload: payload
+    };
+  }
+  if (payload.data === null && (payload.message || payload.error)) {
+    return {
+      code: "UPSTREAM_APPLICATION_ERROR",
+      reason: "empty_error_payload",
+      message: payload.message || payload.error || "Upstream API returned null data with an error-like message.",
+      upstream_payload: payload
+    };
+  }
+  return null;
 }
 
 async function parseUpstreamPayload(response) {

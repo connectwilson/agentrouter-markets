@@ -1004,6 +1004,41 @@ test("Provider runtime reports non-JSON upstream responses clearly", async () =>
   });
 });
 
+test("Provider Studio rejects JSON application-level upstream errors", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ server, baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "hosted-http",
+        service_id: "application_error_demo",
+        provider_id: "provider_studio",
+        title: "Application Error Demo",
+        description_for_agent: "Use this service to verify JSON application errors are not publishable.",
+        capabilities: "application_error_demo,data_service",
+        price: "0.01",
+        sample_request: "{}",
+        sample_data: "{\"ok\":true}",
+        summary: "Application error demo.",
+        upstream_url: "/mock/upstream/app-error",
+        upstream_method: "GET",
+        secret_name: "PROVIDER_SECRET",
+        secret_value: "",
+        auth_header: "authorization"
+      })
+    });
+    assert.equal(studioResponse.status, 422);
+    const payload = await studioResponse.json();
+    assert.equal(payload.error.code, "VALIDATION_FAILED");
+    assert.equal(payload.validation.status, 502);
+    assert.match(JSON.stringify(payload.validation), /UPSTREAM_APPLICATION_ERROR/);
+    assert.equal(payload.validation.provider_error.code, "UPSTREAM_ERROR");
+    const search = searchServices(server.store, { query: "application error demo", verifiedOnly: false });
+    assert.equal(search.some((service) => service.service_id === "application_error_demo"), false);
+  });
+});
+
 test("provider configs can be reloaded into a fresh registry after restart", async () => {
   await withServer(async ({ baseUrl }) => {
     const onboard = await runCli(["provider", "onboard", "--mode", "hosted-http", "--yes"], {
