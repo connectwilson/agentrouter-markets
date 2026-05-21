@@ -162,6 +162,9 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.equal(routed.verification.schema_valid, true);
     assert.equal(routed.feedback.settlement_receipt.protocol, "x402");
     assert.equal(routed.protocol.semantic_parser, "external_main_agent");
+    assert.equal(routed.consumer_feedback_request.endpoint, "/agent-router/feedback");
+    assert.equal(routed.consumer_feedback_request.service_id, "btc_liquidation_max_pain_demo");
+    assert.equal(routed.consumer_feedback_request.request_id, routed.result.request_id);
     assert.equal(routed.evidence.evidence_version, "agent_router_evidence_v1");
     assert.equal(routed.evidence.route_type, "structured_capability_request");
     assert.equal(routed.evidence.service_id, "btc_liquidation_max_pain_demo");
@@ -188,6 +191,29 @@ test("AgentRouter capability catalog and structured request route deterministica
     const trust = await trustResponse.json();
     assert.equal(trust.trust_snapshot_version, "agent_router_trust_snapshot_v1");
     assert.equal(trust.services[0].provider_id, "provider_derivatives_bob");
+
+    const feedbackResponse = await fetch(`${baseUrl}/agent-router/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service_id: routed.selected_service.service_id,
+        request_id: routed.result.request_id,
+        consumer_id: "test_main_agent",
+        feedback: {
+          intent_fit: "yes",
+          answer_useful: "yes",
+          data_quality_score: 0.95,
+          used_in_final_answer: true,
+          reason: "The result directly answered the requested liquidation max-pain task.",
+          confidence: 0.9
+        }
+      })
+    });
+    assert.equal(feedbackResponse.status, 200);
+    const feedbackPayload = await feedbackResponse.json();
+    assert.equal(feedbackPayload.ok, true);
+    assert.equal(feedbackPayload.trust.consumer_feedback_count, 1);
+    assert.equal(feedbackPayload.trust.usefulness_rate, 1);
 
     const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?service_id=btc_liquidation_max_pain_demo`);
     assert.equal(observationsResponse.status, 200);
@@ -686,6 +712,100 @@ test("Provider Studio can derive preview data from result data by default", asyn
     assert.equal(studioResponse.status, 201);
     const payload = await studioResponse.json();
     assert.deepEqual(payload.manifest.sample_response.data, { asset: "BTC", score: 0.8 });
+  });
+});
+
+test("consumer feedback updates trust and affects later routing", async () => {
+  await withServer(async ({ baseUrl }) => {
+    for (const service of [
+      {
+        service_id: "alpha_signal_good_source",
+        provider_id: "provider_alpha_good",
+        title: "Alpha Signal Good Source",
+        score: 0.91,
+        summary: "Alpha signal from the good source."
+      },
+      {
+        service_id: "alpha_signal_weak_source",
+        provider_id: "provider_alpha_weak",
+        title: "Alpha Signal Weak Source",
+        score: 0.12,
+        summary: "Alpha signal from the weak source."
+      }
+    ]) {
+      const response = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: service.service_id,
+          provider_id: service.provider_id,
+          title: service.title,
+          description_for_agent: "Use this service to fetch generic alpha signal data.",
+          capabilities: "data_service,alpha_signal",
+          price: "0.01",
+          sample_request: "{}",
+          sample_data: JSON.stringify({ alpha_signal_score: service.score, source: service.service_id }),
+          live_data: JSON.stringify({ alpha_signal_score: service.score, source: service.service_id }),
+          summary: service.summary
+        })
+      });
+      assert.equal(response.status, 201);
+    }
+
+    const goodFeedback = await fetch(`${baseUrl}/agent-router/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service_id: "alpha_signal_good_source",
+        request_id: "manual_eval_good",
+        consumer_id: "test_main_agent",
+        feedback: {
+          intent_fit: "yes",
+          answer_useful: "yes",
+          data_quality_score: 0.95,
+          used_in_final_answer: true,
+          reason: "The data was directly usable for the alpha signal task.",
+          confidence: 0.9
+        }
+      })
+    }).then((res) => res.json());
+    assert.equal(goodFeedback.ok, true);
+
+    const weakFeedback = await fetch(`${baseUrl}/agent-router/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service_id: "alpha_signal_weak_source",
+        request_id: "manual_eval_weak",
+        consumer_id: "test_main_agent",
+        feedback: {
+          intent_fit: "partial",
+          answer_useful: "no",
+          data_quality_score: 0.2,
+          used_in_final_answer: false,
+          reason: "The data was related but not useful enough for the answer.",
+          confidence: 0.8
+        }
+      })
+    }).then((res) => res.json());
+    assert.equal(weakFeedback.ok, true);
+    assert.ok(goodFeedback.trust.trust_score > weakFeedback.trust.trust_score);
+
+    const routeResponse = await fetch(`${baseUrl}/agent-router/request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        capability: "alpha_signal",
+        params: {},
+        constraints: { max_price_usdc: "0.05" }
+      })
+    });
+    assert.equal(routeResponse.status, 200);
+    const routed = await routeResponse.json();
+    assert.equal(routed.ok, true);
+    assert.equal(routed.selected_service.service_id, "alpha_signal_good_source");
+    assert.match(routed.selected_service.selection_reason, /consumer_feedback=1/);
   });
 });
 

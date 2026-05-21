@@ -1,5 +1,6 @@
 import { invokePaidService, searchServices } from "./registry.js";
 import { routeCapabilityRequest } from "./router.js";
+import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
 
 export async function askAgentRouter(store, {
   task = "",
@@ -54,6 +55,12 @@ export async function askAgentRouter(store, {
       error: invocation.body.error
     };
   }
+  const verification = verifyServiceResult({
+    result: invocation.body.result,
+    manifest: record.manifest,
+    intent: intent.input,
+    constraints: { max_price_usdc: maxPrice }
+  });
   return {
     ok: true,
     task,
@@ -62,6 +69,13 @@ export async function askAgentRouter(store, {
     preview_sample_type: preview?.sample_type || null,
     result: invocation.body.result,
     feedback: invocation.body.feedback,
+    verification,
+    consumer_feedback_request: createConsumerFeedbackRequest({
+      request: { task, input: intent.input },
+      selectedService: selected,
+      result: invocation.body.result,
+      verification
+    }),
     answer: summarize(task, invocation.body.result)
   };
 }

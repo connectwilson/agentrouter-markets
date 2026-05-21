@@ -1,9 +1,10 @@
 import { createDevPaymentProof } from "./payment.js";
 import { validateEnvelope, validateJsonSchema } from "./schema.js";
-import { publicServiceRecord } from "./store.js";
+import { publicServiceRecord, summarizeTrust } from "./store.js";
 import { normalizeEndpoint } from "./http-utils.js";
 import { suggestCapabilities } from "./id-utils.js";
 import { createSettlementReceipt } from "./payment-adapter.js";
+import { normalizeConsumerFeedback } from "./verifier.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -253,6 +254,61 @@ export async function invokePaidService(store, serviceId, input, budget) {
       result: body,
       feedback
     }
+  };
+}
+
+export function recordConsumerFeedback(store, body = {}) {
+  const serviceId = body.service_id;
+  const record = store.services.get(serviceId);
+  if (!record) {
+    const error = new Error("SERVICE_NOT_FOUND");
+    error.statusCode = 404;
+    throw error;
+  }
+  const requestId = body.request_id || body.feedback?.request_id;
+  if (!requestId) {
+    const error = new Error("request_id is required");
+    error.statusCode = 422;
+    error.code = "INVALID_CONSUMER_FEEDBACK";
+    throw error;
+  }
+  const consumerFeedback = normalizeConsumerFeedback(body.feedback || body);
+  const targetEvent = [...(record.feedback_events || [])].reverse().find((event) => event.request_id === requestId);
+  if (targetEvent) {
+    targetEvent.consumer_feedback = consumerFeedback;
+    targetEvent.consumer_rating = consumerFeedback.consumer_score;
+    targetEvent.updated_at = new Date().toISOString();
+  } else {
+    record.feedback_events.push({
+      event_version: "agent_service_feedback_v1",
+      request_id: requestId,
+      service_id: serviceId,
+      provider_id: record.manifest.provider.provider_id,
+      consumer_id: body.consumer_id || "unknown_consumer_agent",
+      status: "consumer_feedback_only",
+      schema_valid: null,
+      latency_ms: null,
+      consumer_rating: consumerFeedback.consumer_score,
+      consumer_feedback: consumerFeedback,
+      created_at: new Date().toISOString()
+    });
+  }
+  const event = {
+    event_version: "agent_consumer_feedback_v1",
+    service_id: serviceId,
+    provider_id: record.manifest.provider.provider_id,
+    request_id: requestId,
+    consumer_id: body.consumer_id || "unknown_consumer_agent",
+    consumer_feedback: consumerFeedback,
+    created_at: new Date().toISOString()
+  };
+  store.feedbackEvents.push(event);
+  return {
+    ok: true,
+    service_id: serviceId,
+    request_id: requestId,
+    consumer_feedback: consumerFeedback,
+    trust: summarizeTrust(record)
   };
 }
 

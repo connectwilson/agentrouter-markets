@@ -27,32 +27,57 @@ export function publicServiceRecord(record) {
 
 export function summarizeTrust(record) {
   const events = record.feedback_events || [];
-  const successful = events.filter((event) => event.status === "success").length;
-  const schemaValid = events.filter((event) => event.schema_valid).length;
-  const freshnessValid = events.filter((event) => event.verification?.freshness_valid === true).length;
-  const coverageValid = events.filter((event) => event.verification?.coverage_valid === true).length;
-  const agentFriendlyEvents = events
+  const operationalEvents = events.filter((event) => event.status !== "consumer_feedback_only");
+  const successful = operationalEvents.filter((event) => event.status === "success").length;
+  const schemaValid = operationalEvents.filter((event) => event.schema_valid).length;
+  const freshnessValid = operationalEvents.filter((event) => event.verification?.freshness_valid === true).length;
+  const coverageValid = operationalEvents.filter((event) => event.verification?.coverage_valid === true).length;
+  const agentFriendlyEvents = operationalEvents
     .map((event) => event.verification?.agent_friendly_score)
     .filter((score) => typeof score === "number");
-  const successRate = events.length ? successful / events.length : null;
-  const schemaValidRate = events.length ? schemaValid / events.length : null;
-  const freshnessValidRate = events.length ? freshnessValid / events.length : null;
-  const coverageValidRate = events.length ? coverageValid / events.length : null;
+  const consumerFeedbackEvents = events
+    .map((event) => event.consumer_feedback)
+    .filter(Boolean);
+  const intentFitScores = consumerFeedbackEvents
+    .map((feedback) => assessmentScore(feedback.intent_fit))
+    .filter((score) => typeof score === "number");
+  const usefulScores = consumerFeedbackEvents
+    .map((feedback) => assessmentScore(feedback.answer_useful))
+    .filter((score) => typeof score === "number");
+  const consumerScores = consumerFeedbackEvents
+    .map((feedback) => feedback.consumer_score)
+    .filter((score) => typeof score === "number");
+  const successRate = operationalEvents.length ? successful / operationalEvents.length : null;
+  const schemaValidRate = operationalEvents.length ? schemaValid / operationalEvents.length : null;
+  const freshnessValidRate = operationalEvents.length ? freshnessValid / operationalEvents.length : null;
+  const coverageValidRate = operationalEvents.length ? coverageValid / operationalEvents.length : null;
   const averageAgentFriendlyScore = agentFriendlyEvents.length
     ? agentFriendlyEvents.reduce((sum, score) => sum + score, 0) / agentFriendlyEvents.length
     : null;
-  const latencyEvents = events.filter((event) => typeof event.latency_ms === "number");
+  const intentFitRate = intentFitScores.length
+    ? intentFitScores.reduce((sum, score) => sum + score, 0) / intentFitScores.length
+    : null;
+  const usefulnessRate = usefulScores.length
+    ? usefulScores.reduce((sum, score) => sum + score, 0) / usefulScores.length
+    : null;
+  const averageConsumerScore = consumerScores.length
+    ? consumerScores.reduce((sum, score) => sum + score, 0) / consumerScores.length
+    : null;
+  const latencyEvents = operationalEvents.filter((event) => typeof event.latency_ms === "number");
   const averageLatencyMs = latencyEvents.length
     ? latencyEvents.reduce((sum, event) => sum + event.latency_ms, 0) / latencyEvents.length
     : null;
   const verificationScore = record.verification_status === "verified" ? 1 : 0.2;
-  const trustScore = events.length
+  const subjectiveScore = averageConsumerScore ?? usefulnessRate ?? intentFitRate ?? null;
+  const hasTrustEvents = operationalEvents.length || consumerFeedbackEvents.length;
+  const trustScore = hasTrustEvents
     ? (
-        (successRate ?? 0) * 0.3 +
-        (schemaValidRate ?? 0) * 0.25 +
-        (coverageValidRate ?? schemaValidRate ?? 0) * 0.15 +
-        (freshnessValidRate ?? schemaValidRate ?? 0) * 0.1 +
-        (averageAgentFriendlyScore ?? 0.7) * 0.1 +
+        (successRate ?? verificationScore) * 0.22 +
+        (schemaValidRate ?? verificationScore) * 0.18 +
+        (coverageValidRate ?? schemaValidRate ?? 0) * 0.12 +
+        (freshnessValidRate ?? schemaValidRate ?? 0) * 0.08 +
+        (averageAgentFriendlyScore ?? 0.7) * 0.08 +
+        (subjectiveScore ?? (schemaValidRate ?? verificationScore)) * 0.22 +
         latencyScore(averageLatencyMs) * 0.05 +
         verificationScore * 0.05
       )
@@ -60,15 +85,27 @@ export function summarizeTrust(record) {
   return {
     provider_id: record.manifest.provider.provider_id,
     feedback_count: events.length,
+    operational_feedback_count: operationalEvents.length,
+    consumer_feedback_count: consumerFeedbackEvents.length,
     success_rate: successRate,
     schema_valid_rate: schemaValidRate,
     freshness_valid_rate: freshnessValidRate,
     coverage_valid_rate: coverageValidRate,
+    intent_fit_rate: intentFitRate == null ? null : Number(intentFitRate.toFixed(2)),
+    usefulness_rate: usefulnessRate == null ? null : Number(usefulnessRate.toFixed(2)),
+    average_consumer_score: averageConsumerScore == null ? null : Number(averageConsumerScore.toFixed(2)),
     average_agent_friendly_score: averageAgentFriendlyScore == null ? null : Number(averageAgentFriendlyScore.toFixed(2)),
     average_latency_ms: averageLatencyMs == null ? null : Number(averageLatencyMs.toFixed(2)),
     verification_status: record.verification_status,
     trust_score: Number(trustScore.toFixed(4))
   };
+}
+
+function assessmentScore(value) {
+  if (value === "yes") return 1;
+  if (value === "partial") return 0.5;
+  if (value === "no") return 0;
+  return null;
 }
 
 export function summarizeQuality(record) {

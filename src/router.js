@@ -1,7 +1,8 @@
 import { invokePaidService, searchServices } from "./registry.js";
-import { verifyServiceResult } from "./verifier.js";
+import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
 import { createPaymentQuote } from "./payment-adapter.js";
 import { createEvidenceEnvelope } from "./evidence.js";
+import { summarizeTrust } from "./store.js";
 
 export const ROUTER_STATUSES = {
   READY: "ready_to_route",
@@ -238,6 +239,12 @@ export async function routeTask(store, { task = "", intent: providedIntent, cons
     verification,
     created_at: new Date().toISOString()
   });
+  const consumer_feedback_request = createConsumerFeedbackRequest({
+    request: { task, intent: resolved.intent, constraints },
+    selectedService: selected,
+    result: invocation.body.result,
+    verification
+  });
   store.feedbackEvents.push(routingEvent);
 
   return {
@@ -245,6 +252,7 @@ export async function routeTask(store, { task = "", intent: providedIntent, cons
     result: invocation.body.result,
     payment_feedback: invocation.body.feedback,
     verification,
+    consumer_feedback_request,
     routing_event: routingEvent
   };
 }
@@ -337,6 +345,7 @@ export async function routeCapabilityRequest(store, {
     intent,
     constraints: normalizedConstraints
   });
+  attachVerificationToLatestFeedback(record, invocation.body.result?.request_id, verification);
   const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
   const evidence = createEvidenceEnvelope({
     request,
@@ -359,6 +368,12 @@ export async function routeCapabilityRequest(store, {
     verification,
     evidence
   });
+  const consumer_feedback_request = createConsumerFeedbackRequest({
+    request,
+    selectedService: selected,
+    result: invocation.body.result,
+    verification
+  });
 
   return {
     ok: true,
@@ -377,6 +392,7 @@ export async function routeCapabilityRequest(store, {
     result: invocation.body.result,
     feedback: invocation.body.feedback,
     verification,
+    consumer_feedback_request,
     evidence,
     observation
   };
@@ -643,9 +659,8 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
     return { service_id: manifest.service_id, routing_score: 0 };
   }
   const assetFit = intent.asset ? Number(sampleText.includes(String(intent.asset).toLowerCase())) : 1;
-  const trustScore = record.feedback_events?.length
-    ? record.feedback_events.filter((event) => event.status === "success" && event.schema_valid !== false).length / record.feedback_events.length
-    : Number(record.verification_status === "verified") * 0.7;
+  const trust = summarizeTrust(record);
+  const trustScore = trust.trust_score;
   const freshnessLimit = Number(constraints.freshness_seconds || 0);
   const serviceFreshness = Number(manifest.freshness?.max_data_lag_seconds || 0);
   const freshnessFit = !freshnessLimit || (serviceFreshness && serviceFreshness <= freshnessLimit) ? 1 : 0.35;
@@ -667,8 +682,16 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
     pricing: manifest.pricing,
     trust_score: Number(trustScore.toFixed(4)),
     routing_score: Number(score.toFixed(4)),
-    selection_reason: `Matched ${capabilityHits}/${requiredCapabilities.length} required capabilities, verification=${record.verification_status}, trust=${trustScore.toFixed(2)}, price=${manifest.pricing.amount} ${manifest.pricing.currency}.`
+    selection_reason: `Matched ${capabilityHits}/${requiredCapabilities.length} required capabilities, verification=${record.verification_status}, trust=${trustScore.toFixed(2)}, consumer_feedback=${trust.consumer_feedback_count}, price=${manifest.pricing.amount} ${manifest.pricing.currency}.`
   };
+}
+
+function attachVerificationToLatestFeedback(record, requestId, verification) {
+  const event = [...(record.feedback_events || [])].reverse().find((item) => !requestId || item.request_id === requestId);
+  if (!event) return;
+  event.verification = verification;
+  event.schema_valid = verification.schema_valid;
+  event.updated_at = new Date().toISOString();
 }
 
 function serviceCoversCapability(surfaceText, capability) {

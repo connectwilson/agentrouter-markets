@@ -32,6 +32,15 @@ export class DiscoveryConnector {
     return this.#post("/connector/get_feedback", { service_id: serviceId });
   }
 
+  async submitConsumerFeedback({ service_id: serviceId, request_id: requestId, consumer_id: consumerId, feedback }) {
+    return this.#post("/agent-router/feedback", {
+      service_id: serviceId,
+      request_id: requestId,
+      consumer_id: consumerId,
+      feedback
+    });
+  }
+
   async routeTask({ task, intent, constraints = {}, budget = {} }) {
     return this.#post("/router/route", {
       task,

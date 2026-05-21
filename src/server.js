@@ -4,7 +4,7 @@ import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from ".
 import { createMemoryStore, publicServiceRecord } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { invokePaidService, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
+import { invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
@@ -134,6 +134,13 @@ async function routeRequest(req, res, store, baseUrl) {
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
     sendJson(res, 200, record.feedback_events || []);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agent-router/feedback") {
+    const body = await readJson(req);
+    const result = recordConsumerFeedback(store, body);
+    sendJson(res, 200, result);
     return;
   }
 

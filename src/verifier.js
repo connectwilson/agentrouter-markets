@@ -66,6 +66,125 @@ export function verifyServiceResult({ result, manifest, intent = {}, constraints
   };
 }
 
+export function createConsumerFeedbackRequest({
+  request = {},
+  selectedService = {},
+  result = {},
+  verification = {}
+} = {}) {
+  return {
+    feedback_request_version: "agent_consumer_feedback_request_v1",
+    endpoint: "/agent-router/feedback",
+    method: "POST",
+    service_id: selectedService.service_id || result.service_id,
+    request_id: result.request_id,
+    instructions: [
+      "Submit this after the main agent has inspected whether the returned data helped answer the user's task.",
+      "Do not infer domain truth beyond the returned data. Judge intent fit, usefulness, and parseability for this call.",
+      "Use unknown when the main agent cannot reasonably judge a field."
+    ],
+    schema: {
+      type: "object",
+      required: ["service_id", "request_id", "feedback"],
+      properties: {
+        service_id: { type: "string" },
+        request_id: { type: "string" },
+        consumer_id: { type: "string" },
+        feedback: {
+          type: "object",
+          required: ["intent_fit", "answer_useful", "reason"],
+          properties: {
+            intent_fit: { enum: ["yes", "partial", "no", "unknown"] },
+            answer_useful: { enum: ["yes", "partial", "no", "unknown"] },
+            data_quality_score: { type: "number", minimum: 0, maximum: 1 },
+            used_in_final_answer: { type: "boolean" },
+            reason: { type: "string" },
+            missing_fields: { type: "array", items: { type: "string" } },
+            confidence: { type: "number", minimum: 0, maximum: 1 }
+          }
+        }
+      }
+    },
+    rubric: {
+      intent_fit: "yes if the data directly matches the requested capability and parameters; partial if it is related but incomplete; no if it is the wrong data; unknown if the agent cannot judge.",
+      answer_useful: "yes if the data can support a final answer; partial if it needs another source or transformation; no if it cannot be used; unknown if unclear.",
+      data_quality_score: "0..1 score for non-empty, fresh, parseable, complete, and relevant data.",
+      reason: "One short sentence grounded in the returned data, not provider reputation."
+    },
+    suggested_feedback: suggestConsumerFeedback({ request, result, verification })
+  };
+}
+
+export function normalizeConsumerFeedback(input = {}) {
+  const feedback = input.feedback && typeof input.feedback === "object" ? input.feedback : input;
+  const normalized = {
+    intent_fit: normalizeAssessment(feedback.intent_fit),
+    answer_useful: normalizeAssessment(feedback.answer_useful),
+    data_quality_score: normalizeScore(feedback.data_quality_score),
+    used_in_final_answer: typeof feedback.used_in_final_answer === "boolean" ? feedback.used_in_final_answer : null,
+    reason: String(feedback.reason || "").trim().slice(0, 500),
+    missing_fields: Array.isArray(feedback.missing_fields)
+      ? feedback.missing_fields.map((item) => String(item).trim()).filter(Boolean).slice(0, 20)
+      : [],
+    confidence: normalizeScore(feedback.confidence)
+  };
+  const componentScores = [
+    assessmentScore(normalized.intent_fit),
+    assessmentScore(normalized.answer_useful),
+    normalized.data_quality_score,
+    normalized.used_in_final_answer === null ? null : Number(normalized.used_in_final_answer)
+  ].filter((score) => typeof score === "number");
+  if (!componentScores.length) {
+    const error = new Error("feedback must include at least one judgeable signal");
+    error.statusCode = 422;
+    error.code = "INVALID_CONSUMER_FEEDBACK";
+    throw error;
+  }
+  if (!normalized.reason) {
+    const error = new Error("feedback.reason is required");
+    error.statusCode = 422;
+    error.code = "INVALID_CONSUMER_FEEDBACK";
+    throw error;
+  }
+  normalized.consumer_score = Number((componentScores.reduce((sum, score) => sum + score, 0) / componentScores.length).toFixed(4));
+  return normalized;
+}
+
+function suggestConsumerFeedback({ result = {}, verification = {} }) {
+  const score = typeof verification.overall_quality_score === "number" ? verification.overall_quality_score : null;
+  const hasBlockingIssues = (verification.issues || []).some((issue) => ["EMPTY_RESULT", "STATUS_NOT_SUCCESS", "SCHEMA_ERROR", "ENVELOPE_ERROR"].includes(issue.code));
+  return {
+    intent_fit: verification.coverage_valid === false ? "partial" : "unknown",
+    answer_useful: hasBlockingIssues ? "no" : "unknown",
+    data_quality_score: score,
+    used_in_final_answer: null,
+    reason: result?.summary || (hasBlockingIssues ? "Deterministic checks found blocking quality issues." : "Main agent should judge usefulness against the user task."),
+    missing_fields: (verification.issues || []).map((issue) => issue.code).slice(0, 8),
+    confidence: 0.5
+  };
+}
+
+function normalizeAssessment(value) {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  const normalized = String(value || "unknown").trim().toLowerCase();
+  return ["yes", "partial", "no", "unknown"].includes(normalized) ? normalized : "unknown";
+}
+
+function assessmentScore(value) {
+  if (value === "yes") return 1;
+  if (value === "partial") return 0.5;
+  if (value === "no") return 0;
+  return null;
+}
+
+function normalizeScore(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const score = Number(value);
+  if (!Number.isFinite(score)) return null;
+  return Math.max(0, Math.min(1, Number(score.toFixed(4))));
+}
+
 function checkCoverage(result, intent) {
   const issues = [];
   const queryText = JSON.stringify(result?.query || {}).toLowerCase();
