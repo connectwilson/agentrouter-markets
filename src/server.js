@@ -299,6 +299,12 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/mock/upstream/html-error") {
+    res.writeHead(404, { "content-type": "text/html" });
+    res.end("<html><h1>Not Found</h1></html>");
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/mock/api/openapi.json") {
     sendJson(res, 200, mockOpenApi(baseUrl));
     return;

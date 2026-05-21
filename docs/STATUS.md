@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-05-18
+Last updated: 2026-05-21
 
 ## Current MVP
 
@@ -11,7 +11,7 @@ Last updated: 2026-05-18
 - AgentRouter is available as:
   - CLI: `node bin/agent-router.js ask "<task>"`
   - HTTP: `POST /agent-router/ask`
-- AgentRouter currently recognizes address lookup and BTC/perp liquidation max-pain demo intents.
+- AgentRouter currently recognizes address lookup, BTC/perp liquidation max-pain, generic netflow, Nansen-style smart-money netflow, and smart-money holdings intents.
 - Local provider configs using `/provider/custom/...` are rebound to the current server port at startup, so old generated JSON does not pin the app to a stale local port.
 - Wallet/payment is still dev-mode x402-style proof, not production USDC settlement.
 - Agora hackathon positioning is captured in `docs/PRD_AGORA_HACKATHON.md`: AgentRouter Markets, a paid market-intelligence routing layer for trading agents.
@@ -23,8 +23,8 @@ Last updated: 2026-05-18
 - Search results now expose `trust_score`; structured routing returns provider selection reasons.
 - Verified the full provider-to-demand flow: Provider Studio OpenAPI import publishes `get_liquidation_max_pain`; AgentRouter `/ask` compiles natural language into a structured `perp_liquidation_max_pain` request, selects the uploaded service, pays, validates, and returns data.
 - OpenAPI capability inference now enriches imported liquidation services with the standard `perp_liquidation`, `liquidation_heatmap`, and `perp_liquidation_max_pain` capabilities.
-- Deployed AgentRouter Markets to Railway at `https://agentrouter-markets.onrender.com`.
-- Claude Skill now points to the Railway endpoint instead of the temporary Cloudflare tunnel.
+- Deployed AgentRouter Markets to Render at `https://agentrouter-markets.onrender.com`.
+- Claude/Codex Skill and MCP defaults now point to the Render endpoint instead of the temporary Cloudflare/Railway endpoints.
 - Added payment backend abstraction: `dev`, `x402`, `omniagentpay`, and `circle_arc`.
 - Added `POST /agent-router/quote` so agents can inspect selected service, input, price, and guard result before paying.
 - Product positioning updated: AgentRouter is not a payment SDK; OmniAgentPay/Circle/x402 can be payment execution backends.
@@ -38,6 +38,10 @@ Last updated: 2026-05-18
 - `mcpb validate mcpb/agentrouter` passes and `mcpb pack mcpb/agentrouter` succeeds.
 - Added publish-ready npm/npx MCP package source in `packages/agentrouter-mcp` with target package name `@agentrouter/mcp`.
 - Added `npm run mcp:npm:check` and `npm run mcp:npm:pack` to validate the npm package before publication.
+- Provider configs that fail validation now reload as unverified but routable services instead of disappearing at restart. This lets real paid APIs prove discovery/routing even when upstream credentials or entitlements still need work.
+- Imported provider manifests now include inferred input schemas and an `agent_data_service_contract_v1` block with example questions, shape summaries, and quality expectations.
+- Data quality verification now records deterministic checks for schema, envelope, freshness, coverage, empty result, confidence, data shape, and an overall quality score. Trust snapshots include freshness, coverage, and agent-friendliness signals.
+- Route failures now return `failure_explanation` so clients can distinguish "no service found" from "service found and invoked, but upstream rejected the request."
 
 ## Known Useful Local Flow
 

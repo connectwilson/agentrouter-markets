@@ -281,6 +281,7 @@ function detectLimit(task, wantsSingle) {
 
 function detectChain(task) {
   const text = String(task || "").toLowerCase();
+  if (/\beth\b/.test(text) || text.includes("以太坊")) return "ethereum";
   for (const chain of ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc"]) {
     if (text.includes(chain)) return chain;
   }

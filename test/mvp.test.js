@@ -839,6 +839,7 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     assert.equal(draft.method, "POST");
     assert.equal(draft.auth_header, "apikey");
     assert.equal(draft.secret_name, "NANSEN_API_KEY");
+    assert.ok(draft.capabilities.includes("smart_money_holdings"));
     assert.deepEqual(draft.sample_request, {
       chains: ["ethereum"],
       pagination: { page: 1, per_page: 10 }
@@ -880,11 +881,61 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     assert.equal(routed.observation.status, "route_failed");
     assert.equal(routed.observation.request.capability, "smart_money_holdings");
     assert.equal(routed.observation.candidates_considered, 1);
+    assert.equal(routed.failure_explanation.code, "UPSTREAM_ERROR");
 
     const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=route_failed`);
     assert.equal(observationsResponse.status, 200);
     const observations = await observationsResponse.json();
     assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));
+  });
+});
+
+test("AgentRouter routes newly published unverified smart-money netflow services", async () => {
+  await withServer(async ({ server, baseUrl }) => {
+    const endpointUrl = `${baseUrl}/api/v1/smart-money/netflow`;
+    const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        api_url: endpointUrl,
+        default_price: "0.01",
+        secret_value: "provider-owned-secret"
+      })
+    });
+    assert.equal(discoverResponse.status, 200);
+    const discovered = await discoverResponse.json();
+    assert.equal(discovered.ok, true);
+    assert.equal(discovered.drafts.length, 1);
+    assert.ok(discovered.drafts[0].capabilities.includes("smart_money_netflow"));
+
+    const publishResponse = await fetch(`${baseUrl}/studio/import/publish`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ drafts: discovered.drafts, publish_scope: "local_only" })
+    });
+    assert.equal(publishResponse.status, 201);
+    const published = await publishResponse.json();
+    assert.equal(published.ok, true);
+    assert.equal(published.published[0].service_id, "post_api_v1_smart_money_netflow");
+
+    const search = searchServices(server.store, { query: "smart money netflow", verifiedOnly: false });
+    assert.ok(search.some((service) => service.service_id === "post_api_v1_smart_money_netflow"));
+
+    const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "通过 AgentRouter 查询 ETH 的近 24 小时 netflow",
+        max_price: "0.05"
+      })
+    });
+    assert.equal(askResponse.status, 200);
+    const routed = await askResponse.json();
+    assert.equal(routed.ok, false);
+    assert.equal(routed.status, "route_failed");
+    assert.equal(routed.selected_service.service_id, "post_api_v1_smart_money_netflow");
+    assert.deepEqual(routed.input.chains, ["ethereum"]);
+    assert.equal(routed.failure_explanation.code, "UPSTREAM_ERROR");
   });
 });
 
@@ -926,6 +977,37 @@ test("Provider Studio surfaces hosted HTTP upstream failures during validation",
   });
 });
 
+test("Provider runtime reports non-JSON upstream responses clearly", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "hosted-http",
+        service_id: "html_upstream_demo",
+        provider_id: "provider_studio",
+        title: "HTML Upstream Demo",
+        description_for_agent: "Use this service to verify non JSON upstream errors are visible.",
+        capabilities: "html_upstream_demo,data_service",
+        price: "0.01",
+        sample_request: "{}",
+        sample_data: "{\"ok\":true}",
+        summary: "HTML upstream demo.",
+        upstream_url: "/mock/upstream/html-error",
+        upstream_method: "POST",
+        secret_name: "PROVIDER_SECRET",
+        secret_value: "",
+        auth_header: "authorization"
+      })
+    });
+    assert.equal(studioResponse.status, 422);
+    const payload = await studioResponse.json();
+    assert.equal(payload.validation.status, 502);
+    assert.match(JSON.stringify(payload.validation), /UPSTREAM_NON_JSON_RESPONSE/);
+  });
+});
+
 test("provider configs can be reloaded into a fresh registry after restart", async () => {
   await withServer(async ({ baseUrl }) => {
     const onboard = await runCli(["provider", "onboard", "--mode", "hosted-http", "--yes"], {
@@ -947,7 +1029,7 @@ test("provider configs can be reloaded into a fresh registry after restart", asy
   });
 });
 
-test("failed provider configs are not loaded into the routable registry on startup", async () => {
+test("failed provider configs reload as unverified but routable after restart", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
     const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
@@ -958,7 +1040,7 @@ test("failed provider configs are not loaded into the routable registry on start
         service_id: "failed_reload_demo",
         provider_id: "provider_studio",
         title: "Failed Reload Demo",
-        description_for_agent: "Use this service to verify failed configs do not reload.",
+        description_for_agent: "Use this service to verify failed configs reload as unverified services.",
         capabilities: "reload_failure_demo,data_service",
         price: "0.01",
         sample_request: "{\"asset\":\"ETH\"}",
@@ -980,7 +1062,10 @@ test("failed provider configs are not loaded into the routable registry on start
     const freshBaseUrl = `http://127.0.0.1:${freshServer.address().port}`;
     try {
       await loadProviderConfigs(freshServer.store, freshBaseUrl, { validate: true });
-      assert.equal(freshServer.store.services.has("failed_reload_demo"), false);
+      const record = freshServer.store.services.get("failed_reload_demo");
+      assert.ok(record);
+      assert.equal(record.verification_status, "failed");
+      assert.equal(record.validation_runs.at(-1).ok, false);
     } finally {
       await new Promise((resolve) => freshServer.close(resolve));
     }

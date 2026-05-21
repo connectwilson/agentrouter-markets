@@ -20,6 +20,11 @@ export function suggestCapabilities(text) {
     tags.add("fund_flow");
   }
   if (/net[\s_-]?flow|netflow|净流入|净流出/.test(value)) tags.add("netflow");
+  if (/smart[\s_-]?money|smart money|聪明钱/.test(value)) {
+    tags.add("smart_money");
+    if (/net[\s_-]?flow|netflow|净流入|净流出|inflow|outflow/.test(value)) tags.add("smart_money_netflow");
+    if (/holding|holdings|持仓|balance/.test(value)) tags.add("smart_money_holdings");
+  }
   if (/funding|资金费率/.test(value)) {
     tags.add("crypto_derivatives");
     tags.add("funding_rate");

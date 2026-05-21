@@ -77,10 +77,7 @@ export function createStaticProviderConfig({
     description_for_agent: description,
     capabilities,
     not_for: [],
-    input_schema: {
-      type: "object",
-      properties: {}
-    },
+    input_schema: schemaFromSample(sampleRequest),
     output_schema: {
       type: "object",
       required: ["schema_version", "service_id", "request_id", "status", "query", "data", "metadata"],
@@ -125,6 +122,7 @@ export function createStaticProviderConfig({
       update_frequency: "manual",
       max_data_lag_seconds: 86400
     },
+    agent_contract: createAgentContract({ capabilities, sampleRequest, sampleData, summary }),
     registration: {
       source_fingerprint: createSourceFingerprint({
         type: "static_json",
@@ -181,10 +179,7 @@ export function createHostedHttpProviderConfig({
     description_for_agent: description,
     capabilities,
     not_for: [],
-    input_schema: {
-      type: "object",
-      properties: {}
-    },
+    input_schema: schemaFromSample(sampleRequest),
     output_schema: {
       type: "object",
       required: ["schema_version", "service_id", "request_id", "status", "query", "data", "metadata"],
@@ -235,6 +230,7 @@ export function createHostedHttpProviderConfig({
       update_frequency: "on_request",
       max_data_lag_seconds: 300
     },
+    agent_contract: createAgentContract({ capabilities, sampleRequest, sampleData, summary }),
     registration: {
       source_fingerprint: createSourceFingerprint({
         type: "hosted_http",
@@ -262,6 +258,65 @@ export function createHostedHttpProviderConfig({
     },
     manifest
   };
+}
+
+function createAgentContract({ capabilities = [], sampleRequest = {}, sampleData = {}, summary = "" }) {
+  return {
+    contract_version: "agent_data_service_contract_v1",
+    capability_tags: capabilities,
+    example_questions: exampleQuestionsForCapabilities(capabilities),
+    request_shape_summary: summarizeShape(sampleRequest),
+    response_shape_summary: summarizeShape(sampleData),
+    quality_expectations: {
+      result_envelope: "agent_data_envelope_v1",
+      must_include_metadata: ["data_sources", "generated_at", "freshness_seconds", "confidence", "limitations"],
+      preview_paid_shape_should_match: true,
+      empty_result_should_be_explicit: true
+    },
+    routing_hints: {
+      good_for: capabilities.filter((capability) => capability !== "data_service").slice(0, 8),
+      not_for: []
+    },
+    summary
+  };
+}
+
+function schemaFromSample(sample) {
+  return {
+    type: "object",
+    properties: Object.fromEntries(
+      Object.entries(sample || {}).map(([key, value]) => [key, schemaForValue(value)])
+    )
+  };
+}
+
+function schemaForValue(value) {
+  if (Array.isArray(value)) {
+    return { type: "array", items: value.length ? schemaForValue(value[0]) : {} };
+  }
+  if (value && typeof value === "object") {
+    return {
+      type: "object",
+      properties: Object.fromEntries(Object.entries(value).map(([key, child]) => [key, schemaForValue(child)]))
+    };
+  }
+  if (typeof value === "number") return { type: "number" };
+  if (typeof value === "boolean") return { type: "boolean" };
+  return { type: "string" };
+}
+
+function summarizeShape(value) {
+  if (Array.isArray(value)) return `array(${value.length} sample items)`;
+  if (value && typeof value === "object") return `object keys: ${Object.keys(value).slice(0, 12).join(", ") || "none"}`;
+  return typeof value;
+}
+
+function exampleQuestionsForCapabilities(capabilities = []) {
+  if (capabilities.includes("smart_money_netflow")) return ["Query ETH smart money netflow for the latest page.", "查询 ETH 近 24 小时 smart money netflow。"];
+  if (capabilities.includes("smart_money_holdings")) return ["Query the first 10 smart money holdings rows.", "查询 smart money holdings 的前 10 条数据。"];
+  if (capabilities.includes("perp_liquidation_max_pain")) return ["What is BTC's current liquidation max-pain price?"];
+  if (capabilities.includes("fund_flow")) return ["What is the recent fund flow for this chain?"];
+  return ["Query this provider data service with the sample request shape."];
 }
 
 function createSourceFingerprint(value) {

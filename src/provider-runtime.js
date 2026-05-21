@@ -295,7 +295,18 @@ async function callHostedHttpSource(config, input) {
     request.body = JSON.stringify(input);
   }
   const response = await fetch(url, request);
-  const payload = await response.json();
+  const payload = await parseUpstreamPayload(response);
+  if (payload.non_json) {
+    return {
+      upstream_error: true,
+      status: response.status,
+      payload: {
+        code: "UPSTREAM_NON_JSON_RESPONSE",
+        content_type: payload.content_type,
+        body_preview: payload.body_preview
+      }
+    };
+  }
   if (!response.ok) {
     return {
       upstream_error: true,
@@ -304,4 +315,32 @@ async function callHostedHttpSource(config, input) {
     };
   }
   return payload;
+}
+
+async function parseUpstreamPayload(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  if (!text.trim()) return {};
+  if (contentType.includes("application/json") || looksLikeJson(text)) {
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return {
+        non_json: true,
+        content_type: contentType,
+        body_preview: text.slice(0, 240),
+        parse_error: error.message
+      };
+    }
+  }
+  return {
+    non_json: true,
+    content_type: contentType,
+    body_preview: text.slice(0, 240)
+  };
+}
+
+function looksLikeJson(text) {
+  const trimmed = String(text || "").trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
 }

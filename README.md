@@ -248,7 +248,7 @@ node bin/agent-router.js quote '{"capability":"perp_liquidation_max_pain","param
 
 ## Claude MCP Integration
 
-Hosted Claude environments may block outbound access to temporary tunnels or platform domains such as `trycloudflare.com` and `railway.app`. The preferred integration is a local MCP server: Claude calls the MCP tool locally, and the MCP server forwards requests to either the Railway deployment or your local AgentRouter server.
+Hosted Claude environments may block outbound access to temporary tunnels or some platform domains. The preferred integration is a local MCP server: Claude calls the MCP tool locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
 
 ### No-Command Claude Desktop Install
 

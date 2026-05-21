@@ -86,6 +86,65 @@ const CAPABILITY_ALIASES = [
       }
     ],
     defaultInput: (intent) => ({ chain: intent.chain || "base", days: intent.days || 7 })
+  },
+  {
+    capability: "smart_money_netflow",
+    capabilities: ["data_service", "smart_money_netflow", "netflow", "smart_money", "onchain_data"],
+    keywords: ["smart money netflow", "smart-money netflow", "聪明钱 净流", "聪明钱", "netflow", "net flow", "净流入", "净流出"],
+    agent_description: "Use this when the user asks for smart-money inflow, outflow, or netflow by chain or asset.",
+    not_for: ["generic exchange spot netflow unless no more specific service exists"],
+    input_schema: {
+      type: "object",
+      required: [],
+      properties: {
+        chains: { type: "array", items: { type: "string" } },
+        pagination: { type: "object" },
+        asset: { type: "string" },
+        window: { type: "string" }
+      }
+    },
+    examples: [
+      {
+        user_query: "用 AgentRouter 查询 ETH 近 24 小时 smart money netflow",
+        request: {
+          capability: "smart_money_netflow",
+          params: { chains: ["ethereum"], pagination: { page: 1, per_page: 10 } }
+        }
+      }
+    ],
+    defaultInput: (intent) => ({
+      chains: [intent.chain || chainFromAsset(intent.asset) || "ethereum"],
+      pagination: { page: 1, per_page: 10 }
+    })
+  },
+  {
+    capability: "smart_money_holdings",
+    capabilities: ["data_service", "smart_money_holdings", "smart_money", "onchain_data"],
+    keywords: ["smart money holdings", "smart-money holdings", "聪明钱 持仓", "聪明钱", "holdings", "持仓"],
+    agent_description: "Use this when the user asks for smart-money holdings or top held assets.",
+    not_for: ["netflow or trade history requests"],
+    input_schema: {
+      type: "object",
+      required: [],
+      properties: {
+        chains: { type: "array", items: { type: "string" } },
+        pagination: { type: "object" },
+        asset: { type: "string" }
+      }
+    },
+    examples: [
+      {
+        user_query: "用 AgentRouter 查询 smart money holdings 的前 10 条数据",
+        request: {
+          capability: "smart_money_holdings",
+          params: { chains: ["ethereum"], pagination: { page: 1, per_page: 10 } }
+        }
+      }
+    ],
+    defaultInput: (intent) => ({
+      chains: [intent.chain || chainFromAsset(intent.asset) || "ethereum"],
+      pagination: { page: 1, per_page: 10 }
+    })
   }
 ];
 
@@ -215,10 +274,12 @@ export async function routeCapabilityRequest(store, {
   const candidates = rankCandidates(store, intent, normalizedConstraints);
   if (!candidates.length) {
     const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
+    const diagnostics = diagnoseNoMatch(store, { capability, params, constraints: normalizedConstraints });
     const observation = recordRouteObservation(store, {
       status: ROUTER_STATUSES.NO_MATCH,
       request,
-      candidates
+      candidates,
+      error: diagnostics
     });
     return {
       ok: false,
@@ -226,7 +287,8 @@ export async function routeCapabilityRequest(store, {
       request,
       candidates_considered: 0,
       observation,
-      message: "No registered service matched the structured capability request and constraints."
+      message: diagnostics.message,
+      diagnostics
     };
   }
 
@@ -264,7 +326,8 @@ export async function routeCapabilityRequest(store, {
       input,
       quote,
       observation,
-      error
+      error,
+      failure_explanation: explainRouteFailure({ error, selected, input })
     };
   }
 
@@ -555,6 +618,8 @@ function buildSearchQuery(intent) {
   if (intent.capability === "perp_liquidation_max_pain") return `${intent.asset || "BTC"} liquidation max pain`;
   if (intent.capability === "options_max_pain") return `${intent.asset || "BTC"} options max pain`;
   if (intent.capability === "onchain_fund_flow") return `${intent.chain || ""} fund flow`;
+  if (intent.capability === "smart_money_netflow") return `${intent.chain || chainFromAsset(intent.asset) || ""} smart money netflow`;
+  if (intent.capability === "smart_money_holdings") return `${intent.chain || chainFromAsset(intent.asset) || ""} smart money holdings`;
   return [
     String(intent.capability || "").replace(/[_-]/g, " "),
     ...Object.values(intent).flatMap((value) => searchableValues(value))
@@ -615,6 +680,12 @@ function serviceCoversCapability(surfaceText, capability) {
   }
   if (capability === "onchain_fund_flow") {
     return /fund[\s_-]?flow|inflow|outflow|资金流|onchain|链上/.test(surfaceText);
+  }
+  if (capability === "smart_money_netflow") {
+    return /smart[\s_-]?money|聪明钱/.test(surfaceText) && /net[\s_-]?flow|netflow|inflow|outflow|净流/.test(surfaceText);
+  }
+  if (capability === "smart_money_holdings") {
+    return /smart[\s_-]?money|聪明钱/.test(surfaceText) && /holdings?|持仓|balance/.test(surfaceText);
   }
   const terms = dynamicCapabilityTerms(capability);
   return terms.length > 0 && terms.every((term) => surfaceText.includes(term));
@@ -774,6 +845,67 @@ function dynamicInputParams(intent, sampleRequest = {}) {
   );
 }
 
+function diagnoseNoMatch(store, { capability, params, constraints }) {
+  const registered = [...store.services.values()].map((record) => record.manifest);
+  const capabilityTerms = dynamicCapabilityTerms(capability);
+  const related = registered
+    .map((manifest) => {
+      const text = [
+        manifest.service_id,
+        manifest.title,
+        manifest.description_for_agent,
+        ...(manifest.capabilities || [])
+      ].join(" ").toLowerCase();
+      const hits = capabilityTerms.filter((term) => text.includes(term)).length;
+      return {
+        service_id: manifest.service_id,
+        title: manifest.title,
+        capabilities: manifest.capabilities,
+        price: manifest.pricing,
+        hits
+      };
+    })
+    .filter((item) => item.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 5);
+  return {
+    code: "NO_REGISTERED_SERVICE_MATCHED",
+    message: related.length
+      ? "Registered services exist with related terms, but none satisfied capability, price, and coverage constraints."
+      : "No registered service exposes this capability yet.",
+    requested_capability: capability,
+    requested_params: params,
+    constraints,
+    related_services: related,
+    next_actions: [
+      "Check that the provider service was published to the same remote registry the client is using.",
+      "Search /services/search for the expected service id or capability tag.",
+      "If the service is unverified, it can still route, but its title, tags, and sample shape must match the requested capability."
+    ]
+  };
+}
+
+function explainRouteFailure({ error, selected, input }) {
+  const code = error?.code || error?.error?.code || "UNKNOWN_ERROR";
+  const upstreamStatus = error?.upstream_status || error?.error?.upstream_status;
+  return {
+    code,
+    selected_service_id: selected?.service_id,
+    user_message: code === "UPSTREAM_ERROR"
+      ? `AgentRouter found and invoked ${selected?.service_id}, but the provider upstream rejected the request${upstreamStatus ? ` with HTTP ${upstreamStatus}` : ""}. This proves discovery/routing worked; the remaining issue is provider credentials, permission, or request shape.`
+      : `AgentRouter found ${selected?.service_id}, but invocation failed with ${code}.`,
+    input_sent: input,
+    likely_causes: code === "UPSTREAM_ERROR"
+      ? ["Provider API key is missing or lacks permission.", "The upstream endpoint requires a different request body.", "The upstream API rejected the provider account or quota."]
+      : ["Budget, payment challenge, or provider runtime failed."],
+    suggested_next_actions: [
+      "Validate the provider secret in Provider Studio.",
+      "Compare the input_sent body with the upstream API documentation.",
+      "If the upstream returns 403/401, verify the provider account entitlement."
+    ]
+  };
+}
+
 function searchableValues(value) {
   if (value === undefined || value === null) return [];
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return [String(value)];
@@ -815,10 +947,17 @@ function detectAsset(text) {
 }
 
 function detectChain(text) {
+  if (/\beth\b/.test(text) || text.includes("以太坊")) return "ethereum";
   for (const chain of ["base", "ethereum", "arbitrum", "optimism", "solana", "bsc"]) {
     if (text.includes(chain)) return chain;
   }
   if (text.includes("链")) return "base";
+  return undefined;
+}
+
+function chainFromAsset(asset) {
+  if (String(asset || "").toUpperCase() === "ETH") return "ethereum";
+  if (String(asset || "").toUpperCase() === "BNB") return "bsc";
   return undefined;
 }
 
