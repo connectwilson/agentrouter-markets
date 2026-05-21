@@ -2,13 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ADN_DIR, ensureAdnDir } from "./wallet.js";
-import { deletePersistentProviderSecret, readPersistentProviderSecret, writePersistentProviderSecret } from "./persistence.js";
+import { assertPersistentProviderStorageReady, deletePersistentProviderSecret, persistenceEnabled, readPersistentProviderSecret, writePersistentProviderSecret } from "./persistence.js";
 
 export const PROVIDER_SECRETS_PATH = path.join(ADN_DIR, "provider-secrets.json");
 export const PROVIDER_SECRET_KEY_PATH = path.join(ADN_DIR, "provider-secret.key");
 
 export async function writeProviderSecret({ serviceId, secretName, secretValue }) {
   if (!secretValue) return null;
+  assertPersistentProviderStorageReady({ requiresSecret: true });
   await ensureAdnDir();
   const secrets = await readSecretStoreRaw();
   const secretRef = `${serviceId}:${secretName}`;
@@ -48,6 +49,9 @@ async function readSecretStoreRaw() {
 }
 
 async function getProviderSecretPassphrase() {
+  if (persistenceEnabled()) {
+    assertPersistentProviderStorageReady({ requiresSecret: true });
+  }
   const passphrase = process.env.ADN_PROVIDER_SECRET_PASSPHRASE || process.env.ADN_WALLET_PASSPHRASE;
   if (passphrase && passphrase.length < 8) {
     throw new Error("Provider Secret passphrase must be at least 8 characters.");

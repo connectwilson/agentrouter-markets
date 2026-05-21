@@ -87,7 +87,15 @@ ADN_PROVIDER_SECRET_PASSPHRASE=<stable-32+-char-secret>
 
 When `DATABASE_URL` is present, Provider Studio writes provider configs to Postgres and stores provider credentials as encrypted secret records. On every restart, AgentRouter reloads registered providers from the database, so a provider only needs to publish once.
 
-`ADN_PROVIDER_SECRET_PASSPHRASE` must stay stable across deploys. Rotating it without re-encrypting secrets will make existing provider credentials unreadable.
+`ADN_PROVIDER_SECRET_PASSPHRASE` is a platform encryption key, not a provider API key. It must stay stable across deploys. Rotating it without re-encrypting secrets will make existing provider credentials unreadable.
+
+Do not add provider-owned API keys such as BlockBeats, Nansen, or other upstream keys to hosted deployment environment variables as the normal onboarding path. Providers enter their credentials in Provider Studio; the platform stores encrypted secret records in the persistent registry. Hosted deployments that require persistence, such as Render, reject Provider Studio publish requests unless `DATABASE_URL` and a stable `ADN_PROVIDER_SECRET_PASSPHRASE` are configured.
+
+Environment-variable provider bootstrap is disabled by default and exists only for temporary local tests:
+
+```text
+ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP=true
+```
 
 ## CLI Connector
 
@@ -500,6 +508,8 @@ In hosted HTTP mode, the submitted Provider Secret is moved into the local encry
 ```
 
 It is encrypted with `ADN_PROVIDER_SECRET_PASSPHRASE`, falling back to `ADN_WALLET_PASSPHRASE` for local MVP demos.
+
+When `DATABASE_URL` is enabled, `ADN_PROVIDER_SECRET_PASSPHRASE` is required. Local fallback keys are intentionally not used for persistent hosted credentials because they can disappear across deploys and make stored provider secrets unreadable.
 
 The generated provider config only includes a secret reference:
 

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { deleteProviderSecret, writeProviderSecret } from "./provider-secrets.js";
-import { deletePersistentProviderConfig, listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
+import { assertPersistentProviderStorageReady, deletePersistentProviderConfig, listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
 
 export const PROVIDER_DIR = path.resolve(process.env.ADN_PROVIDER_DIR || "providers");
 
@@ -16,6 +16,7 @@ export function providerConfigPath(serviceId) {
 
 export async function writeProviderConfig(config) {
   await ensureProviderDir();
+  assertPersistentProviderStorageReady({ requiresSecret: Boolean(config.source?.auth?.secret_value) });
   const sanitized = await sanitizeProviderConfig(config);
   await writePersistentProviderConfig(sanitized);
   await fs.writeFile(providerConfigPath(config.manifest.service_id), `${JSON.stringify(sanitized, null, 2)}\n`);

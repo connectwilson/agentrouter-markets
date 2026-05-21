@@ -5,6 +5,29 @@ export function persistenceEnabled() {
   return Boolean(process.env.DATABASE_URL);
 }
 
+export function persistentRegistryRequired() {
+  return process.env.ADN_REQUIRE_PERSISTENT_REGISTRY === "true" || Boolean(process.env.RENDER);
+}
+
+export function providerSecretPassphraseConfigured() {
+  return Boolean(process.env.ADN_PROVIDER_SECRET_PASSPHRASE);
+}
+
+export function assertPersistentProviderStorageReady({ requiresSecret = false } = {}) {
+  if (persistentRegistryRequired() && !persistenceEnabled()) {
+    const error = new Error("Persistent registry is required for hosted Provider Studio publishing. Configure DATABASE_URL instead of storing provider services in runtime memory.");
+    error.statusCode = 503;
+    error.code = "PERSISTENT_REGISTRY_REQUIRED";
+    throw error;
+  }
+  if ((persistentRegistryRequired() || persistenceEnabled()) && requiresSecret && !providerSecretPassphraseConfigured()) {
+    const error = new Error("ADN_PROVIDER_SECRET_PASSPHRASE is required to persist provider credentials. It is a platform encryption key, not a provider API key.");
+    error.statusCode = 503;
+    error.code = "PROVIDER_SECRET_PASSPHRASE_REQUIRED";
+    throw error;
+  }
+}
+
 export async function writePersistentProviderConfig(config) {
   if (!persistenceEnabled()) return false;
   const pool = await getPool();

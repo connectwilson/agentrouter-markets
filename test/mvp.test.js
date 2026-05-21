@@ -695,7 +695,9 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
 
 test("bootstrap can seed Nansen services from environment without validation", async () => {
   const previous = process.env.NANSEN_API_KEY;
+  const previousFlag = process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP;
   process.env.NANSEN_API_KEY = "test-nansen-key";
+  process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP = "true";
   try {
     const store = createMemoryStore();
     const seeded = await seedEnvProviderServices("http://127.0.0.1:8800", store);
@@ -711,42 +713,52 @@ test("bootstrap can seed Nansen services from environment without validation", a
   } finally {
     if (previous === undefined) delete process.env.NANSEN_API_KEY;
     else process.env.NANSEN_API_KEY = previous;
+    if (previousFlag === undefined) delete process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP;
+    else process.env.ADN_ENABLE_ENV_PROVIDER_BOOTSTRAP = previousFlag;
   }
 });
 
-test("bootstrap can seed and validate BlockBeats BTC ETF service from environment", async () => {
-  const previousKey = process.env.BLOCKBEATS_API_KEY;
-  const previousUrl = process.env.BLOCKBEATS_BTC_ETF_URL;
-  process.env.BLOCKBEATS_API_KEY = "demo-blockbeats-key";
+test("hosted publish requires persistent storage when the deployment requires it", async () => {
+  const previousRequired = process.env.ADN_REQUIRE_PERSISTENT_REGISTRY;
+  const previousDatabase = process.env.DATABASE_URL;
+  const previousPassphrase = process.env.ADN_PROVIDER_SECRET_PASSPHRASE;
+  process.env.ADN_REQUIRE_PERSISTENT_REGISTRY = "true";
+  delete process.env.DATABASE_URL;
+  process.env.ADN_PROVIDER_SECRET_PASSPHRASE = "stable-test-passphrase";
   try {
-    await withServer(async ({ server, baseUrl }) => {
-      process.env.BLOCKBEATS_BTC_ETF_URL = `${baseUrl}/mock/upstream/btc-etf`;
-      const seeded = await seedEnvProviderServices(baseUrl, server.store);
-      assert.ok(seeded.some((service) => service.service_id === "get_v1_data_btc_etf"));
-
-      const search = searchServices(server.store, { query: "btc_etf", verifiedOnly: true });
-      assert.equal(search.some((service) => service.service_id === "get_v1_data_btc_etf"), true);
-
-      const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+    await withServer(async ({ baseUrl }) => {
+      const response = await fetch(`${baseUrl}/studio/providers`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          task: "用 AgentRouter 查询 BTC ETF 数据",
-          max_price: "0.05"
+          mode: "hosted-http",
+          service_id: "persistent_required_demo",
+          provider_id: "provider_studio",
+          title: "Persistent Required Demo",
+          description_for_agent: "Use this service to verify hosted publish persistence guards.",
+          capabilities: "persistent_required_demo,data_service",
+          price: "0.01",
+          sample_request: "{}",
+          sample_data: "{\"ok\":true}",
+          summary: "Persistent required demo.",
+          upstream_url: "/mock/upstream/btc-etf",
+          upstream_method: "GET",
+          secret_name: "PROVIDER_SECRET",
+          secret_value: "demo-blockbeats-key",
+          auth_header: "api-key"
         })
       });
-      assert.equal(askResponse.status, 200);
-      const routed = await askResponse.json();
-      assert.equal(routed.ok, true);
-      assert.equal(routed.request.capability, "btc_etf");
-      assert.equal(routed.selected_service.service_id, "get_v1_data_btc_etf");
-      assert.equal(routed.result.data.data[0].date, "2026-05-20");
+      assert.equal(response.status, 503);
+      const payload = await response.json();
+      assert.equal(payload.error.code, "PERSISTENT_REGISTRY_REQUIRED");
     });
   } finally {
-    if (previousKey === undefined) delete process.env.BLOCKBEATS_API_KEY;
-    else process.env.BLOCKBEATS_API_KEY = previousKey;
-    if (previousUrl === undefined) delete process.env.BLOCKBEATS_BTC_ETF_URL;
-    else process.env.BLOCKBEATS_BTC_ETF_URL = previousUrl;
+    if (previousRequired === undefined) delete process.env.ADN_REQUIRE_PERSISTENT_REGISTRY;
+    else process.env.ADN_REQUIRE_PERSISTENT_REGISTRY = previousRequired;
+    if (previousDatabase === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousDatabase;
+    if (previousPassphrase === undefined) delete process.env.ADN_PROVIDER_SECRET_PASSPHRASE;
+    else process.env.ADN_PROVIDER_SECRET_PASSPHRASE = previousPassphrase;
   }
 });
 

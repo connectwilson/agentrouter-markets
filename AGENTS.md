@@ -33,4 +33,5 @@ AGENT_ROUTER_URL=http://127.0.0.1:8800 node bin/agent-router.js ask "查询标�
 
 - The product is not just an API directory. Its wedge is agent-native capability routing plus post-call verification/trust feedback.
 - MCP connects tools after humans install them; this MVP focuses on discovery, zero preconfiguration for the demand agent, paid invocation, and service quality feedback.
+- Do not propose hardcoding provider API keys in deployment environment variables as the long-term or normal provider onboarding path. Provider-owned credentials must come through Provider Studio/onboarding and be stored as provider secrets in the registry/persistence layer. Environment variables are only acceptable for platform-level bootstrap/config or temporary local tests, not for adding each new provider service.
 - Skills should stay short. Stable project context belongs in this file and `docs/`; transient run state belongs in `docs/STATUS.md`.
