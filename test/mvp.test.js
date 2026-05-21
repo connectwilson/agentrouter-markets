@@ -74,6 +74,13 @@ test("discovery connector searches, previews, invokes, and records feedback", as
 
     const feedback = await connector.getFeedback("chain_fund_flow_7d_base");
     assert.equal(feedback.length, 1);
+
+    const statsResponse = await fetch(`${baseUrl}/agent-router/stats`);
+    assert.equal(statsResponse.status, 200);
+    const stats = await statsResponse.json();
+    assert.equal(stats.registered_services, 2);
+    assert.equal(stats.total_calls, 1);
+    assert.equal(stats.services.find((service) => service.service_id === "chain_fund_flow_7d_base").total_calls, 1);
   });
 });
 

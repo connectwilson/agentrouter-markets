@@ -71,6 +71,38 @@ export async function listPersistentProviderConfigs() {
   return result.rows.map((row) => row.config);
 }
 
+export async function writePersistentServiceEvent({ eventType, serviceId, requestId, event }) {
+  if (!persistenceEnabled()) return false;
+  const pool = await getPool();
+  await ensureSchema(pool);
+  await pool.query(
+    `insert into adn_service_events (event_type, service_id, request_id, event, created_at)
+     values ($1, $2, $3, $4::jsonb, coalesce(($4::jsonb->>'created_at')::timestamptz, now()))`,
+    [eventType, serviceId || null, requestId || null, JSON.stringify(event)]
+  );
+  return true;
+}
+
+export async function listPersistentServiceEvents({ limit = 10000 } = {}) {
+  if (!persistenceEnabled()) return [];
+  const pool = await getPool();
+  await ensureSchema(pool);
+  const result = await pool.query(
+    `select event_type, service_id, request_id, event, created_at
+     from adn_service_events
+     order by created_at asc, event_id asc
+     limit $1`,
+    [Math.max(1, Math.min(100000, Number(limit) || 10000))]
+  );
+  return result.rows.map((row) => ({
+    event_type: row.event_type,
+    service_id: row.service_id,
+    request_id: row.request_id,
+    event: row.event,
+    created_at: row.created_at
+  }));
+}
+
 export async function deletePersistentProviderSecret(secretRef) {
   if (!persistenceEnabled() || !secretRef) return false;
   const pool = await getPool();
@@ -127,6 +159,17 @@ async function ensureSchema(pool) {
       encrypted jsonb not null,
       updated_at timestamptz not null default now()
     );
+    create table if not exists adn_service_events (
+      event_id bigserial primary key,
+      event_type text not null,
+      service_id text,
+      request_id text,
+      event jsonb not null,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists adn_service_events_service_idx on adn_service_events(service_id);
+    create index if not exists adn_service_events_type_idx on adn_service_events(event_type);
+    create index if not exists adn_service_events_request_idx on adn_service_events(request_id);
   `);
   schemaReady = true;
 }

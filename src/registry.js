@@ -5,6 +5,7 @@ import { normalizeEndpoint } from "./http-utils.js";
 import { suggestCapabilities } from "./id-utils.js";
 import { createSettlementReceipt } from "./payment-adapter.js";
 import { normalizeConsumerFeedback } from "./verifier.js";
+import { listPersistentServiceEvents, writePersistentServiceEvent } from "./persistence.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -247,6 +248,12 @@ export async function invokePaidService(store, serviceId, input, budget) {
   record.feedback_events.push(feedback);
   store.feedbackEvents.push(feedback);
   store.invocationLogs.push({ service_id: serviceId, input, feedback });
+  await writePersistentServiceEvent({
+    eventType: "operational_feedback",
+    serviceId,
+    requestId: feedback.request_id,
+    event: feedback
+  });
 
   return {
     statusCode: paidResponse.status,
@@ -303,12 +310,78 @@ export function recordConsumerFeedback(store, body = {}) {
     created_at: new Date().toISOString()
   };
   store.feedbackEvents.push(event);
+  writePersistentServiceEvent({
+    eventType: "consumer_feedback",
+    serviceId,
+    requestId,
+    event
+  }).catch(() => {});
   return {
     ok: true,
     service_id: serviceId,
     request_id: requestId,
     consumer_feedback: consumerFeedback,
     trust: summarizeTrust(record)
+  };
+}
+
+export async function hydratePersistentServiceEvents(store) {
+  const events = await listPersistentServiceEvents();
+  for (const row of events) {
+    const event = row.event;
+    if (row.event_type === "operational_feedback") {
+      const record = store.services.get(row.service_id);
+      if (record && !record.feedback_events.some((item) => item.request_id === event.request_id && item.payment_tx === event.payment_tx)) {
+        record.feedback_events.push(event);
+      }
+      if (!store.feedbackEvents.some((item) => item.request_id === event.request_id && item.payment_tx === event.payment_tx)) {
+        store.feedbackEvents.push(event);
+      }
+      continue;
+    }
+    if (row.event_type === "consumer_feedback") {
+      const record = store.services.get(row.service_id);
+      if (record) {
+        const existing = [...record.feedback_events].reverse().find((item) => item.request_id === row.request_id);
+        if (existing) {
+          existing.consumer_feedback = event.consumer_feedback;
+          existing.consumer_rating = event.consumer_feedback?.consumer_score ?? existing.consumer_rating;
+        } else if (!record.feedback_events.some((item) => item.request_id === row.request_id && item.status === "consumer_feedback_only")) {
+          record.feedback_events.push({
+            event_version: "agent_service_feedback_v1",
+            request_id: row.request_id,
+            service_id: row.service_id,
+            provider_id: record.manifest.provider.provider_id,
+            consumer_id: event.consumer_id,
+            status: "consumer_feedback_only",
+            schema_valid: null,
+            latency_ms: null,
+            consumer_rating: event.consumer_feedback?.consumer_score ?? null,
+            consumer_feedback: event.consumer_feedback,
+            created_at: event.created_at
+          });
+        }
+      }
+      if (!store.feedbackEvents.some((item) => item.event_version === event.event_version && item.request_id === event.request_id && item.consumer_id === event.consumer_id)) {
+        store.feedbackEvents.push(event);
+      }
+      continue;
+    }
+    if (row.event_type === "route_observation") {
+      if (!store.routeObservations.some((item) => item.observation_id === event.observation_id)) {
+        store.routeObservations.push(event);
+      }
+      continue;
+    }
+    if (row.event_type === "evidence") {
+      if (!store.evidenceEvents.some((item) => item.trace_hash === event.trace_hash)) {
+        store.evidenceEvents.push(event);
+      }
+    }
+  }
+  return {
+    ok: true,
+    loaded: events.length
   };
 }
 

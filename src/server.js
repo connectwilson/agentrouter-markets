@@ -1,10 +1,10 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
-import { createMemoryStore, publicServiceRecord } from "./store.js";
+import { createMemoryStore, publicServiceRecord, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
+import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
@@ -39,6 +39,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/agent-router/health") {
     sendJson(res, 200, { ok: true, service: "agent-router" });
+    return;
+  }
+
+  if (req.method === "GET" && (url.pathname === "/stats" || url.pathname === "/agent-router/stats")) {
+    sendJson(res, 200, summarizeRegistryStats(store));
     return;
   }
 
@@ -677,6 +682,7 @@ export async function seedDemoService(serverUrl, store) {
 export async function bootstrapServer(server, baseUrl) {
   await seedDemoService(baseUrl, server.store);
   await loadProviderConfigs(server.store, baseUrl, { validate: true });
+  await hydratePersistentServiceEvents(server.store);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -3,6 +3,7 @@ import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.j
 import { createPaymentQuote } from "./payment-adapter.js";
 import { createEvidenceEnvelope } from "./evidence.js";
 import { summarizeTrust } from "./store.js";
+import { writePersistentServiceEvent } from "./persistence.js";
 
 export const ROUTER_STATUSES = {
   READY: "ready_to_route",
@@ -358,6 +359,12 @@ export async function routeCapabilityRequest(store, {
     verification
   });
   store.evidenceEvents.push(evidence);
+  writePersistentServiceEvent({
+    eventType: "evidence",
+    serviceId: selected.service_id,
+    requestId: invocation.body.result?.request_id,
+    event: evidence
+  }).catch(() => {});
   const observation = recordRouteObservation(store, {
     status: "routed",
     request,
@@ -772,6 +779,12 @@ function recordRouteObservation(store, {
     }
   };
   store.routeObservations.push(observation);
+  writePersistentServiceEvent({
+    eventType: "route_observation",
+    serviceId: selected?.service_id || null,
+    requestId: invocation?.body?.result?.request_id || null,
+    event: observation
+  }).catch(() => {});
   return observation;
 }
 

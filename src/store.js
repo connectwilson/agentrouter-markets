@@ -131,6 +131,31 @@ export function summarizeQuality(record) {
   };
 }
 
+export function summarizeRegistryStats(store) {
+  const services = [...store.services.values()].map((record) => {
+    const trust = summarizeTrust(record);
+    return {
+      service_id: record.manifest.service_id,
+      title: record.manifest.title,
+      provider_id: record.manifest.provider.provider_id,
+      verification_status: record.verification_status,
+      total_calls: trust.operational_feedback_count,
+      consumer_feedback_count: trust.consumer_feedback_count,
+      trust_score: trust.trust_score
+    };
+  });
+  return {
+    stats_version: "agent_router_registry_stats_v1",
+    registered_services: services.length,
+    verified_services: services.filter((service) => service.verification_status === "verified").length,
+    total_calls: services.reduce((sum, service) => sum + service.total_calls, 0),
+    total_consumer_feedback: services.reduce((sum, service) => sum + service.consumer_feedback_count, 0),
+    route_observations: store.routeObservations?.length || 0,
+    evidence_events: store.evidenceEvents?.length || 0,
+    services
+  };
+}
+
 function latencyScore(averageLatencyMs) {
   if (averageLatencyMs == null) return 0.8;
   if (averageLatencyMs <= 250) return 1;
