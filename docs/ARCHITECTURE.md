@@ -4,6 +4,7 @@
 
 - Provider Studio: human-facing service onboarding GUI.
 - Registry: stores service manifests, provider metadata, validation status, and feedback events.
+- Persistent Registry: optional Postgres-backed provider config and encrypted secret storage, enabled by `DATABASE_URL`.
 - Connector API: agent-facing primitives for search, manifest, preview, paid invocation, and feedback.
 - AgentRouter: higher-level routing endpoint that accepts a natural-language task and performs search -> selection -> invocation -> summary.
 - Route Observations: lightweight offchain records of structured routing decisions, candidate scores, selected service, verification outcome, and feedback hashes for future ranking improvements.
@@ -14,6 +15,7 @@
 
 - Demand agents should not choose payment target or amount directly. Invocation derives those from the service manifest and provider challenge.
 - Provider secrets stay server-side in provider config/runtime. They should not be exposed to demand agents or Skill files.
+- Hosted provider credentials are encrypted before persistence. `ADN_PROVIDER_SECRET_PASSPHRASE` is the deployment key and must remain stable across restarts.
 - AgentRouter returns routing metadata so the main agent can inspect which service was selected, what input was used, and whether schema validation passed.
 - Public Skills should call an HTTP endpoint, not a local filesystem path, when used from hosted Claude-like environments.
 

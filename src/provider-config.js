@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { writeProviderSecret } from "./provider-secrets.js";
+import { listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
 
 export const PROVIDER_DIR = path.resolve(process.env.ADN_PROVIDER_DIR || "providers");
 
@@ -16,27 +17,34 @@ export function providerConfigPath(serviceId) {
 export async function writeProviderConfig(config) {
   await ensureProviderDir();
   const sanitized = await sanitizeProviderConfig(config);
+  await writePersistentProviderConfig(sanitized);
   await fs.writeFile(providerConfigPath(config.manifest.service_id), `${JSON.stringify(sanitized, null, 2)}\n`);
   return providerConfigPath(config.manifest.service_id);
 }
 
 export async function readProviderConfig(serviceId) {
+  const persistent = await readPersistentProviderConfig(serviceId);
+  if (persistent) return persistent;
   const content = await fs.readFile(providerConfigPath(serviceId), "utf8");
   return JSON.parse(content);
 }
 
 export async function listProviderConfigs() {
+  const persistent = await listPersistentProviderConfigs();
   try {
     await ensureProviderDir();
     const files = await fs.readdir(PROVIDER_DIR);
-    const configs = [];
+    const seen = new Set(persistent.map((config) => config.manifest?.service_id).filter(Boolean));
+    const configs = [...persistent];
     for (const file of files.filter((name) => name.endsWith(".json"))) {
       const content = await fs.readFile(path.join(PROVIDER_DIR, file), "utf8");
-      configs.push(JSON.parse(content));
+      const config = JSON.parse(content);
+      if (seen.has(config.manifest?.service_id)) continue;
+      configs.push(config);
     }
     return configs;
   } catch {
-    return [];
+    return persistent;
   }
 }
 

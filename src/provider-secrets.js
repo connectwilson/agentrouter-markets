@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ADN_DIR, ensureAdnDir } from "./wallet.js";
+import { readPersistentProviderSecret, writePersistentProviderSecret } from "./persistence.js";
 
 export const PROVIDER_SECRETS_PATH = path.join(ADN_DIR, "provider-secrets.json");
 export const PROVIDER_SECRET_KEY_PATH = path.join(ADN_DIR, "provider-secret.key");
@@ -11,7 +12,9 @@ export async function writeProviderSecret({ serviceId, secretName, secretValue }
   await ensureAdnDir();
   const secrets = await readSecretStoreRaw();
   const secretRef = `${serviceId}:${secretName}`;
-  secrets[secretRef] = encryptSecret(secretValue, await getProviderSecretPassphrase());
+  const encrypted = encryptSecret(secretValue, await getProviderSecretPassphrase());
+  secrets[secretRef] = encrypted;
+  await writePersistentProviderSecret(secretRef, encrypted);
   await fs.writeFile(PROVIDER_SECRETS_PATH, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
   return secretRef;
 }
@@ -19,7 +22,7 @@ export async function writeProviderSecret({ serviceId, secretName, secretValue }
 export async function readProviderSecret(secretRef) {
   if (!secretRef) return "";
   const secrets = await readSecretStoreRaw();
-  const encrypted = secrets[secretRef];
+  const encrypted = await readPersistentProviderSecret(secretRef) || secrets[secretRef];
   if (!encrypted) {
     throw new Error(`Provider secret ${secretRef} was not found in local secret store.`);
   }

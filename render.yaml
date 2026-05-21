@@ -13,3 +13,7 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: ADN_PROVIDER_SECRET_PASSPHRASE
+        sync: false

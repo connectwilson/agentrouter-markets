@@ -10,6 +10,7 @@ It demonstrates:
 - Sample response preview
 - Provider onboarding validation
 - Hosted HTTP Provider Runtime with private Provider Secret
+- Optional Postgres-backed persistent registry and encrypted provider secret vault
 - x402-style HTTP 402 payment challenge and retry flow
 - Local Alice Agent Wallet with budget policy
 - Agent-friendly `agent_data_envelope_v1` response
@@ -72,6 +73,21 @@ Open the Provider Studio GUI:
 ```text
 http://127.0.0.1:8787/studio
 ```
+
+## Persistent Registry
+
+By default, the MVP uses in-memory registry state plus local provider files. That is fine for local development, but hosted instances can restart and lose runtime files.
+
+For production-style deployments, set:
+
+```text
+DATABASE_URL=postgres://...
+ADN_PROVIDER_SECRET_PASSPHRASE=<stable-32+-char-secret>
+```
+
+When `DATABASE_URL` is present, Provider Studio writes provider configs to Postgres and stores provider credentials as encrypted secret records. On every restart, AgentRouter reloads registered providers from the database, so a provider only needs to publish once.
+
+`ADN_PROVIDER_SECRET_PASSPHRASE` must stay stable across deploys. Rotating it without re-encrypting secrets will make existing provider credentials unreadable.
 
 ## CLI Connector
 
