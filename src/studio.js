@@ -1,6 +1,6 @@
 import { normalizeEndpoint, parseCapabilities, parseMaybeJson } from "./http-utils.js";
 import { normalizeId, suggestCapabilities } from "./id-utils.js";
-import { createHostedHttpProviderConfig, createStaticProviderConfig, writeProviderConfig } from "./provider-config.js";
+import { createHostedHttpProviderConfig, createStaticProviderConfig, deleteProviderConfig, writeProviderConfig } from "./provider-config.js";
 import { findDuplicateService, registerService, unregisterService, validateService } from "./registry.js";
 import { publicServiceRecord } from "./store.js";
 
@@ -57,6 +57,12 @@ export async function createProviderFromStudio(body, store, baseUrl) {
   const validation = await validateService(store, config.manifest.service_id);
   if (!validation.ok) {
     unregisterService(store, config.manifest.service_id);
+    await deleteProviderConfig(config.manifest.service_id);
+    const error = new Error("Provider validation failed. The service was not registered because the API endpoint did not return a valid paid AgentRouter response.");
+    error.statusCode = 422;
+    error.code = "VALIDATION_FAILED";
+    error.validation = validation;
+    throw error;
   }
   return {
     ok: validation.ok,

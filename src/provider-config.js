@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { writeProviderSecret } from "./provider-secrets.js";
-import { listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
+import { deleteProviderSecret, writeProviderSecret } from "./provider-secrets.js";
+import { deletePersistentProviderConfig, listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
 
 export const PROVIDER_DIR = path.resolve(process.env.ADN_PROVIDER_DIR || "providers");
 
@@ -27,6 +27,25 @@ export async function readProviderConfig(serviceId) {
   if (persistent) return persistent;
   const content = await fs.readFile(providerConfigPath(serviceId), "utf8");
   return JSON.parse(content);
+}
+
+export async function deleteProviderConfig(serviceId) {
+  let config = null;
+  try {
+    config = await readProviderConfig(serviceId);
+  } catch {
+    // It may only exist in one backing store; still delete the known paths.
+  }
+  await deletePersistentProviderConfig(serviceId);
+  if (config?.source?.auth?.secret_ref) {
+    await deleteProviderSecret(config.source.auth.secret_ref);
+  }
+  try {
+    await fs.rm(providerConfigPath(serviceId), { force: true });
+  } catch {
+    // Best-effort cleanup.
+  }
+  return true;
 }
 
 export async function listProviderConfigs() {

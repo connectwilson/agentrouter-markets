@@ -1,6 +1,6 @@
 import { normalizeEndpoint } from "./http-utils.js";
 import { normalizeId, suggestCapabilities } from "./id-utils.js";
-import { createHostedHttpProviderConfig, writeProviderConfig } from "./provider-config.js";
+import { createHostedHttpProviderConfig, deleteProviderConfig, writeProviderConfig } from "./provider-config.js";
 import { findDuplicateService, registerService, unregisterService, validateService } from "./registry.js";
 import { publicServiceRecord } from "./store.js";
 
@@ -141,13 +141,23 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const duplicate = store.services.get(config.manifest.service_id) || findDuplicateService(store, config.manifest);
       if (duplicate) {
         const validation = duplicate.validation_runs?.at(-1) || { ok: duplicate.verification_status === "verified" };
+        if (validation.ok !== true) {
+          failed.push({
+            service_id: config.manifest.service_id,
+            existing_service_id: duplicate.manifest.service_id,
+            error: "EXISTING_SERVICE_NOT_VERIFIED",
+            message: "A matching service already exists but is not verified. Fix the endpoint/auth/request body and publish again.",
+            validation
+          });
+          continue;
+        }
         published.push({
-          ok: validation.ok === true,
+          ok: true,
           service_id: duplicate.manifest.service_id,
           requested_service_id: config.manifest.service_id,
           already_registered: true,
           duplicate_reason: duplicate.manifest.service_id === config.manifest.service_id ? "service_id" : "same_provider_source",
-          warning: validation.ok === true ? null : "EXISTING_SERVICE_NOT_VERIFIED",
+          warning: null,
           registration: publicServiceRecord(duplicate),
           validation
         });
@@ -156,10 +166,21 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const configPath = await writeProviderConfig(config);
       const record = registerService(store, config.manifest, baseUrl);
       const validation = await validateService(store, config.manifest.service_id);
+      if (!validation.ok) {
+        unregisterService(store, config.manifest.service_id);
+        await deleteProviderConfig(config.manifest.service_id);
+        failed.push({
+          service_id: config.manifest.service_id,
+          error: "VALIDATION_FAILED",
+          message: "Service was not registered because validation failed. Confirm the API endpoint, auth, request body, and JSON response shape.",
+          validation
+        });
+        continue;
+      }
       published.push({
-        ok: validation.ok,
+        ok: true,
         service_id: config.manifest.service_id,
-        warning: validation.ok ? null : "VALIDATION_FAILED_SERVICE_REGISTERED_UNVERIFIED",
+        warning: null,
         provider_config_path: configPath,
         registration: publicServiceRecord(record),
         validation
@@ -168,11 +189,20 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       const existing = store.services.get(draft.service_id);
       if (existing && /already registered/i.test(error.message)) {
         const validation = existing.validation_runs?.at(-1) || { ok: existing.verification_status === "verified" };
+        if (validation.ok !== true) {
+          failed.push({
+            service_id: draft.service_id,
+            error: "EXISTING_SERVICE_NOT_VERIFIED",
+            message: "A matching service already exists but is not verified. Fix the endpoint/auth/request body and publish again.",
+            validation
+          });
+          continue;
+        }
         published.push({
-          ok: validation.ok === true,
+          ok: true,
           service_id: draft.service_id,
           already_registered: true,
-          warning: validation.ok === true ? null : "EXISTING_SERVICE_NOT_VERIFIED",
+          warning: null,
           registration: publicServiceRecord(existing),
           validation
         });

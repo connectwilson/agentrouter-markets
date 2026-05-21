@@ -38,7 +38,7 @@ Last updated: 2026-05-21
 - `mcpb validate mcpb/agentrouter` passes and `mcpb pack mcpb/agentrouter` succeeds.
 - Added publish-ready npm/npx MCP package source in `packages/agentrouter-mcp` with target package name `@agentrouter/mcp`.
 - Added `npm run mcp:npm:check` and `npm run mcp:npm:pack` to validate the npm package before publication.
-- Provider configs that fail validation now reload as unverified but routable services instead of disappearing at restart. This lets real paid APIs prove discovery/routing even when upstream credentials or entitlements still need work.
+- Provider Studio now treats validation as a registration gate: services are only published when the endpoint can be invoked and returns a valid AgentRouter envelope. Failed API calls are reported with validation details and are not persisted into the registry.
 - Imported provider manifests now include inferred input schemas and an `agent_data_service_contract_v1` block with example questions, shape summaries, and quality expectations.
 - Data quality verification now records deterministic checks for schema, envelope, freshness, coverage, empty result, confidence, data shape, and an overall quality score. Trust snapshots include freshness, coverage, and agent-friendliness signals.
 - Route failures now return `failure_explanation` so clients can distinguish "no service found" from "service found and invoked, but upstream rejected the request."

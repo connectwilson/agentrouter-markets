@@ -30,6 +30,14 @@ export async function readPersistentProviderConfig(serviceId) {
   return result.rows[0]?.config || null;
 }
 
+export async function deletePersistentProviderConfig(serviceId) {
+  if (!persistenceEnabled()) return false;
+  const pool = await getPool();
+  await ensureSchema(pool);
+  await pool.query("delete from adn_provider_configs where service_id = $1", [serviceId]);
+  return true;
+}
+
 export async function listPersistentProviderConfigs() {
   if (!persistenceEnabled()) return [];
   const pool = await getPool();
@@ -38,6 +46,14 @@ export async function listPersistentProviderConfigs() {
     "select config from adn_provider_configs order by updated_at asc, service_id asc"
   );
   return result.rows.map((row) => row.config);
+}
+
+export async function deletePersistentProviderSecret(secretRef) {
+  if (!persistenceEnabled() || !secretRef) return false;
+  const pool = await getPool();
+  await ensureSchema(pool);
+  await pool.query("delete from adn_provider_secrets where secret_ref = $1", [secretRef]);
+  return true;
 }
 
 export async function writePersistentProviderSecret(secretRef, encrypted) {

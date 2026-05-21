@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ADN_DIR, ensureAdnDir } from "./wallet.js";
-import { readPersistentProviderSecret, writePersistentProviderSecret } from "./persistence.js";
+import { deletePersistentProviderSecret, readPersistentProviderSecret, writePersistentProviderSecret } from "./persistence.js";
 
 export const PROVIDER_SECRETS_PATH = path.join(ADN_DIR, "provider-secrets.json");
 export const PROVIDER_SECRET_KEY_PATH = path.join(ADN_DIR, "provider-secret.key");
@@ -27,6 +27,16 @@ export async function readProviderSecret(secretRef) {
     throw new Error(`Provider secret ${secretRef} was not found in local secret store.`);
   }
   return decryptSecret(encrypted, await getProviderSecretPassphrase());
+}
+
+export async function deleteProviderSecret(secretRef) {
+  if (!secretRef) return false;
+  const secrets = await readSecretStoreRaw();
+  delete secrets[secretRef];
+  await deletePersistentProviderSecret(secretRef);
+  await ensureAdnDir();
+  await fs.writeFile(PROVIDER_SECRETS_PATH, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  return true;
 }
 
 async function readSecretStoreRaw() {

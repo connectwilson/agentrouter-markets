@@ -258,6 +258,9 @@ export async function loadProviderConfigs(store, baseUrl, { validate = true } = 
     if (validate) {
       try {
         validation = await validateService(store, manifest.service_id);
+        if (!validation.ok) {
+          unregisterService(store, manifest.service_id);
+        }
       } catch (error) {
         validation = storeValidation(record, {
           ok: false,
@@ -266,6 +269,7 @@ export async function loadProviderConfigs(store, baseUrl, { validate = true } = 
           message: error.message,
           created_at: new Date().toISOString()
         });
+        unregisterService(store, manifest.service_id);
       }
     }
     loaded.push({ service_id: manifest.service_id, record, validation });

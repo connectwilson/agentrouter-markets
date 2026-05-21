@@ -20,7 +20,8 @@ export function createServer({ store = createMemoryStore(), baseUrl = "" } = {})
         error: {
           code: error.code || (error.statusCode ? "REQUEST_ERROR" : "INTERNAL_ERROR"),
           message: error.message
-        }
+        },
+        validation: error.validation
       });
     }
   });
@@ -86,7 +87,7 @@ async function routeRequest(req, res, store, baseUrl) {
   if (req.method === "POST" && url.pathname === "/studio/import/publish") {
     const body = await readJson(req);
     const result = await publishApiDrafts(body, store, baseUrl);
-    sendJson(res, result.ok ? 201 : 207, result);
+    sendJson(res, result.ok ? 201 : 422, result);
     return;
   }
 

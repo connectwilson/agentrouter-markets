@@ -851,13 +851,13 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ drafts: discovered.drafts, publish_scope: "local_only" })
     });
-    assert.equal(publishResponse.status, 201);
+    assert.equal(publishResponse.status, 422);
     const published = await publishResponse.json();
-    assert.equal(published.ok, true);
-    assert.equal(published.published.length, 1);
-    assert.equal(published.published[0].service_id, "post_api_v1_smart_money_holdings");
-    assert.equal(published.published[0].warning, "VALIDATION_FAILED_SERVICE_REGISTERED_UNVERIFIED");
-    assert.equal(published.published[0].validation.ok, false);
+    assert.equal(published.ok, false);
+    assert.equal(published.published.length, 0);
+    assert.equal(published.failed[0].service_id, "post_api_v1_smart_money_holdings");
+    assert.equal(published.failed[0].error, "VALIDATION_FAILED");
+    assert.equal(published.failed[0].validation.ok, false);
 
     const routeResponse = await fetch(`${baseUrl}/agent-router/request`, {
       method: "POST",
@@ -874,23 +874,20 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     assert.equal(routeResponse.status, 200);
     const routed = await routeResponse.json();
     assert.equal(routed.ok, false);
-    assert.equal(routed.status, "route_failed");
-    assert.equal(routed.selected_service.service_id, "post_api_v1_smart_money_holdings");
-    assert.equal(routed.error.code, "UPSTREAM_ERROR");
+    assert.equal(routed.status, "no_match");
     assert.equal(routed.observation.observation_version, "agent_router_route_observation_v1");
-    assert.equal(routed.observation.status, "route_failed");
+    assert.equal(routed.observation.status, "no_match");
     assert.equal(routed.observation.request.capability, "smart_money_holdings");
-    assert.equal(routed.observation.candidates_considered, 1);
-    assert.equal(routed.failure_explanation.code, "UPSTREAM_ERROR");
+    assert.equal(routed.observation.candidates_considered, 0);
 
-    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=route_failed`);
+    const observationsResponse = await fetch(`${baseUrl}/agent-router/observations?status=no_match`);
     assert.equal(observationsResponse.status, 200);
     const observations = await observationsResponse.json();
     assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));
   });
 });
 
-test("AgentRouter routes newly published unverified smart-money netflow services", async () => {
+test("AgentRouter refuses to publish unreachable smart-money netflow services", async () => {
   await withServer(async ({ server, baseUrl }) => {
     const endpointUrl = `${baseUrl}/api/v1/smart-money/netflow`;
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
@@ -913,13 +910,14 @@ test("AgentRouter routes newly published unverified smart-money netflow services
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ drafts: discovered.drafts, publish_scope: "local_only" })
     });
-    assert.equal(publishResponse.status, 201);
+    assert.equal(publishResponse.status, 422);
     const published = await publishResponse.json();
-    assert.equal(published.ok, true);
-    assert.equal(published.published[0].service_id, "post_api_v1_smart_money_netflow");
+    assert.equal(published.ok, false);
+    assert.equal(published.failed[0].service_id, "post_api_v1_smart_money_netflow");
+    assert.equal(published.failed[0].error, "VALIDATION_FAILED");
 
     const search = searchServices(server.store, { query: "smart money netflow", verifiedOnly: false });
-    assert.ok(search.some((service) => service.service_id === "post_api_v1_smart_money_netflow"));
+    assert.equal(search.some((service) => service.service_id === "post_api_v1_smart_money_netflow"), false);
 
     const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
       method: "POST",
@@ -932,10 +930,7 @@ test("AgentRouter routes newly published unverified smart-money netflow services
     assert.equal(askResponse.status, 200);
     const routed = await askResponse.json();
     assert.equal(routed.ok, false);
-    assert.equal(routed.status, "route_failed");
-    assert.equal(routed.selected_service.service_id, "post_api_v1_smart_money_netflow");
-    assert.deepEqual(routed.input.chains, ["ethereum"]);
-    assert.equal(routed.failure_explanation.code, "UPSTREAM_ERROR");
+    assert.equal(routed.status, "no_match");
   });
 });
 
@@ -965,7 +960,7 @@ test("Provider Studio surfaces hosted HTTP upstream failures during validation",
     });
     assert.equal(studioResponse.status, 422);
     const payload = await studioResponse.json();
-    assert.equal(payload.ok, false);
+    assert.equal(payload.error.code, "VALIDATION_FAILED");
     assert.equal(payload.validation.status, 502);
     assert.equal(payload.validation.ok, false);
     assert.ok(payload.validation.schema_errors.length);
@@ -1003,6 +998,7 @@ test("Provider runtime reports non-JSON upstream responses clearly", async () =>
     });
     assert.equal(studioResponse.status, 422);
     const payload = await studioResponse.json();
+    assert.equal(payload.error.code, "VALIDATION_FAILED");
     assert.equal(payload.validation.status, 502);
     assert.match(JSON.stringify(payload.validation), /UPSTREAM_NON_JSON_RESPONSE/);
   });
@@ -1029,7 +1025,7 @@ test("provider configs can be reloaded into a fresh registry after restart", asy
   });
 });
 
-test("failed provider configs reload as unverified but routable after restart", async () => {
+test("failed provider configs are not persisted or loaded after failed registration", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
     const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
@@ -1040,7 +1036,7 @@ test("failed provider configs reload as unverified but routable after restart", 
         service_id: "failed_reload_demo",
         provider_id: "provider_studio",
         title: "Failed Reload Demo",
-        description_for_agent: "Use this service to verify failed configs reload as unverified services.",
+        description_for_agent: "Use this service to verify failed configs are not persisted.",
         capabilities: "reload_failure_demo,data_service",
         price: "0.01",
         sample_request: "{\"asset\":\"ETH\"}",
@@ -1054,18 +1050,16 @@ test("failed provider configs reload as unverified but routable after restart", 
       })
     });
     assert.equal(studioResponse.status, 422);
-    const savedConfig = await fs.readFile(path.join(process.env.ADN_PROVIDER_DIR, "failed_reload_demo.json"), "utf8");
-    assert.ok(savedConfig.includes("failed_reload_demo"));
+    await assert.rejects(
+      fs.readFile(path.join(process.env.ADN_PROVIDER_DIR, "failed_reload_demo.json"), "utf8")
+    );
 
     const freshServer = createServer();
     await new Promise((resolve) => freshServer.listen(0, "127.0.0.1", resolve));
     const freshBaseUrl = `http://127.0.0.1:${freshServer.address().port}`;
     try {
       await loadProviderConfigs(freshServer.store, freshBaseUrl, { validate: true });
-      const record = freshServer.store.services.get("failed_reload_demo");
-      assert.ok(record);
-      assert.equal(record.verification_status, "failed");
-      assert.equal(record.validation_runs.at(-1).ok, false);
+      assert.equal(freshServer.store.services.has("failed_reload_demo"), false);
     } finally {
       await new Promise((resolve) => freshServer.close(resolve));
     }

@@ -880,7 +880,7 @@ function diagnoseNoMatch(store, { capability, params, constraints }) {
     next_actions: [
       "Check that the provider service was published to the same remote registry the client is using.",
       "Search /services/search for the expected service id or capability tag.",
-      "If the service is unverified, it can still route, but its title, tags, and sample shape must match the requested capability."
+      "If Provider Studio showed validation errors, fix the upstream API/auth/request body and publish again."
     ]
   };
 }
