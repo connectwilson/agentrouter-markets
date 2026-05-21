@@ -10,13 +10,14 @@ process.env.ADN_DIR = path.join(runtimeRoot, ".adn");
 process.env.ADN_PROVIDER_DIR = path.join(runtimeRoot, "providers");
 process.env.ADN_WALLET_PASSPHRASE = "test-passphrase";
 
-const { createServer, seedDemoService } = await import("../src/server.js");
-const { loadProviderConfigs } = await import("../src/registry.js");
+const { createServer, seedDemoService, seedEnvProviderServices } = await import("../src/server.js");
+const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
 const { readWallet } = await import("../src/wallet.js");
 const { createWalletPaymentProof } = await import("../src/payment.js");
 const { normalizeEndpoint } = await import("../src/http-utils.js");
+const { createMemoryStore } = await import("../src/store.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -690,6 +691,27 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
     assert.deepEqual(routed.input, { asset: "ETH", window: "24h" });
     assert.equal(routed.result.data.netflow_usd, 23456);
   });
+});
+
+test("bootstrap can seed Nansen services from environment without validation", async () => {
+  const previous = process.env.NANSEN_API_KEY;
+  process.env.NANSEN_API_KEY = "test-nansen-key";
+  try {
+    const store = createMemoryStore();
+    const seeded = await seedEnvProviderServices("http://127.0.0.1:8800", store);
+    assert.equal(seeded.length, 2);
+    assert.ok(store.services.has("nansen_smart_money_netflow"));
+    assert.ok(store.services.has("nansen_smart_money_holdings"));
+
+    const netflow = searchServices(store, { query: "ETH netflow" });
+    assert.ok(netflow.some((service) => service.service_id === "nansen_smart_money_netflow"));
+    const manifest = store.services.get("nansen_smart_money_netflow").manifest;
+    assert.equal(manifest.endpoint.url, "http://127.0.0.1:8800/provider/custom/nansen_smart_money_netflow");
+    assert.equal(JSON.stringify(manifest).includes("test-nansen-key"), false);
+  } finally {
+    if (previous === undefined) delete process.env.NANSEN_API_KEY;
+    else process.env.NANSEN_API_KEY = previous;
+  }
 });
 
 test("Provider Studio imports OpenAPI data endpoints into multiple services", async () => {
