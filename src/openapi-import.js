@@ -139,7 +139,7 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
         upstreamMethod: draft.method,
         secretName: draft.secret_name || "PROVIDER_SECRET",
         secretValue: draft.secret_value || "",
-        authHeader: draft.auth_header || "authorization",
+        authHeader: draft.auth_header || (draft.secret_value ? "auto" : "authorization"),
         summary: draft.summary
       });
       const duplicate = store.services.get(config.manifest.service_id) || findDuplicateService(store, config.manifest);
@@ -176,7 +176,7 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
         failed.push({
           service_id: config.manifest.service_id,
           error: "VALIDATION_FAILED",
-          message: "Service was not registered because validation failed. Confirm the API endpoint, auth, request body, and JSON response shape.",
+          message: summarizeValidationFailure(validation),
           validation
         });
         continue;
@@ -214,7 +214,8 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       }
       failed.push({
         service_id: draft.service_id,
-        error: error.message
+        error: error.code || "PUBLISH_ERROR",
+        message: error.message
       });
     }
   }
@@ -224,6 +225,31 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
     published,
     failed
   };
+}
+
+function summarizeValidationFailure(validation = {}) {
+  const providerCode = validation.provider_error?.code;
+  const providerMessage = validation.provider_error?.message;
+  if (providerCode === "UPSTREAM_ERROR") {
+    const upstream = validation.provider_error?.upstream_payload;
+    const upstreamCode = upstream?.code;
+    const upstreamReason = upstream?.reason;
+    if (upstreamCode === "UPSTREAM_NON_JSON_RESPONSE") {
+      return "The endpoint responded, but it did not return JSON. Use a JSON API endpoint or update the URL.";
+    }
+    if (upstreamReason === "auth_or_permission_error") {
+      return "The endpoint rejected authentication. Check the API key and auth header, or leave the header blank so AgentRouter can try common header names.";
+    }
+    if (upstreamReason === "non_success_status" || upstreamReason === "empty_error_payload") {
+      return upstream.message || "The endpoint returned an application-level error instead of usable data.";
+    }
+    return providerMessage || "The endpoint was reachable, but the upstream API rejected or failed the request.";
+  }
+  const resultCode = validation.result_errors?.[0]?.code;
+  if (resultCode === "RESULT_DATA_EMPTY") return "The endpoint returned empty data. Publish requires one real non-empty result.";
+  if (resultCode === "RESULT_DATA_PLACEHOLDER") return "The endpoint returned placeholder data. Publish requires a real result, not a shape-only sample.";
+  const schemaMessage = validation.schema_errors?.[0]?.message || validation.envelope_errors?.[0]?.message;
+  return schemaMessage || "Service was not registered because validation failed. Confirm the API endpoint, auth, request body, and JSON response shape.";
 }
 
 function shouldPublishToRemote({ body, baseUrl, remoteUrl }) {
@@ -364,7 +390,7 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
     method: method.toUpperCase(),
     path: routePath,
     upstream_url: upstreamUrl,
-    auth_header: inferAuthHeader(apiUrl),
+    auth_header: secretValue ? "auto" : inferAuthHeader(apiUrl),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
     sample_request: sampleRequest,
@@ -393,7 +419,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
     method: method.toUpperCase(),
     path: routePath,
     upstream_url: apiUrl,
-    auth_header: authHeader || inferAuthHeader(apiUrl),
+    auth_header: authHeader || (secretValue ? "auto" : inferAuthHeader(apiUrl)),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
     sample_request: sampleRequest,

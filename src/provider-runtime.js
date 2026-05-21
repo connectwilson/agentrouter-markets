@@ -270,44 +270,111 @@ export async function handleMockUpstreamApplicationError(_req, res) {
   });
 }
 
-async function callHostedHttpSource(config, input) {
-  const headers = { "content-type": "application/json" };
-  const secretValue = config.source.auth?.secret_value || await readProviderSecret(config.source.auth?.secret_ref);
-  if (config.source.auth?.mode === "header" && secretValue) {
-    headers[config.source.auth.header || "authorization"] = config.source.auth.header?.toLowerCase() === "authorization"
-      ? `Bearer ${secretValue}`
-      : secretValue;
+export async function handleMockUpstreamHeaderKey(req, res) {
+  if (req.headers["api-key"] !== "demo-provider-secret") {
+    sendJson(res, 401, {
+      error: "missing or invalid provider secret"
+    });
+    return;
   }
+  sendJson(res, 200, {
+    status: "success",
+    rows: [
+      {
+        metric: "sample_metric",
+        value: 42
+      }
+    ],
+    source: "mock_upstream_header_key"
+  });
+}
+
+async function callHostedHttpSource(config, input) {
+  const secretValue = config.source.auth?.secret_value || await readProviderSecret(config.source.auth?.secret_ref);
   const method = (config.source.upstream_method || "POST").toUpperCase();
-  const request = { method, headers };
-  let url = config.source.upstream_url;
+  const prepared = prepareHostedHttpRequest({
+    url: config.source.upstream_url,
+    method,
+    input
+  });
+  const authAttempts = buildAuthAttempts({
+    mode: config.source.auth?.mode,
+    header: config.source.auth?.header,
+    secretValue
+  });
+  let lastError = null;
+  for (const attempt of authAttempts) {
+    const request = {
+      method,
+      headers: {
+        "content-type": "application/json",
+        ...attempt.headers
+      }
+    };
+    if (prepared.body !== undefined) request.body = prepared.body;
+    const response = await fetch(prepared.url, request);
+    const payload = await parseUpstreamPayload(response);
+    const outcome = classifyUpstreamResponse(response, payload, attempt);
+    if (!outcome.upstream_error) return payload;
+    lastError = outcome;
+  }
+  return {
+    ...lastError,
+    attempted_auth_headers: authAttempts.map((attempt) => attempt.label).filter((label) => label !== "none")
+  };
+}
+
+function prepareHostedHttpRequest({ url, method, input }) {
+  let nextUrl = url;
   const consumedPathParams = new Set();
   for (const [key, value] of Object.entries(input || {})) {
     if (value === undefined || value === null) continue;
     const encodedKey = encodeURIComponent(key);
-    if (url.includes(`{${key}}`) || url.includes(`%7B${encodedKey}%7D`)) {
-      url = url
+    if (nextUrl.includes(`{${key}}`) || nextUrl.includes(`%7B${encodedKey}%7D`)) {
+      nextUrl = nextUrl
         .replaceAll(`{${key}}`, encodeURIComponent(String(value)))
         .replaceAll(`%7B${encodedKey}%7D`, encodeURIComponent(String(value)));
       consumedPathParams.add(key);
     }
   }
   if (method === "GET") {
-    const parsed = new URL(url);
+    const parsed = new URL(nextUrl);
     for (const [key, value] of Object.entries(input || {})) {
       if (consumedPathParams.has(key)) continue;
       if (value !== undefined && value !== null) parsed.searchParams.set(key, String(value));
     }
-    url = parsed.toString();
-  } else {
-    request.body = JSON.stringify(input);
+    return { url: parsed.toString() };
   }
-  const response = await fetch(url, request);
-  const payload = await parseUpstreamPayload(response);
+  return {
+    url: nextUrl,
+    body: JSON.stringify(input)
+  };
+}
+
+function buildAuthAttempts({ mode, header, secretValue }) {
+  if (mode !== "header" || !secretValue) return [{ label: "none", headers: {} }];
+  const normalized = String(header || "").trim().toLowerCase();
+  if (normalized && normalized !== "auto") {
+    return [{
+      label: normalized,
+      headers: { [normalized]: normalized === "authorization" ? `Bearer ${secretValue}` : secretValue }
+    }];
+  }
+  return [
+    { label: "authorization", headers: { authorization: `Bearer ${secretValue}` } },
+    { label: "x-api-key", headers: { "x-api-key": secretValue } },
+    { label: "api-key", headers: { "api-key": secretValue } },
+    { label: "apikey", headers: { apikey: secretValue } },
+    { label: "x-access-token", headers: { "x-access-token": secretValue } }
+  ];
+}
+
+function classifyUpstreamResponse(response, payload, attempt) {
   if (payload.non_json) {
     return {
       upstream_error: true,
       status: response.status,
+      auth_header: attempt.label,
       payload: {
         code: "UPSTREAM_NON_JSON_RESPONSE",
         content_type: payload.content_type,
@@ -319,6 +386,7 @@ async function callHostedHttpSource(config, input) {
     return {
       upstream_error: true,
       status: response.status,
+      auth_header: attempt.label,
       payload
     };
   }
@@ -327,10 +395,11 @@ async function callHostedHttpSource(config, input) {
     return {
       upstream_error: true,
       status: response.status,
+      auth_header: attempt.label,
       payload: applicationError
     };
   }
-  return payload;
+  return { upstream_error: false };
 }
 
 function detectApplicationError(payload) {

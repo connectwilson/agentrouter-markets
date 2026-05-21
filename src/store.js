@@ -20,6 +20,7 @@ export function publicServiceRecord(record) {
     verification_status: record.verification_status,
     trust: summarizeTrust(record),
     sample_response: record.manifest.sample_response,
+    validation_result_preview: record.validation_runs?.at(-1)?.result_preview || null,
     quality_profile: summarizeQuality(record)
   };
 }

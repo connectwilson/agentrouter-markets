@@ -156,7 +156,13 @@ export function searchServices(store, { query = "", capabilities = [], maxPrice,
       manifest.title,
       manifest.description_for_agent,
       ...(manifest.capabilities || []),
-      manifest.service_id
+      manifest.service_id,
+      manifest.agent_contract?.summary,
+      manifest.agent_contract?.request_shape_summary,
+      manifest.agent_contract?.response_shape_summary,
+      JSON.stringify(manifest.sample_request || {}),
+      JSON.stringify(manifest.sample_response?.data || {}),
+      JSON.stringify(record.validation_runs?.at(-1)?.result_preview || {})
     ].join(" ").toLowerCase();
 
     const matchCount = terms.filter((term) => haystack.includes(term)).length;

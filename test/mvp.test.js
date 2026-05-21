@@ -560,6 +560,41 @@ test("Provider Studio API creates and validates hosted-http service", async () =
   });
 });
 
+test("Provider Studio auto-detects common API key headers during validation", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "hosted-http",
+        service_id: "studio_auto_auth_header_demo",
+        provider_id: "provider_studio",
+        title: "Studio Auto Auth Header Demo",
+        description_for_agent: "Use this service to fetch a generic provider dataset with automatic auth header detection.",
+        capabilities: "data_service,provider_api_demo",
+        price: "0.01",
+        sample_request: "{}",
+        sample_data: "{\"status\":\"success\",\"rows\":[{\"metric\":\"sample_metric\",\"value\":42}]}",
+        summary: "Generic provider API returned one row.",
+        upstream_url: "/mock/upstream/header-key",
+        upstream_method: "GET",
+        secret_name: "PROVIDER_SECRET",
+        secret_value: "demo-provider-secret",
+        auth_header: ""
+      })
+    });
+    assert.equal(studioResponse.status, 201);
+    const payload = await studioResponse.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.validation.ok, true);
+    assert.equal(payload.validation.result_preview.rows[0].value, 42);
+    const config = JSON.parse(await fs.readFile(path.join(process.env.ADN_PROVIDER_DIR, "studio_auto_auth_header_demo.json"), "utf8"));
+    assert.equal(config.source.auth.header, "auto");
+    assert.equal(JSON.stringify(config).includes("demo-provider-secret"), false);
+  });
+});
+
 test("Provider Studio rejects duplicate or invalid service submissions", async () => {
   await withServer(async ({ baseUrl }) => {
     const invalid = await fetch(`${baseUrl}/studio/providers`, {
@@ -878,7 +913,7 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     const draft = discovered.drafts[0];
     assert.equal(draft.upstream_url, endpointUrl);
     assert.equal(draft.method, "POST");
-    assert.equal(draft.auth_header, "authorization");
+    assert.equal(draft.auth_header, "auto");
     assert.equal(draft.secret_name, "PROVIDER_SECRET");
     assert.ok(draft.capabilities.includes("data_service"));
     assert.deepEqual(draft.sample_request, {});
@@ -922,6 +957,50 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     assert.equal(observationsResponse.status, 200);
     const observations = await observationsResponse.json();
     assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));
+  });
+});
+
+test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        api_url: `${baseUrl}/api/v1/data/header-key`,
+        default_price: "0.01",
+        default_method: "GET",
+        secret_value: "demo-provider-secret",
+        auth_header: ""
+      })
+    });
+    assert.equal(discoverResponse.status, 200);
+    const discovered = await discoverResponse.json();
+    assert.equal(discovered.ok, true);
+    assert.equal(discovered.drafts[0].auth_header, "auto");
+
+    const publishResponse = await fetch(`${baseUrl}/studio/import/publish`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ drafts: discovered.drafts, publish_scope: "local_only" })
+    });
+    assert.equal(publishResponse.status, 201);
+    const published = await publishResponse.json();
+    assert.equal(published.ok, true);
+    assert.equal(published.published[0].service_id, "get_api_v1_data_header_key");
+
+    const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "Use AgentRouter to query header key sample metric data",
+        max_price: "0.05"
+      })
+    });
+    assert.equal(askResponse.status, 200);
+    const routed = await askResponse.json();
+    assert.equal(routed.ok, true);
+    assert.equal(routed.selected_service.service_id, "get_api_v1_data_header_key");
+    assert.equal(routed.result.data.rows[0].value, 42);
   });
 });
 

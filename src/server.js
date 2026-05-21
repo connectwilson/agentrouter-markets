@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, publicServiceRecord } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
-import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamSentiment } from "./provider-runtime.js";
+import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
 import { invokePaidService, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
@@ -301,6 +301,16 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/mock/upstream/app-error") {
     await handleMockUpstreamApplicationError(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/mock/upstream/header-key") {
+    await handleMockUpstreamHeaderKey(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/v1/data/header-key") {
+    await handleMockUpstreamHeaderKey(req, res);
     return;
   }
 

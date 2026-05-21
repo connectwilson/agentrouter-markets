@@ -362,24 +362,14 @@ function filterDynamicCandidates(candidates, intent) {
   const terms = intent.dynamic_terms || [];
   if (terms.length < 2) return candidates;
   return candidates.filter((service) => {
-    const haystack = [
-      service.service_id,
-      service.title,
-      service.description_for_agent,
-      ...(service.capabilities || [])
-    ].join(" ").toLowerCase();
+    const haystack = serviceSearchHaystack(service);
     return terms.every((term) => haystack.includes(term));
   });
 }
 
 export function selectService(candidates, intent) {
   const scored = candidates.map((service) => {
-    const haystack = [
-      service.service_id,
-      service.title,
-      service.description_for_agent,
-      ...(service.capabilities || [])
-    ].join(" ").toLowerCase();
+    const haystack = serviceSearchHaystack(service);
     let score = service.match_score || 0;
     if (intent.wants_address && /address|wallet/.test(haystack)) score += 3;
     if (intent.wants_liquidation && /liquidation|max pain|max-pain|derivatives|perp/.test(haystack)) score += 4;
@@ -390,6 +380,18 @@ export function selectService(candidates, intent) {
     return { service, score };
   }).sort((a, b) => b.score - a.score);
   return scored[0].service;
+}
+
+function serviceSearchHaystack(service) {
+  return [
+    service.service_id,
+    service.title,
+    service.description_for_agent,
+    ...(service.capabilities || []),
+    service.sample_response?.summary,
+    JSON.stringify(service.sample_response?.data || {}),
+    JSON.stringify(service.validation_result_preview || {})
+  ].join(" ").toLowerCase();
 }
 
 export function summarize(_task, envelope) {

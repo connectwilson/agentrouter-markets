@@ -33,7 +33,7 @@ export async function createProviderFromStudio(body, store, baseUrl) {
       upstreamMethod: normalizedBody.upstream_method || "POST",
       secretName: normalizedBody.secret_name || "PROVIDER_SECRET",
       secretValue: normalizedBody.secret_value || "",
-      authHeader: normalizedBody.auth_header || "authorization"
+      authHeader: normalizedBody.auth_header || (normalizedBody.secret_value ? "auto" : "authorization")
     })
     : createStaticProviderConfig({
       ...common,
@@ -208,17 +208,17 @@ export function studioHtml({ draft } = {}) {
         </div>
         <details>
           <summary>API key / auth</summary>
-          <p class="hint">Optional. Stored as an encrypted Provider Secret and never exposed in the service manifest.</p>
+          <p class="hint">Optional. Stored as an encrypted Provider Secret and never exposed in the service manifest. Leave header blank for generic auto-detection.</p>
           <label>API key or token
             <input name="import_secret_value" value="" />
           </label>
           <label>Header name
-            <input name="import_auth_header" value="" placeholder="auto-detect" />
+            <input name="import_auth_header" value="" placeholder="auto" />
           </label>
         </details>
         <div class="actions">
-          <button type="button" class="secondary" id="discover-api">Check API</button>
-          <button type="button" class="ghost" id="publish-drafts">Publish Selected</button>
+          <button type="button" class="secondary" id="discover-api">Import Endpoints</button>
+          <button type="button" class="ghost" id="publish-drafts">Verify & Publish Selected</button>
           <span class="status" id="status"></span>
         </div>
         <div class="draft-toolbar hidden" id="draft-toolbar">
@@ -226,7 +226,7 @@ export function studioHtml({ draft } = {}) {
           <button type="button" class="tiny-button" id="clear-drafts">Clear Selection</button>
           <span class="hint" id="selected-drafts-status">0 selected</span>
         </div>
-        <p class="flow-note">Select endpoint cards and click <strong>Publish Selected</strong>. AgentRouter auto-generates service name, routing tags, data contract, and runtime wrapper.</p>
+        <p class="flow-note">Select endpoint cards and click <strong>Verify & Publish Selected</strong>. AgentRouter auto-generates service name, routing tags, data contract, and runtime wrapper.</p>
         <p class="hint" id="import-status">Use a concrete endpoint for one API, or an OpenAPI/Swagger URL for many endpoints.</p>
         <div id="draft-list" class="draft-list"></div>
         <details>
@@ -324,7 +324,7 @@ export function studioHtml({ draft } = {}) {
               <input name="secret_name" value="${html(formDefaults.secretName)}" />
             </label>
           </details>
-          <p class="hint">Tokens are encrypted into the local Provider Secret store; manifests only keep a secret reference.</p>
+          <p class="hint">Tokens are encrypted into the local Provider Secret store; manifests only keep a secret reference. Use "auto" to try common auth headers during validation.</p>
         </fieldset>
       </details>
       <details>
@@ -543,6 +543,13 @@ export function studioHtml({ draft } = {}) {
       return message;
     }
 
+    function formatPublishFailures(failed) {
+      return failed.map((item) => {
+        const reason = item.message || item.validation?.result_errors?.[0]?.message || item.validation?.provider_error?.message || item.error || "Validation failed";
+        return item.service_id + ": " + reason;
+      }).join("; ");
+    }
+
     function setSingleServiceReady(ready, message = "") {
       singleServiceReady = Boolean(ready);
       publishService.disabled = !singleServiceReady;
@@ -693,7 +700,7 @@ export function studioHtml({ draft } = {}) {
           formMessage,
           payload.ok
             ? "Verified and published to " + (payload.remote_registry_url || "this registry") + ". Buyer agents can route to it now."
-            : "Not published to remote registry: " + ((payload.failed || []).map((item) => item.service_id + ": " + item.error).join("; ") || "Validation failed."),
+            : "Not published to remote registry: " + (formatPublishFailures(payload.failed || []) || "Validation failed."),
           payload.ok ? "success" : "error"
         );
         for (const item of payload.published || []) publishedServiceIds.add(item.service_id);
@@ -806,7 +813,7 @@ export function studioHtml({ draft } = {}) {
       const selected = selectedDraftCount();
       const total = discoveredDrafts.length;
       const published = discoveredDrafts.filter((draft) => draft.published).length;
-      publishDrafts.textContent = total ? "Publish " + selected + " Selected" : "Publish Selected";
+      publishDrafts.textContent = total ? "Verify & Publish " + selected + " Selected" : "Verify & Publish Selected";
       publishDrafts.disabled = total > 0 && selected === 0;
       selectedDraftsStatus.textContent = selected + " of " + total + " endpoints selected" + (published ? " · " + published + " published" : "");
       importStatus.textContent = total
@@ -895,9 +902,9 @@ export function studioHtml({ draft } = {}) {
       summaryInput.value = draft.summary || "";
       upstreamUrlInput.value = draft.upstream_url || "";
       upstreamMethodInput.value = draft.method || "GET";
-      authHeaderInput.value = draft.auth_header || "authorization";
       secretNameInput.value = draft.secret_name || "PROVIDER_SECRET";
       secretValueInput.value = draft.secret_value || importSecretValue.value || "";
+      authHeaderInput.value = draft.auth_header || (secretValueInput.value ? "auto" : "authorization");
       syncMode();
       syncEnvelopePreview();
       updateSidePanel({ selectedDraft: draft });
@@ -1005,6 +1012,7 @@ export function studioHtml({ draft } = {}) {
           '<div>Verified</div><div>' + escapeHtml(extra.batchPublishResult.published?.length || 0) + '</div>' +
           '<div>Failed</div><div>' + escapeHtml(extra.batchPublishResult.failed?.length || 0) + '</div>' +
           '<div>Routable services</div><div>' + escapeHtml((extra.batchPublishResult.published || []).map((item) => item.service_id).join(", ") || "-") + '</div>' +
+          '<div>Issues</div><div>' + escapeHtml(formatPublishFailures(extra.batchPublishResult.failed || []) || "-") + '</div>' +
           "</div></div>"
         );
       }
@@ -1126,7 +1134,7 @@ function defaultsFromDraft(draft) {
       summary: draft.summary || "",
       upstreamUrl: draft.upstream_url || "",
       upstreamMethod: draft.method || "GET",
-      authHeader: draft.auth_header || "authorization",
+      authHeader: draft.auth_header || (draft.secret_value ? "auto" : "authorization"),
       secretName: draft.secret_name || "PROVIDER_SECRET",
       secretValue: draft.secret_value || ""
     };
