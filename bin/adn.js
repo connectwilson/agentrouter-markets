@@ -6,7 +6,7 @@ import { normalizeId, suggestCapabilities } from "../src/id-utils.js";
 import { invokePaidServiceWithLocalWallet } from "../src/local-invoke.js";
 import { routeTaskWithLocalWallet } from "../src/local-route.js";
 import { createHostedHttpProviderConfig, createStaticProviderConfig, writeProviderConfig } from "../src/provider-config.js";
-import { initWallet, readPaymentLog, readWallet, updatePolicy, walletStatus } from "../src/wallet.js";
+import { initSessionWallet, initWallet, readPaymentLog, readWallet, updatePolicy, walletStatus } from "../src/wallet.js";
 import { getX402ProductionPlan } from "../src/x402-adapter.js";
 
 const [command, ...args] = process.argv.slice(2);
@@ -61,6 +61,7 @@ try {
   adn route "BTC 当前最大爆仓痛点是多少" --max-price 0.05 --freshness 300
   adn feedback <service_id>
   adn wallet init
+  adn wallet create-session
   adn wallet address
   adn wallet status
   adn wallet policy set --per-call 0.05 --daily 2
@@ -93,7 +94,21 @@ async function handleWalletCommand(args) {
     return {
       ok: true,
       address: wallet.address,
-      next_step: "Fund this local agent wallet with a small Base USDC budget before real x402 settlement."
+      address_type: wallet.address_type,
+      network_hint: wallet.network_hint,
+      next_step: "Fund this local EVM agent wallet with a small Base USDC budget before real x402 settlement."
+    };
+  }
+  if (subcommand === "create-session") {
+    const wallet = await initSessionWallet({ force: args.includes("--force") });
+    return {
+      ok: true,
+      status: "wallet_ready",
+      address: wallet.address,
+      address_type: wallet.address_type,
+      network_hint: wallet.network_hint,
+      key_management: wallet.key_management,
+      next_step: "Fund this local EVM session wallet with a small Base USDC budget before real x402 settlement."
     };
   }
   if (subcommand === "address") {
@@ -129,6 +144,7 @@ async function handleWalletCommand(args) {
   return {
     usage: [
       "adn wallet init",
+      "adn wallet create-session",
       "adn wallet address",
       "adn wallet status",
       "adn wallet lock",

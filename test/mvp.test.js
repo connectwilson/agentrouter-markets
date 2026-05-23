@@ -18,6 +18,8 @@ const { readWallet } = await import("../src/wallet.js");
 const { createWalletPaymentProof } = await import("../src/payment.js");
 const { normalizeEndpoint } = await import("../src/http-utils.js");
 const { createMemoryStore } = await import("../src/store.js");
+const { keccak256Hex } = await import("../src/keccak.js");
+const { currentPaymentBackend } = await import("../src/payment-adapter.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -41,6 +43,36 @@ test("registry seeds and validates demo service", async () => {
     assert.equal(record.verification_status, "verified");
     assert.equal(record.validation_runs.length, 1);
     assert.equal(record.validation_runs[0].ok, true);
+  });
+});
+
+test("home page and Provider Studio render separately", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const home = await fetch(`${baseUrl}/`);
+    assert.equal(home.status, 200);
+    const homeHtml = await home.text();
+    assert.match(homeHtml, /Network snapshot/);
+    assert.match(homeHtml, /Open provider dashboard/);
+    assert.match(homeHtml, /Open agent API hub/);
+
+    const human = await fetch(`${baseUrl}/human`);
+    assert.equal(human.status, 200);
+    const humanHtml = await human.text();
+    assert.match(humanHtml, /Provider Dashboard/);
+    assert.match(humanHtml, /Your API cards/);
+
+    const agent = await fetch(`${baseUrl}/agent`);
+    assert.equal(agent.status, 200);
+    const agentHtml = await agent.text();
+    assert.match(agentHtml, /API Hub for agents/);
+    assert.match(agentHtml, /Playground/);
+    assert.match(agentHtml, /claude mcp add AgentRouter/);
+
+    const studio = await fetch(`${baseUrl}/studio`);
+    assert.equal(studio.status, 200);
+    const studioHtml = await studio.text();
+    assert.match(studioHtml, /Provider Studio/);
+    assert.match(studioHtml, /Verify & Publish Selected/);
   });
 });
 
@@ -81,6 +113,31 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     assert.equal(stats.registered_services, 2);
     assert.equal(stats.total_calls, 1);
     assert.equal(stats.services.find((service) => service.service_id === "chain_fund_flow_7d_base").total_calls, 1);
+    assert.equal(stats.services.find((service) => service.service_id === "chain_fund_flow_7d_base").health_status, "healthy");
+
+    const detailResponse = await fetch(`${baseUrl}/agent-router/service?service_id=chain_fund_flow_7d_base`);
+    assert.equal(detailResponse.status, 200);
+    const detail = await detailResponse.json();
+    assert.equal(detail.service_detail_version, "agent_router_service_detail_v1");
+    assert.equal(detail.service.source_provenance.source_provenance_level, "wrapped_api");
+    assert.ok(detail.service.badges.some((badge) => badge.code === "verified_live_endpoint"));
+
+    const qualityResponse = await fetch(`${baseUrl}/agent-router/quality?service_id=chain_fund_flow_7d_base`);
+    assert.equal(qualityResponse.status, 200);
+    const quality = await qualityResponse.json();
+    assert.equal(quality.quality_feed_version, "agent_router_quality_events_v1");
+    assert.equal(quality.count, 1);
+    assert.equal(quality.events[0].business_error.detected, false);
+
+    const healthCheckResponse = await fetch(`${baseUrl}/agent-router/health-check`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ service_id: "chain_fund_flow_7d_base" })
+    });
+    assert.equal(healthCheckResponse.status, 200);
+    const healthCheck = await healthCheckResponse.json();
+    assert.equal(healthCheck.event_version, "agent_service_health_check_v1");
+    assert.equal(healthCheck.ok, true);
   });
 });
 
@@ -103,6 +160,23 @@ test("endpoint normalization treats bare hostnames as HTTPS URLs", () => {
     normalizeEndpoint("/mock/api", "http://127.0.0.1:8800"),
     "http://127.0.0.1:8800/mock/api"
   );
+});
+
+test("keccak helper matches Ethereum address hashing vectors", () => {
+  assert.equal(keccak256Hex(Buffer.alloc(0)), "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
+  assert.equal(keccak256Hex(Buffer.from("hello")), "1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8");
+});
+
+test("payment backend aliases real mode to x402", () => {
+  const previousBackend = process.env.ADN_PAYMENT_BACKEND;
+  const previousMode = process.env.ADN_PAYMENT_MODE;
+  delete process.env.ADN_PAYMENT_BACKEND;
+  process.env.ADN_PAYMENT_MODE = "real";
+  assert.equal(currentPaymentBackend(), "x402");
+  if (previousBackend === undefined) delete process.env.ADN_PAYMENT_BACKEND;
+  else process.env.ADN_PAYMENT_BACKEND = previousBackend;
+  if (previousMode === undefined) delete process.env.ADN_PAYMENT_MODE;
+  else process.env.ADN_PAYMENT_MODE = previousMode;
 });
 
 test("AgentRouter HTTP endpoint routes and invokes BTC liquidation task", async () => {
@@ -291,8 +365,9 @@ test("AgentRouter quote blocks payments above budget before invocation", async (
 });
 
 test("AgentRouter MCP server exposes Claude-callable tools", async () => {
+  await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
-    const client = createMcpClient({ AGENT_ROUTER_URL: baseUrl });
+    const client = createMcpClient({ AGENT_ROUTER_URL: baseUrl, ADN_WALLET_PASSPHRASE: "" });
     try {
       const initialized = await client.request("initialize", {
         protocolVersion: "2024-11-05",
@@ -300,11 +375,31 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
         clientInfo: { name: "mvp-test", version: "0.1.0" }
       });
       assert.equal(initialized.serverInfo.name, "AgentRouter");
+      assert.equal(initialized.agentrouter.auto_wallet.enabled, true);
+      assert.equal(initialized.agentrouter.auto_wallet.created, true);
+      assert.equal(initialized.agentrouter.auto_wallet.status, "wallet_ready");
+      assert.equal(initialized.agentrouter.auto_wallet.key_management, "local_session_secret");
+      assert.match(initialized.agentrouter.auto_wallet.address, /^0x[0-9a-f]{40}$/);
 
       const listed = await client.request("tools/list", {});
       assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_ask"));
       assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_request"));
       assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_quote"));
+      assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_wallet_status"));
+      assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_wallet_create"));
+      assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_wallet_init"));
+      assert.ok(listed.tools.some((tool) => tool.name === "agentrouter_wallet_setup"));
+
+      const walletStatusCall = await client.request("tools/call", {
+        name: "agentrouter_wallet_status",
+        arguments: {}
+      });
+      const walletPayload = JSON.parse(walletStatusCall.content[0].text);
+      assert.equal(walletPayload.initialized, true);
+      assert.equal(walletPayload.address_type, "evm");
+      assert.equal(walletPayload.key_management, "local_session_secret");
+      assert.match(walletPayload.address, /^0x[0-9a-f]{40}$/);
+      assert.equal("private_key_pem" in walletPayload, false);
 
       const called = await client.request("tools/call", {
         name: "agentrouter_request",
@@ -625,6 +720,55 @@ test("Provider Studio auto-detects common API key headers during validation", as
     const config = JSON.parse(await fs.readFile(path.join(process.env.ADN_PROVIDER_DIR, "studio_auto_auth_header_demo.json"), "utf8"));
     assert.equal(config.source.auth.header, "auto");
     assert.equal(JSON.stringify(config).includes("demo-provider-secret"), false);
+  });
+});
+
+test("hosted HTTP providers honor agent limit and keep compact validation previews", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "hosted-http",
+        service_id: "studio_limited_rows_demo",
+        provider_id: "provider_studio",
+        title: "Studio Limited Rows Demo",
+        description_for_agent: "Use this service to fetch provider rows with a caller-specified limit.",
+        capabilities: "data_service,provider_api_demo",
+        price: "0.01",
+        sample_request: "{\"limit\":2,\"total_rows\":7}",
+        sample_data: "{\"status\":\"success\",\"rows\":[{\"metric\":\"sample_metric_1\",\"value\":42}]}",
+        summary: "Generic provider API returned limited rows.",
+        upstream_url: "/mock/upstream/header-key",
+        upstream_method: "GET",
+        secret_name: "PROVIDER_SECRET",
+        secret_value: "demo-provider-secret",
+        auth_header: ""
+      })
+    });
+    assert.equal(studioResponse.status, 201);
+    const payload = await studioResponse.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.validation.ok, true);
+    assert.equal(payload.validation.result_preview.rows.length, 2);
+    assert.equal(payload.validation.result_preview.agentrouter_page.total_available, 7);
+    assert.equal(payload.validation.result_preview.agentrouter_page.truncated, true);
+
+    const invokeResponse = await fetch(`${baseUrl}/connector/invoke_paid_service`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service_id: "studio_limited_rows_demo",
+        input: { limit: 3, total_rows: 9 },
+        budget: { max_amount: "0.05", currency: "USDC" }
+      })
+    });
+    assert.equal(invokeResponse.status, 200);
+    const invocation = await invokeResponse.json();
+    assert.equal(invocation.result.data.rows.length, 3);
+    assert.equal(invocation.result.data.agentrouter_page.total_available, 9);
+    assert.equal(invocation.result.data.agentrouter_page.returned, 3);
   });
 });
 
@@ -1357,6 +1501,8 @@ test("CLI wallet signs local payment automatically within policy", async () => {
     const walletFile = await fs.readFile(path.join(process.env.ADN_DIR, "wallet.json"), "utf8");
     assert.equal(walletFile.includes("private_key_pem"), false);
     assert.equal(walletFile.includes("encrypted_private_key"), true);
+    const unlockedWallet = await readWallet();
+    assert.match(unlockedWallet.private_key_hex, /^0x[0-9a-f]{64}$/);
 
     const invoke = await runCli(["invoke", "chain_fund_flow_7d_base", "{\"chain\":\"base\",\"days\":7}"], {
       ADN_REGISTRY_URL: baseUrl
@@ -1418,7 +1564,7 @@ test("CLI invoke cannot unlock wallet without passphrase", async () => {
       { ADN_REGISTRY_URL: baseUrl, ADN_WALLET_PASSPHRASE: "" }
     );
     assert.equal(invoke.code, 1);
-    assert.match(invoke.stderr, /ADN_WALLET_PASSPHRASE is required/);
+    assert.match(invoke.stderr, /ADN_WALLET_PASSPHRASE or a local AgentRouter session wallet secret is required/);
   });
 });
 

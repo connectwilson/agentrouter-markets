@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { keccak256 } from "./keccak.js";
 
 export const ADN_DIR = path.resolve(process.env.ADN_DIR || ".adn");
 export const WALLET_PATH = path.join(ADN_DIR, "wallet.json");
+export const WALLET_SESSION_SECRET_PATH = path.join(ADN_DIR, "wallet-session.key");
 export const POLICY_PATH = path.join(ADN_DIR, "policy.json");
 export const PAYMENT_LOG_PATH = path.join(ADN_DIR, "payments.log");
 export const USED_CHALLENGES_PATH = path.join(ADN_DIR, "used-challenges.json");
@@ -27,29 +30,23 @@ export async function ensureAdnDir() {
   await fs.mkdir(ADN_DIR, { recursive: true });
 }
 
-export async function initWallet({ force = false } = {}) {
+export async function initWallet({ force = false, passphrase = null, keyManagement = "user_passphrase" } = {}) {
   await ensureAdnDir();
   if (!force && await fileExists(WALLET_PATH)) {
     return readWalletPublic();
   }
 
-  const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", {
-    namedCurve: "secp256k1",
-    privateKeyEncoding: {
-      type: "pkcs8",
-      format: "pem"
-    },
-    publicKeyEncoding: {
-      type: "spki",
-      format: "pem"
-    }
-  });
+  const { privateKey, publicKey, publicKeyHex } = generateEvmKeypair();
   const address = deriveAddress(publicKey);
-  const passphrase = getWalletPassphrase();
-  const encryptedPrivateKey = encryptPrivateKey(privateKey, passphrase);
+  const walletPassphrase = passphrase || getWalletPassphrase();
+  const encryptedPrivateKey = encryptPrivateKey(privateKey, walletPassphrase);
   const walletFile = {
-    wallet_version: "adn_encrypted_wallet_v1",
+    wallet_version: "adn_encrypted_evm_wallet_v1",
+    address_type: "evm",
+    network_hint: "base",
+    key_management: keyManagement,
     address,
+    public_key_hex: publicKeyHex,
     public_key_pem: publicKey,
     encrypted_private_key: encryptedPrivateKey,
     created_at: new Date().toISOString()
@@ -61,6 +58,15 @@ export async function initWallet({ force = false } = {}) {
   return publicWallet(walletFile);
 }
 
+export async function initSessionWallet({ force = false } = {}) {
+  const passphrase = await readOrCreateSessionPassphrase({ force });
+  return initWallet({
+    force,
+    passphrase,
+    keyManagement: "local_session_secret"
+  });
+}
+
 export async function readWallet() {
   const content = await fs.readFile(WALLET_PATH, "utf8");
   const walletFile = JSON.parse(content);
@@ -70,8 +76,13 @@ export async function readWallet() {
   const privateKey = decryptPrivateKey(walletFile.encrypted_private_key, getWalletPassphrase());
   return {
     wallet_version: walletFile.wallet_version,
+    address_type: walletFile.address_type || "evm",
+    network_hint: walletFile.network_hint || "base",
+    key_management: walletFile.key_management || "user_passphrase",
     address: walletFile.address,
+    public_key_hex: walletFile.public_key_hex || publicKeyPemToHex(walletFile.public_key_pem),
     public_key_pem: walletFile.public_key_pem,
+    private_key_hex: privateKeyPemToHex(privateKey),
     private_key_pem: privateKey,
     created_at: walletFile.created_at
   };
@@ -96,6 +107,9 @@ export async function walletStatus() {
   return {
     initialized: true,
     address: wallet.address,
+    address_type: wallet.address_type || "evm",
+    network_hint: wallet.network_hint || "base",
+    key_management: wallet.key_management || "user_passphrase",
     wallet_path: WALLET_PATH,
     encrypted: true,
     policy
@@ -200,8 +214,8 @@ export async function resetWalletForTests() {
 }
 
 export function deriveAddress(publicKeyPem) {
-  const hash = crypto.createHash("sha256").update(publicKeyPem).digest("hex");
-  return `0x${hash.slice(-40)}`;
+  const publicKey = publicKeyPemToBytes(publicKeyPem);
+  return `0x${keccak256(publicKey).subarray(-20).toString("hex")}`;
 }
 
 async function fileExists(filePath) {
@@ -225,9 +239,9 @@ function assertManifestMatches({ serviceId, amount, currency, network, payTo, ma
 }
 
 function getWalletPassphrase() {
-  const passphrase = process.env.ADN_WALLET_PASSPHRASE;
+  const passphrase = process.env.ADN_WALLET_PASSPHRASE || readSessionPassphraseSync();
   if (!passphrase) {
-    throw new Error("ADN_WALLET_PASSPHRASE is required to unlock the local Agent Wallet.");
+    throw new Error("ADN_WALLET_PASSPHRASE or a local AgentRouter session wallet secret is required to unlock the local Agent Wallet.");
   }
   if (passphrase.length < 8) {
     throw new Error("ADN_WALLET_PASSPHRASE must be at least 8 characters.");
@@ -265,10 +279,86 @@ function decryptPrivateKey(encrypted, passphrase) {
 function publicWallet(walletFile) {
   return {
     wallet_version: walletFile.wallet_version,
+    address_type: walletFile.address_type || "evm",
+    network_hint: walletFile.network_hint || "base",
+    key_management: walletFile.key_management || "user_passphrase",
     address: walletFile.address,
+    public_key_hex: walletFile.public_key_hex || publicKeyPemToHex(walletFile.public_key_pem),
     public_key_pem: walletFile.public_key_pem,
     created_at: walletFile.created_at
   };
+}
+
+async function readOrCreateSessionPassphrase({ force = false } = {}) {
+  await ensureAdnDir();
+  if (!force && await fileExists(WALLET_SESSION_SECRET_PATH)) {
+    return (await fs.readFile(WALLET_SESSION_SECRET_PATH, "utf8")).trim();
+  }
+  const passphrase = crypto.randomBytes(32).toString("base64url");
+  await fs.writeFile(WALLET_SESSION_SECRET_PATH, `${passphrase}\n`, { mode: 0o600 });
+  return passphrase;
+}
+
+function readSessionPassphraseSync() {
+  try {
+    return fsSync.readFileSync(WALLET_SESSION_SECRET_PATH, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function generateEvmKeypair() {
+  const ecdh = crypto.createECDH("secp256k1");
+  while (true) {
+    try {
+      ecdh.setPrivateKey(crypto.randomBytes(32));
+      break;
+    } catch {
+      // Retry the extremely rare invalid scalar.
+    }
+  }
+  const uncompressedPublicKey = ecdh.getPublicKey(null, "uncompressed");
+  const publicKey = uncompressedPublicKey.subarray(1);
+  const privateKeyBytes = ecdh.getPrivateKey();
+  const privateKeyObject = crypto.createPrivateKey({
+    key: {
+      kty: "EC",
+      crv: "secp256k1",
+      x: publicKey.subarray(0, 32).toString("base64url"),
+      y: publicKey.subarray(32, 64).toString("base64url"),
+      d: privateKeyBytes.toString("base64url")
+    },
+    format: "jwk"
+  });
+  const publicKeyObject = crypto.createPublicKey(privateKeyObject);
+  return {
+    privateKey: privateKeyObject.export({ type: "pkcs8", format: "pem" }),
+    publicKey: publicKeyObject.export({ type: "spki", format: "pem" }),
+    publicKeyHex: `0x${publicKey.toString("hex")}`
+  };
+}
+
+function publicKeyPemToBytes(publicKeyPem) {
+  const jwk = crypto.createPublicKey(publicKeyPem).export({ format: "jwk" });
+  if (!jwk.x || !jwk.y) {
+    throw new Error("Unsupported public key format for EVM address derivation.");
+  }
+  return Buffer.concat([
+    Buffer.from(jwk.x, "base64url"),
+    Buffer.from(jwk.y, "base64url")
+  ]);
+}
+
+function publicKeyPemToHex(publicKeyPem) {
+  return `0x${publicKeyPemToBytes(publicKeyPem).toString("hex")}`;
+}
+
+function privateKeyPemToHex(privateKeyPem) {
+  const jwk = crypto.createPrivateKey(privateKeyPem).export({ format: "jwk" });
+  if (!jwk.d) {
+    throw new Error("Unsupported private key format for EVM signing.");
+  }
+  return `0x${Buffer.from(jwk.d, "base64url").toString("hex").padStart(64, "0")}`;
 }
 
 async function isChallengeUsed(nonce) {

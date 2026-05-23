@@ -116,34 +116,46 @@ export function studioHtml({ draft } = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ADN Provider Studio</title>
   <style>
-    :root { color-scheme: light; --ink:#17201a; --muted:#5d695f; --line:#d8ded7; --panel:#ffffff; --bg:#f6f4ef; --accent:#0f766e; --accent2:#6d5dfc; --bad:#b42318; }
+    :root { color-scheme: light; --ink:#17201a; --muted:#617168; --line:#d8dfd9; --panel:#ffffff; --bg:#f7f6f1; --soft:#eef4f0; --accent:#0f766e; --accent2:#315f9f; --warn:#9a6a12; --bad:#b42318; --code:#101714; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
-    header { padding: 28px 32px 18px; border-bottom: 1px solid var(--line); background: #fbfaf6; }
-    h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }
+    a { color: inherit; text-decoration: none; }
+    header { border-bottom: 1px solid var(--line); background: #fbfaf6; }
+    .topbar { height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 28px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 820; }
+    .mark { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; background: var(--code); color: #eaf7ee; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+    .nav-links { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; font-weight: 650; }
+    .hero-copy { padding: 26px 32px 22px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 26px; align-items: end; }
+    h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: 0; line-height: 1.05; }
     p { margin: 0; color: var(--muted); line-height: 1.5; }
-    main { display: grid; grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr); gap: 20px; padding: 22px 32px 32px; align-items: start; }
+    .hero-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .hero-point { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 11px 12px; }
+    .hero-point strong { display: block; margin-bottom: 3px; font-size: 13px; }
+    .hero-point span { color: var(--muted); font-size: 12px; line-height: 1.35; display: block; }
+    main { display: grid; grid-template-columns: minmax(430px, 0.95fr) minmax(380px, 1.05fr); gap: 18px; padding: 20px 28px 32px; align-items: start; max-width: 1480px; margin: 0 auto; }
     form, .output { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .output { position: sticky; top: 76px; }
     fieldset { border: 0; padding: 0; margin: 0 0 18px; }
-    legend { font-weight: 700; margin-bottom: 10px; }
+    legend { font-weight: 780; margin-bottom: 10px; font-size: 17px; }
     label { display: grid; gap: 6px; margin-bottom: 12px; font-size: 13px; font-weight: 650; color: #28332b; }
     input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 10px 11px; font: inherit; background: #fff; color: var(--ink); }
+    input:focus, select:focus, textarea:focus { outline: 3px solid #dbeee8; border-color: #7fb4a5; }
     input.invalid, textarea.invalid, select.invalid { border-color: var(--bad); box-shadow: 0 0 0 2px #ffe1de; }
     input[readonly] { background: #f6f8f5; color: var(--muted); }
     textarea { min-height: 86px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
     code, .code-preview { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .code-preview { display: block; margin: 8px 0 14px; white-space: pre-wrap; word-break: break-word; background: #111814; color: #edf8f0; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.45; max-height: 260px; overflow: auto; }
+    .code-preview { display: block; margin: 8px 0 14px; white-space: pre-wrap; word-break: break-word; background: var(--code); color: #edf8f0; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.45; max-height: 260px; overflow: auto; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .quick-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 116px 132px; gap: 12px; align-items: end; }
-    details { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfa; margin-bottom: 18px; }
+    details { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfa; margin-bottom: 14px; }
     summary { cursor: pointer; font-weight: 700; }
     details .grid { margin-top: 12px; }
     .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    button { border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; font-weight: 700; cursor: pointer; background: var(--accent); color: white; }
-    button.secondary { background: #e7e8ff; color: #23205f; }
+    button { border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; font-weight: 760; cursor: pointer; background: var(--accent); color: white; }
+    button.secondary { background: #e6ebff; color: #20396b; }
     button.ghost { background: #edf2ef; color: #29372f; }
     button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
-    pre { margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; background: #111814; color: #edf8f0; border-radius: 8px; padding: 14px; max-height: 360px; overflow: auto; font-size: 12px; line-height: 1.45; }
+    pre { margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; background: var(--code); color: #edf8f0; border-radius: 8px; padding: 14px; max-height: 360px; overflow: auto; font-size: 12px; line-height: 1.45; }
     .hint { font-size: 12px; color: var(--muted); font-weight: 500; }
     .section-note { margin: -4px 0 14px; font-size: 12px; color: var(--muted); }
     .hidden { display: none; }
@@ -156,12 +168,12 @@ export function studioHtml({ draft } = {}) {
     .confirm-panel button { width: 100%; }
     .divider { height: 1px; background: var(--line); margin: 20px 0; }
     .draft-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
-    .draft-list { display: grid; gap: 8px; margin: 12px 0; }
-    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 110px 112px; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
+    .draft-list { display: grid; gap: 10px; margin: 12px 0; }
+    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 110px 112px; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
     .draft-row.selected { border-color: #81b7a7; background: #f4fbf8; }
     .draft-row.published { border-color: #cbd8d1; background: #f5f7f5; opacity: 0.78; }
     .draft-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 4px; }
-    .draft-title { font-weight: 750; }
+    .draft-title { font-weight: 790; overflow-wrap: anywhere; }
     .draft-meta { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
     .draft-price input { padding: 8px; }
     .mini-button { padding: 8px 10px; font-size: 12px; background: #29372f; align-self: center; }
@@ -179,19 +191,45 @@ export function studioHtml({ draft } = {}) {
     .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: 13px; }
     .kv div:nth-child(odd) { color: var(--muted); }
     .kv div:nth-child(even) { overflow-wrap: anywhere; font-weight: 650; }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 22px 16px 14px; } .grid, .quick-grid { grid-template-columns: 1fr; } }
+    .step-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px; }
+    .step { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
+    .step b { display: block; color: var(--accent); font-size: 12px; margin-bottom: 4px; }
+    .step span { color: var(--muted); font-size: 12px; line-height: 1.35; display: block; }
+    @media (max-width: 980px) { main, .hero-copy { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; } .topbar { padding: 0 16px; } .output { position: static; } .grid, .quick-grid, .hero-points, .step-strip { grid-template-columns: 1fr; } .nav-links { display: none; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>ADN Provider Studio</h1>
-    <p>Connect an existing data API, review the discovered endpoints, and publish them as Agent-callable paid services.</p>
+    <div class="topbar">
+      <a class="brand" href="/"><span class="mark">AR</span><span>AgentRouter Markets</span></a>
+      <nav class="nav-links" aria-label="Studio navigation">
+        <a href="/">Home</a>
+        <a href="/demo">Demand demo</a>
+        <a href="/agent-router/stats">Stats</a>
+      </nav>
+    </div>
+    <div class="hero-copy">
+      <div>
+        <h1>Provider Studio</h1>
+        <p>Connect a working data API, verify the real response, and publish it as an Agent-callable paid service.</p>
+      </div>
+      <div class="hero-points">
+        <div class="hero-point"><strong>Import</strong><span>Paste one endpoint or an OpenAPI URL.</span></div>
+        <div class="hero-point"><strong>Verify</strong><span>AgentRouter calls the upstream API before publish.</span></div>
+        <div class="hero-point"><strong>Route</strong><span>Buyer agents can discover it immediately.</span></div>
+      </div>
+    </div>
   </header>
   <main>
     <form id="provider-form">
+      <div class="step-strip">
+        <div class="step"><b>Step 1</b><span>Import a real endpoint.</span></div>
+        <div class="step"><b>Step 2</b><span>Select services to publish.</span></div>
+        <div class="step"><b>Step 3</b><span>Verify and make routable.</span></div>
+      </div>
       <fieldset>
-        <legend>Publish An API</legend>
-        <p class="section-note">Paste a real data endpoint or OpenAPI URL. AgentRouter will test it before publishing, so broken APIs cannot be registered.</p>
+        <legend>Import API</legend>
+        <p class="section-note">Paste a real data endpoint or OpenAPI URL. AgentRouter tests the upstream response before publishing, so broken APIs are blocked before they enter the registry.</p>
         <div class="quick-grid">
         <label>API URL
           <input name="import_api_url" value="/mock/api" />
@@ -226,7 +264,7 @@ export function studioHtml({ draft } = {}) {
           <button type="button" class="tiny-button" id="clear-drafts">Clear Selection</button>
           <span class="hint" id="selected-drafts-status">0 selected</span>
         </div>
-        <p class="flow-note">Select endpoint cards and click <strong>Verify & Publish Selected</strong>. AgentRouter auto-generates service name, routing tags, data contract, and runtime wrapper.</p>
+        <p class="flow-note">Select endpoint cards and click <strong>Verify & Publish Selected</strong>. Service name, routing tags, data contract, and runtime wrapper are generated for you.</p>
         <p class="hint" id="import-status">Use a concrete endpoint for one API, or an OpenAPI/Swagger URL for many endpoints.</p>
         <div id="draft-list" class="draft-list"></div>
         <details>
@@ -333,11 +371,11 @@ export function studioHtml({ draft } = {}) {
       </details>
     </form>
     <section class="output">
-      <h2>Live Preview</h2>
-      <p>Review what will be published and what buyer Agents will see.</p>
+      <h2>Publish Review</h2>
+      <p>Review what will be published, whether required fields are ready, and what buyer Agents will see.</p>
       <div id="side-panel" class="side-grid"></div>
       <div class="confirm-panel">
-        <button type="submit" form="provider-form" id="publish-service" disabled>Create, Register, Validate</button>
+        <button type="submit" form="provider-form" id="publish-service" disabled>Verify & Publish Manual Service</button>
         <div id="form-message" class="notice hidden"></div>
       </div>
       <details>

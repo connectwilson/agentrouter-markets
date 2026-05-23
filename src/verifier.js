@@ -76,13 +76,26 @@ export function createConsumerFeedbackRequest({
     feedback_request_version: "agent_consumer_feedback_request_v1",
     endpoint: "/agent-router/feedback",
     method: "POST",
+    timing: "after_final_answer_or_after_deciding_result_usability",
+    must_submit: true,
     service_id: selectedService.service_id || result.service_id,
     request_id: result.request_id,
     instructions: [
       "Submit this after the main agent has inspected whether the returned data helped answer the user's task.",
       "Do not infer domain truth beyond the returned data. Judge intent fit, usefulness, and parseability for this call.",
-      "Use unknown when the main agent cannot reasonably judge a field."
+      "Use unknown when the main agent cannot reasonably judge a field.",
+      "If the answer required another source, set answer_useful to partial or no and list missing_fields.",
+      "This feedback is part of the service reputation loop; do not skip it for successful calls."
     ],
+    submit_to: {
+      local_path: "/agent-router/feedback",
+      body_template: {
+        service_id: selectedService.service_id || result.service_id,
+        request_id: result.request_id,
+        consumer_id: "<main_agent_or_client_id>",
+        feedback: "<fill_from_schema>"
+      }
+    },
     schema: {
       type: "object",
       required: ["service_id", "request_id", "feedback"],
@@ -109,6 +122,8 @@ export function createConsumerFeedbackRequest({
       intent_fit: "yes if the data directly matches the requested capability and parameters; partial if it is related but incomplete; no if it is the wrong data; unknown if the agent cannot judge.",
       answer_useful: "yes if the data can support a final answer; partial if it needs another source or transformation; no if it cannot be used; unknown if unclear.",
       data_quality_score: "0..1 score for non-empty, fresh, parseable, complete, and relevant data.",
+      missing_fields: "Fields, dimensions, filters, or evidence that were needed but absent from the returned result.",
+      confidence: "Confidence in this feedback judgment, not confidence in the market or domain claim.",
       reason: "One short sentence grounded in the returned data, not provider reputation."
     },
     suggested_feedback: suggestConsumerFeedback({ request, result, verification })

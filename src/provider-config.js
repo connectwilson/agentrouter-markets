@@ -133,6 +133,7 @@ export function createStaticProviderConfig({
     },
     data_source_claim: {
       source_type: "static_dataset",
+      source_provenance_level: "provider_owned",
       authorization_status: "provider_declared",
       redistribution_status: "provider_declared",
       credential_custody: "none",
@@ -241,6 +242,7 @@ export function createHostedHttpProviderConfig({
     },
     data_source_claim: {
       source_type: "provider_declared_data_service",
+      source_provenance_level: inferSourceProvenanceLevel({ upstreamUrl, secretValue }),
       authorization_status: "provider_declared",
       redistribution_status: "provider_declared",
       credential_custody: secretValue ? "hosted_runtime_config" : "none",
@@ -278,6 +280,14 @@ export function createHostedHttpProviderConfig({
     },
     manifest
   };
+}
+
+function inferSourceProvenanceLevel({ upstreamUrl = "", secretValue = "" } = {}) {
+  const url = String(upstreamUrl || "").toLowerCase();
+  if (/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(url)) return "provider_owned";
+  if (/api\.|docs\.|data\./.test(url) && secretValue) return "wrapped_api";
+  if (/scrap|crawl|html|page/.test(url)) return "scraped";
+  return secretValue ? "wrapped_api" : "unknown";
 }
 
 function createAgentContract({ capabilities = [], sampleRequest = {}, sampleData = {}, summary = "" }) {

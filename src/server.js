@@ -4,11 +4,12 @@ import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from ".
 import { createMemoryStore, publicServiceRecord, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs } from "./registry.js";
+import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
 import { createProviderFromStudio, studioHtml } from "./studio.js";
+import { agentHtml, homeHtml, humanHtml } from "./home.js";
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -47,7 +48,54 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
-  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/studio")) {
+  if (req.method === "GET" && url.pathname === "/agent-router/services") {
+    const query = url.searchParams.get("q") || "";
+    const maxPrice = url.searchParams.get("max_price");
+    const verifiedOnly = url.searchParams.get("verified_only") === "true";
+    const capabilities = url.searchParams.getAll("capability");
+    const records = query || maxPrice || verifiedOnly || capabilities.length
+      ? searchServices(store, { query, capabilities, maxPrice, verifiedOnly })
+      : [...store.services.values()].map((record) => publicServiceRecord(record));
+    sendJson(res, 200, {
+      service_list_version: "agent_router_service_list_v1",
+      count: records.length,
+      services: records
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agent-router/service") {
+    const serviceId = url.searchParams.get("service_id");
+    const record = store.services.get(serviceId);
+    if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+    sendJson(res, 200, {
+      service_detail_version: "agent_router_service_detail_v1",
+      service: publicServiceRecord(record),
+      manifest: record.manifest,
+      latest_validation: record.validation_runs?.at(-1) || null,
+      recent_quality_events: (record.quality_events || []).slice(-20),
+      recent_feedback_events: (record.feedback_events || []).slice(-20),
+      recent_health_checks: (record.health_checks || []).slice(-20)
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/") {
+    sendHtml(res, 200, homeHtml());
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/human") {
+    sendHtml(res, 200, humanHtml());
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agent") {
+    sendHtml(res, 200, agentHtml());
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/studio") {
     sendHtml(res, 200, studioHtml());
     return;
   }
@@ -279,6 +327,29 @@ async function routeRequest(req, res, store, baseUrl) {
       audit_anchor: "trust scores are computed offchain from feedback events; evidence hashes can be anchored on Arc.",
       services
     });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agent-router/quality") {
+    const serviceId = url.searchParams.get("service_id");
+    const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") || 50)));
+    const events = (store.qualityEvents || [])
+      .filter((event) => !serviceId || event.service_id === serviceId)
+      .slice(-limit);
+    sendJson(res, 200, {
+      quality_feed_version: "agent_router_quality_events_v1",
+      storage: "offchain_memory_db",
+      note: "Each event is generated after a paid service call and combines deterministic checks, application-error detection, and a prompt for main-agent usefulness feedback.",
+      count: events.length,
+      events
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agent-router/health-check") {
+    const body = await readJson(req);
+    const result = await runServiceHealthCheck(store, body.service_id);
+    sendJson(res, result.ok === false ? 422 : 200, result);
     return;
   }
 

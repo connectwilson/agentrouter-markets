@@ -5,8 +5,8 @@ export async function readJson(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-export function sendJson(res, statusCode, body) {
-  res.writeHead(statusCode, { "content-type": "application/json" });
+export function sendJson(res, statusCode, body, headers = {}) {
+  res.writeHead(statusCode, { "content-type": "application/json", ...headers });
   res.end(JSON.stringify(body, null, 2));
 }
 

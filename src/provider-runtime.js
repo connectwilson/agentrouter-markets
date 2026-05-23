@@ -3,38 +3,30 @@ import { createEnvelope, readProviderConfig } from "./provider-config.js";
 import { createLiveBtcLiquidationEnvelope, createLiveFundFlowEnvelope } from "./fixtures.js";
 import { readJson, sendJson, sendNotFound } from "./http-utils.js";
 import { readProviderSecret } from "./provider-secrets.js";
+import { isRealX402ProviderEnabled, processProviderX402Payment, sendX402Response, settleProviderX402Payment } from "./real-x402-provider.js";
 
 const issuedChallenges = new Map();
 
 export async function handleFundFlowProvider(req, res) {
-  const paymentProof = req.headers["x-payment"];
   const input = await readJson(req);
   const serviceId = "chain_fund_flow_7d_base";
   const amount = "0.01";
   const currency = "USDC";
   const network = "base";
+  const payment = await requirePaymentOrRespond({
+    req,
+    res,
+    serviceId,
+    amount,
+    currency,
+    network,
+    description: "Base 7D Fund Flow"
+  });
+  if (!payment.ok) return;
 
-  if (!paymentProof) {
-    const payment = issueChallenge({ serviceId, amount, currency, network });
-    sendJson(res, 402, {
-      error: "Payment Required",
-      payment
-    });
-    return;
-  }
-
-  const verification = verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network });
-  if (!verification.ok) {
-    sendJson(res, 402, {
-      error: "Invalid Payment",
-      code: verification.error,
-      payment: createPaymentRequirements({ serviceId, amount, currency, network })
-    });
-    return;
-  }
-
+  let body;
   if (input.chain && input.chain !== "base") {
-    sendJson(res, 200, {
+    body = {
       schema_version: "agent_data_envelope_v1",
       service_id: serviceId,
       request_id: `req_${Date.now()}`,
@@ -45,42 +37,33 @@ export async function handleFundFlowProvider(req, res) {
         retryable: false,
         suggested_action: "Use chain=base."
       }
-    });
-    return;
+    };
+  } else {
+    body = createLiveFundFlowEnvelope(input);
   }
-
-  sendJson(res, 200, createLiveFundFlowEnvelope(input));
+  await sendPaidResult({ res, payment, body });
 }
 
 export async function handleBtcLiquidationProvider(req, res) {
-  const paymentProof = req.headers["x-payment"];
   const input = await readJson(req);
   const serviceId = "btc_liquidation_max_pain_demo";
   const amount = "0.02";
   const currency = "USDC";
   const network = "base";
+  const payment = await requirePaymentOrRespond({
+    req,
+    res,
+    serviceId,
+    amount,
+    currency,
+    network,
+    description: "BTC liquidation max pain"
+  });
+  if (!payment.ok) return;
 
-  if (!paymentProof) {
-    const payment = issueChallenge({ serviceId, amount, currency, network });
-    sendJson(res, 402, {
-      error: "Payment Required",
-      payment
-    });
-    return;
-  }
-
-  const verification = verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network });
-  if (!verification.ok) {
-    sendJson(res, 402, {
-      error: "Invalid Payment",
-      code: verification.error,
-      payment: createPaymentRequirements({ serviceId, amount, currency, network })
-    });
-    return;
-  }
-
+  let body;
   if (input.asset && String(input.asset).toUpperCase() !== "BTC") {
-    sendJson(res, 200, {
+    body = {
       schema_version: "agent_data_envelope_v1",
       service_id: serviceId,
       request_id: `req_${Date.now()}`,
@@ -91,11 +74,11 @@ export async function handleBtcLiquidationProvider(req, res) {
         retryable: false,
         suggested_action: "Use asset=BTC."
       }
-    });
-    return;
+    };
+  } else {
+    body = createLiveBtcLiquidationEnvelope(input);
   }
-
-  sendJson(res, 200, createLiveBtcLiquidationEnvelope(input));
+  await sendPaidResult({ res, payment, body });
 }
 
 export async function handleCustomProvider(req, res, serviceId) {
@@ -112,26 +95,16 @@ export async function handleCustomProvider(req, res, serviceId) {
   const amount = manifest.pricing.amount;
   const currency = manifest.pricing.currency;
   const network = manifest.pricing.network;
-  const paymentProof = req.headers["x-payment"];
-
-  if (!paymentProof) {
-    const payment = issueChallenge({ serviceId, amount, currency, network });
-    sendJson(res, 402, {
-      error: "Payment Required",
-      payment
-    });
-    return;
-  }
-
-  const verification = verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network });
-  if (!verification.ok) {
-    sendJson(res, 402, {
-      error: "Invalid Payment",
-      code: verification.error,
-      payment: createPaymentRequirements({ serviceId, amount, currency, network })
-    });
-    return;
-  }
+  const payment = await requirePaymentOrRespond({
+    req,
+    res,
+    serviceId,
+    amount,
+    currency,
+    network,
+    description: manifest.description_for_agent || manifest.title
+  });
+  if (!payment.ok) return;
 
   if (config.source?.type === "hosted_http") {
     const upstream = await callHostedHttpSource(config, input);
@@ -166,16 +139,16 @@ export async function handleCustomProvider(req, res, serviceId) {
       });
       return;
     }
-    sendJson(res, 200, createEnvelope({
+    await sendPaidResult({ res, payment, body: createEnvelope({
       serviceId,
       input,
-      data: upstream,
+      data: shapeHostedHttpPayload(upstream, input),
       sourceType: "hosted_http",
       sampleType: null,
       isEstimated: false,
       confidence: 0.8,
       summary: config.source.summary
-    }));
+    }) });
     return;
   }
 
@@ -195,7 +168,7 @@ export async function handleCustomProvider(req, res, serviceId) {
     return;
   }
 
-  sendJson(res, 200, createEnvelope({
+  await sendPaidResult({ res, payment, body: createEnvelope({
     serviceId,
     input,
     data: config.source.live_data,
@@ -204,7 +177,58 @@ export async function handleCustomProvider(req, res, serviceId) {
     isEstimated: false,
     confidence: 0.8,
     summary: config.source.summary
-  }));
+  }) });
+}
+
+async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, description }) {
+  if (isRealX402ProviderEnabled()) {
+    const payment = await processProviderX402Payment({
+      req,
+      serviceId,
+      amount,
+      network,
+      description
+    });
+    if (!payment.ok) {
+      sendX402Response(res, payment.response);
+      return { ok: false };
+    }
+    return { ok: true, payment };
+  }
+
+  const paymentProof = req.headers["x-payment"];
+  if (!paymentProof) {
+    const payment = issueChallenge({ serviceId, amount, currency, network });
+    sendJson(res, 402, {
+      error: "Payment Required",
+      payment
+    });
+    return { ok: false };
+  }
+
+  const verification = verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network });
+  if (!verification.ok) {
+    sendJson(res, 402, {
+      error: "Invalid Payment",
+      code: verification.error,
+      payment: createPaymentRequirements({ serviceId, amount, currency, network })
+    });
+    return { ok: false };
+  }
+  return { ok: true, payment: { required: false } };
+}
+
+async function sendPaidResult({ res, payment, body }) {
+  if (payment.payment?.required) {
+    const settlement = await settleProviderX402Payment(payment.payment, body);
+    if (settlement.failed) {
+      sendX402Response(res, settlement.response);
+      return;
+    }
+    sendJson(res, 200, body, settlement.headers);
+    return;
+  }
+  sendJson(res, 200, body);
 }
 
 function issueChallenge({ serviceId, amount, currency, network }) {
@@ -277,14 +301,14 @@ export async function handleMockUpstreamHeaderKey(req, res) {
     });
     return;
   }
+  const url = new URL(req.url, "http://127.0.0.1");
+  const rowCount = boundedInteger(url.searchParams.get("total_rows"), 1, 1000) || 1;
   sendJson(res, 200, {
     status: "success",
-    rows: [
-      {
-        metric: "sample_metric",
-        value: 42
-      }
-    ],
+    rows: Array.from({ length: rowCount }, (_, index) => ({
+      metric: `sample_metric_${index + 1}`,
+      value: 42 + index
+    })),
     source: "mock_upstream_header_key"
   });
 }
@@ -400,6 +424,39 @@ function classifyUpstreamResponse(response, payload, attempt) {
     };
   }
   return { upstream_error: false };
+}
+
+function shapeHostedHttpPayload(payload, input = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const limit = boundedInteger(input.limit ?? input.pagination?.per_page, 0, 100);
+  const offset = boundedInteger(input.offset, 0, 100000) || 0;
+  if (!limit) return payload;
+
+  for (const key of ["data", "rows", "items", "records", "results"]) {
+    if (!Array.isArray(payload[key]) || (payload[key].length <= limit && offset === 0)) continue;
+    const page = payload[key].slice(offset, offset + limit);
+    return {
+      ...payload,
+      [key]: page,
+      agentrouter_page: {
+        applied: true,
+        field: key,
+        limit,
+        offset,
+        returned: page.length,
+        total_available: payload[key].length,
+        truncated: offset + limit < payload[key].length
+      }
+    };
+  }
+  return payload;
+}
+
+function boundedInteger(value, min, max) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.max(min, Math.min(max, Math.floor(number)));
 }
 
 function detectApplicationError(payload) {

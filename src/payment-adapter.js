@@ -2,6 +2,7 @@ export const PAYMENT_BACKENDS = ["dev", "x402", "omniagentpay", "circle_arc"];
 
 export function currentPaymentBackend() {
   const backend = process.env.ADN_PAYMENT_BACKEND || process.env.ADN_PAYMENT_MODE || "dev";
+  if (backend === "real") return "x402";
   return PAYMENT_BACKENDS.includes(backend) ? backend : "dev";
 }
 

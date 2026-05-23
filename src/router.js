@@ -2,7 +2,7 @@ import { invokePaidService, searchServices } from "./registry.js";
 import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
 import { createPaymentQuote } from "./payment-adapter.js";
 import { createEvidenceEnvelope } from "./evidence.js";
-import { summarizeTrust } from "./store.js";
+import { summarizeHealth, summarizeProvenance, summarizeTrust } from "./store.js";
 import { writePersistentServiceEvent } from "./persistence.js";
 
 export const ROUTER_STATUSES = {
@@ -668,19 +668,29 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
   const assetFit = intent.asset ? Number(sampleText.includes(String(intent.asset).toLowerCase())) : 1;
   const trust = summarizeTrust(record);
   const trustScore = trust.trust_score;
+  const health = summarizeHealth(record);
+  const provenance = summarizeProvenance(record);
   const freshnessLimit = Number(constraints.freshness_seconds || 0);
   const serviceFreshness = Number(manifest.freshness?.max_data_lag_seconds || 0);
   const freshnessFit = !freshnessLimit || (serviceFreshness && serviceFreshness <= freshnessLimit) ? 1 : 0.35;
   const maxPrice = Number(constraints.max_price_usdc || 0);
   const price = Number(manifest.pricing.amount);
   const priceFit = !maxPrice ? 1 : Math.max(0, 1 - price / Math.max(maxPrice, price));
+  const consumerSignal = trust.average_consumer_score ?? trust.usefulness_rate ?? trust.intent_fit_rate ?? 0.5;
+  const recentFailurePenalty = trust.recent_failure_rate == null ? 0 : trust.recent_failure_rate * 0.18;
+  const healthFit = health.status === "healthy" ? 1 : health.status === "degraded" ? 0.35 : 0.7;
+  const provenanceFit = provenanceScore(provenance.source_provenance_level);
   const score =
-    (capabilityHits / requiredCapabilities.length) * 0.35 +
-    assetFit * 0.15 +
-    trustScore * 0.2 +
-    freshnessFit * 0.15 +
-    priceFit * 0.1 +
-    matchScore * 0.05;
+    (capabilityHits / requiredCapabilities.length) * 0.28 +
+    assetFit * 0.12 +
+    trustScore * 0.16 +
+    consumerSignal * 0.12 +
+    freshnessFit * 0.11 +
+    priceFit * 0.08 +
+    matchScore * 0.05 +
+    healthFit * 0.05 +
+    provenanceFit * 0.03 -
+    recentFailurePenalty;
 
   return {
     service_id: manifest.service_id,
@@ -688,9 +698,34 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
     provider_id: manifest.provider.provider_id,
     pricing: manifest.pricing,
     trust_score: Number(trustScore.toFixed(4)),
-    routing_score: Number(score.toFixed(4)),
-    selection_reason: `Matched ${capabilityHits}/${requiredCapabilities.length} required capabilities, verification=${record.verification_status}, trust=${trustScore.toFixed(2)}, consumer_feedback=${trust.consumer_feedback_count}, price=${manifest.pricing.amount} ${manifest.pricing.currency}.`
+    consumer_feedback_count: trust.consumer_feedback_count,
+    recent_failure_rate: trust.recent_failure_rate,
+    health_status: health.status,
+    source_provenance_level: provenance.source_provenance_level,
+    selection_badges: selectionBadges({ trust, health, provenance, record }),
+    routing_score: Number(Math.max(0, score).toFixed(4)),
+    selection_reason: `Matched ${capabilityHits}/${requiredCapabilities.length} required capabilities, verification=${record.verification_status}, trust=${trustScore.toFixed(2)}, consumer_feedback=${trust.consumer_feedback_count}, recent_failure=${trust.recent_failure_rate ?? "n/a"}, health=${health.status}, provenance=${provenance.source_provenance_level}, price=${manifest.pricing.amount} ${manifest.pricing.currency}.`
   };
+}
+
+function provenanceScore(level) {
+  if (level === "official_verified") return 1;
+  if (level === "provider_owned") return 0.85;
+  if (level === "authorized_reseller") return 0.75;
+  if (level === "wrapped_api") return 0.55;
+  if (level === "scraped") return 0.35;
+  return 0.25;
+}
+
+function selectionBadges({ trust, health, provenance, record }) {
+  const badges = [];
+  if (record.verification_status === "verified") badges.push("verified_live_endpoint");
+  if (health.status === "healthy") badges.push("healthy");
+  if (provenance.source_provenance_level && provenance.source_provenance_level !== "unknown") badges.push(`source_${provenance.source_provenance_level}`);
+  if (trust.consumer_feedback_count > 0) badges.push("has_agent_feedback");
+  if ((trust.average_consumer_score ?? trust.usefulness_rate ?? 0) >= 0.8) badges.push("agent_useful");
+  if ((trust.recent_failure_rate ?? 0) > 0.3) badges.push("recent_failures");
+  return badges;
 }
 
 function attachVerificationToLatestFeedback(record, requestId, verification) {
@@ -722,12 +757,17 @@ function serviceCoversCapability(surfaceText, capability) {
 }
 
 function summarizeCandidates(candidates) {
-  return candidates.map(({ service_id, title, provider_id, pricing, trust_score, routing_score, selection_reason }) => ({
+  return candidates.map(({ service_id, title, provider_id, pricing, trust_score, routing_score, selection_reason, health_status, source_provenance_level, recent_failure_rate, consumer_feedback_count, selection_badges }) => ({
     service_id,
     title,
     provider_id,
     pricing,
     trust_score,
+    health_status,
+    source_provenance_level,
+    recent_failure_rate,
+    consumer_feedback_count,
+    selection_badges,
     routing_score,
     selection_reason
   }));
@@ -755,7 +795,7 @@ function recordRouteObservation(store, {
     score_model: {
       name: "heuristic_weighted_ranker",
       version: "2026-05-20",
-      features: ["capability_fit", "asset_fit", "trust_score", "freshness_fit", "price_fit", "text_match"]
+      features: ["capability_fit", "asset_fit", "trust_score", "consumer_feedback", "recent_failure_rate", "health_status", "source_provenance", "freshness_fit", "price_fit", "text_match"]
     },
     candidates_considered: candidates.length,
     candidates: summarizeCandidates(candidates),

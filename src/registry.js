@@ -4,7 +4,7 @@ import { publicServiceRecord, summarizeTrust } from "./store.js";
 import { normalizeEndpoint } from "./http-utils.js";
 import { suggestCapabilities } from "./id-utils.js";
 import { createSettlementReceipt } from "./payment-adapter.js";
-import { normalizeConsumerFeedback } from "./verifier.js";
+import { normalizeConsumerFeedback, verifyServiceResult } from "./verifier.js";
 import { listPersistentServiceEvents, writePersistentServiceEvent } from "./persistence.js";
 
 export function registerService(store, manifest, baseUrl) {
@@ -224,7 +224,9 @@ export async function invokePaidService(store, serviceId, input, budget) {
   const body = await paidResponse.json();
   const schemaErrors = validateJsonSchema(body, manifest.output_schema);
   const envelopeErrors = validateEnvelope(body);
+  const resultErrors = validateRealResultFeedback(body);
   const schemaValid = schemaErrors.length === 0 && envelopeErrors.length === 0;
+  const verification = verifyServiceResult({ result: body, manifest, intent: input, constraints: {} });
   const paymentTx = decodePaymentTx(proof);
   const settlementReceipt = createSettlementReceipt({
     manifest,
@@ -240,19 +242,46 @@ export async function invokePaidService(store, serviceId, input, budget) {
     payment_tx: paymentTx,
     settlement_receipt: settlementReceipt,
     status: paidResponse.ok ? "success" : "error",
+    http_status: paidResponse.status,
     schema_valid: schemaValid,
+    verification,
+    business_error: resultErrors[0] || null,
     latency_ms: Date.now() - started,
-    consumer_rating: paidResponse.ok && schemaValid ? 1 : 0,
+    consumer_rating: paidResponse.ok && schemaValid && !resultErrors.length ? 1 : 0,
     created_at: new Date().toISOString()
   };
+  const qualityEvent = createQualityEvent({
+    serviceId,
+    providerId: manifest.provider.provider_id,
+    requestId: feedback.request_id,
+    input,
+    result: body,
+    feedback,
+    verification,
+    schemaErrors,
+    envelopeErrors,
+    resultErrors
+  });
   record.feedback_events.push(feedback);
+  record.quality_events = record.quality_events || [];
+  record.quality_events.push(qualityEvent);
+  store.feedbackEvents = store.feedbackEvents || [];
+  store.qualityEvents = store.qualityEvents || [];
+  store.invocationLogs = store.invocationLogs || [];
   store.feedbackEvents.push(feedback);
+  store.qualityEvents.push(qualityEvent);
   store.invocationLogs.push({ service_id: serviceId, input, feedback });
   await writePersistentServiceEvent({
     eventType: "operational_feedback",
     serviceId,
     requestId: feedback.request_id,
     event: feedback
+  });
+  await writePersistentServiceEvent({
+    eventType: "quality_event",
+    serviceId,
+    requestId: feedback.request_id,
+    event: qualityEvent
   });
 
   return {
@@ -262,6 +291,29 @@ export async function invokePaidService(store, serviceId, input, budget) {
       feedback
     }
   };
+}
+
+export async function runServiceHealthCheck(store, serviceId) {
+  const record = store.services.get(serviceId);
+  if (!record) return { ok: false, error: "SERVICE_NOT_FOUND" };
+  const validation = await validateService(store, serviceId);
+  record.health_checks = record.health_checks || [];
+  const healthEvent = {
+    event_version: "agent_service_health_check_v1",
+    service_id: serviceId,
+    provider_id: record.manifest.provider.provider_id,
+    ok: validation.ok,
+    validation,
+    created_at: new Date().toISOString()
+  };
+  record.health_checks.push(healthEvent);
+  await writePersistentServiceEvent({
+    eventType: "health_check",
+    serviceId,
+    requestId: healthEvent.created_at,
+    event: healthEvent
+  });
+  return healthEvent;
 }
 
 export function recordConsumerFeedback(store, body = {}) {
@@ -367,6 +419,27 @@ export async function hydratePersistentServiceEvents(store) {
       }
       continue;
     }
+    if (row.event_type === "quality_event") {
+      const record = store.services.get(row.service_id);
+      if (record) {
+        record.quality_events = record.quality_events || [];
+        if (!record.quality_events.some((item) => item.quality_event_id === event.quality_event_id)) {
+          record.quality_events.push(event);
+        }
+      }
+      if (!store.qualityEvents.some((item) => item.quality_event_id === event.quality_event_id)) {
+        store.qualityEvents.push(event);
+      }
+      continue;
+    }
+    if (row.event_type === "health_check") {
+      const record = store.services.get(row.service_id);
+      if (record) {
+        record.health_checks = record.health_checks || [];
+        if (!record.health_checks.some((item) => item.created_at === event.created_at)) record.health_checks.push(event);
+      }
+      continue;
+    }
     if (row.event_type === "route_observation") {
       if (!store.routeObservations.some((item) => item.observation_id === event.observation_id)) {
         store.routeObservations.push(event);
@@ -382,6 +455,43 @@ export async function hydratePersistentServiceEvents(store) {
   return {
     ok: true,
     loaded: events.length
+  };
+}
+
+function createQualityEvent({
+  serviceId,
+  providerId,
+  requestId,
+  input,
+  result,
+  feedback,
+  verification,
+  schemaErrors = [],
+  envelopeErrors = [],
+  resultErrors = []
+}) {
+  const businessError = resultErrors[0] || null;
+  const blockingIssues = [
+    ...schemaErrors.map((message) => ({ code: "SCHEMA_ERROR", message })),
+    ...envelopeErrors.map((message) => ({ code: "ENVELOPE_ERROR", message })),
+    ...resultErrors
+  ];
+  return {
+    quality_event_id: `qe_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`,
+    event_version: "agent_service_quality_event_v1",
+    service_id: serviceId,
+    provider_id: providerId,
+    request_id: requestId,
+    input,
+    status: blockingIssues.length ? "quality_issue" : "passed",
+    deterministic_verification: verification,
+    business_error: businessError ? { detected: true, ...businessError } : { detected: false },
+    http_status: feedback.http_status,
+    payment_tx: feedback.payment_tx,
+    blocking_issue_count: blockingIssues.length,
+    blocking_issues: blockingIssues,
+    agent_feedback_expected: true,
+    created_at: new Date().toISOString()
   };
 }
 
@@ -530,9 +640,26 @@ function detectApplicationErrorData(data) {
 
 function previewResultData(data) {
   if (data === undefined) return null;
-  try {
-    return JSON.parse(JSON.stringify(data).slice(0, 2000));
-  } catch {
-    return null;
+  return compactPreview(data);
+}
+
+function compactPreview(value, { maxArrayItems = 5, maxObjectKeys = 24, maxStringLength = 240 } = {}) {
+  if (Array.isArray(value)) {
+    return value.slice(0, maxArrayItems).map((item) => compactPreview(item, { maxArrayItems, maxObjectKeys, maxStringLength }));
   }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value);
+    const output = {};
+    for (const [key, child] of entries.slice(0, maxObjectKeys)) {
+      output[key] = compactPreview(child, { maxArrayItems, maxObjectKeys, maxStringLength });
+    }
+    if (entries.length > maxObjectKeys) {
+      output.__preview_truncated_keys = entries.length - maxObjectKeys;
+    }
+    return output;
+  }
+  if (typeof value === "string" && value.length > maxStringLength) {
+    return `${value.slice(0, maxStringLength)}...`;
+  }
+  return value;
 }

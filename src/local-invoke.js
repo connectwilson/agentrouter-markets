@@ -1,10 +1,15 @@
 import { createWalletPaymentProof } from "./payment.js";
+import { createSettlementReceipt, currentPaymentBackend } from "./payment-adapter.js";
+import { invokeWithRealX402, isRealX402Enabled } from "./real-x402-client.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
 
 export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, input = {}, budget = { max_amount: "0.05", currency: "USDC" } }) {
   const manifest = await postJson(baseUrl, "/connector/get_manifest", { service_id: serviceId });
   if (budget.max_amount != null && Number(manifest.pricing.amount) > Number(budget.max_amount)) {
     throw new Error(`Service costs ${manifest.pricing.amount} ${manifest.pricing.currency}, above budget ${budget.max_amount} ${budget.currency}.`);
+  }
+  if (isRealX402Enabled()) {
+    return invokeOfficialX402Service({ manifest, serviceId, input });
   }
 
   const firstResponse = await fetch(manifest.endpoint.url, {
@@ -69,6 +74,63 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   };
 }
 
+async function invokeOfficialX402Service({ manifest, serviceId, input }) {
+  const wallet = await readWallet();
+  const started = Date.now();
+  const body = methodAllowsBody(manifest.endpoint.method) ? JSON.stringify(input) : undefined;
+  const paid = await invokeWithRealX402({
+    url: manifest.endpoint.url,
+    method: manifest.endpoint.method || "POST",
+    body,
+    wallet
+  });
+  const result = paid.payload;
+  const settlement = paid.settlement;
+  const event = {
+    service_id: serviceId,
+    provider_id: manifest.provider.provider_id,
+    payer: wallet.address,
+    payment_tx: paid.payment_tx,
+    amount: settlement?.amount || manifest.pricing.amount,
+    currency: manifest.pricing.currency,
+    network: settlement?.network || manifest.pricing.network,
+    pay_to: manifest.pricing.pay_to || null,
+    challenge_nonce: null,
+    challenge_expires_at: null,
+    status: "success",
+    backend: "x402"
+  };
+  await recordPayment(event);
+  return {
+    result,
+    local_payment: event,
+    feedback: {
+      event_version: "agent_service_feedback_v1",
+      request_id: result?.request_id || `req_${Date.now()}`,
+      service_id: serviceId,
+      provider_id: manifest.provider.provider_id,
+      consumer_id: "local_agent_wallet",
+      payment_tx: paid.payment_tx,
+      settlement_receipt: createSettlementReceipt({
+        manifest,
+        challenge: {
+          amount: event.amount,
+          asset: event.currency,
+          network: event.network,
+          pay_to: event.pay_to
+        },
+        txHash: paid.payment_tx
+      }),
+      status: "success",
+      schema_valid: true,
+      latency_ms: Date.now() - started,
+      consumer_rating: 1,
+      notes: ["Paid through official x402 client flow."],
+      payment_backend: currentPaymentBackend()
+    }
+  };
+}
+
 async function postJson(baseUrl, path, body) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
@@ -90,4 +152,8 @@ function decodePaymentTx(proof) {
   } catch {
     return null;
   }
+}
+
+function methodAllowsBody(method = "POST") {
+  return !["GET", "HEAD"].includes(String(method).toUpperCase());
 }

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { deriveAddress } from "./wallet.js";
 
 export const PAYMENT_MODE = process.env.ADN_PAYMENT_MODE || "dev";
 export const DEFAULT_FACILITATOR_URL = process.env.ADN_X402_FACILITATOR_URL || "https://x402.org/facilitator";
@@ -162,11 +163,6 @@ function verifyWalletPaymentPayload({ payload, signature, expected, decoded }) {
 
 function canonicalPayload(payload) {
   return JSON.stringify(Object.fromEntries(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b))));
-}
-
-function deriveAddress(publicKeyPem) {
-  const hash = crypto.createHash("sha256").update(publicKeyPem).digest("hex");
-  return `0x${hash.slice(-40)}`;
 }
 
 function hashResource({ serviceId, amount, currency, network, payTo }) {

@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
+import http from "node:http";
+import { invokePaidServiceWithLocalWallet } from "../src/local-invoke.js";
+import { routeTaskWithLocalWallet } from "../src/local-route.js";
+import { currentPaymentBackend } from "../src/payment-adapter.js";
+import { initSessionWallet, initWallet, readWallet, walletStatus } from "../src/wallet.js";
 
 const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter-markets.onrender.com").replace(/\/$/, "");
 
@@ -52,10 +58,49 @@ const tools = [
       type: "object",
       properties: {}
     }
+  },
+  {
+    name: "agentrouter_wallet_status",
+    description: "Check whether this local AI client already has an encrypted EVM AgentRouter wallet for future x402 payments. Never returns private keys.",
+    inputSchema: {
+      type: "object",
+      properties: {}
+    }
+  },
+  {
+    name: "agentrouter_wallet_create",
+    description: "Default wallet bootstrap: create a local encrypted EVM session wallet entirely inside the Claude MCP flow. No passphrase is typed into chat; a local random encryption secret is generated and stored on this machine. Never returns private keys.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force: { type: "boolean", description: "Overwrite the existing local AgentRouter wallet. Use only after explicit user confirmation.", default: false }
+      }
+    }
+  },
+  {
+    name: "agentrouter_wallet_init",
+    description: "Advanced wallet bootstrap: create a local encrypted secp256k1 EVM wallet using ADN_WALLET_PASSPHRASE if it is already configured. Prefer agentrouter_wallet_create for normal users. Never returns private keys.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force: { type: "boolean", description: "Overwrite the existing local AgentRouter wallet. Use only after explicit user confirmation.", default: false }
+      }
+    }
+  },
+  {
+    name: "agentrouter_wallet_setup",
+    description: "Advanced wallet bootstrap: start a one-time local browser setup page where the user can enter an encryption passphrase directly on this machine. Prefer agentrouter_wallet_create for normal users.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force: { type: "boolean", description: "Allow replacing an existing local wallet after explicit user confirmation.", default: false }
+      }
+    }
   }
 ];
 
 let buffer = Buffer.alloc(0);
+let walletSetupSession = null;
 
 process.stdin.on("data", async (chunk) => {
   buffer = Buffer.concat([buffer, chunk]);
@@ -102,13 +147,15 @@ async function handleMessage(message) {
 
   try {
     if (message.method === "initialize") {
+      const autoWallet = await ensureAutoWallet();
       send({
         jsonrpc: "2.0",
         id: message.id,
         result: {
           protocolVersion: message.params?.protocolVersion || "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "AgentRouter", version: "0.1.0" }
+          serverInfo: { name: "AgentRouter", version: "0.1.0" },
+          agentrouter: { auto_wallet: autoWallet }
         }
       });
       return;
@@ -145,6 +192,14 @@ async function handleMessage(message) {
 
 async function callTool(name, args) {
   if (name === "agentrouter_ask") {
+    if (currentPaymentBackend() === "x402") {
+      return routeTaskWithLocalWallet({
+        baseUrl,
+        task: args.task,
+        constraints: { max_price_usdc: args.max_price || "0.05" },
+        budget: { max_amount: args.max_price || "0.05", currency: args.currency || "USDC" }
+      });
+    }
     return post("/agent-router/ask", {
       task: args.task,
       max_price: args.max_price || "0.05",
@@ -153,6 +208,9 @@ async function callTool(name, args) {
   }
 
   if (name === "agentrouter_request") {
+    if (currentPaymentBackend() === "x402") {
+      return requestWithLocalWallet(args);
+    }
     return post("/agent-router/request", {
       capability: args.capability,
       params: args.params || {},
@@ -175,11 +233,79 @@ async function callTool(name, args) {
     return get("/capabilities");
   }
 
+  if (name === "agentrouter_wallet_status") {
+    return walletStatus();
+  }
+
+  if (name === "agentrouter_wallet_create") {
+    const wallet = await initSessionWallet({ force: Boolean(args.force) });
+    return {
+      ok: true,
+      status: "wallet_ready",
+      wallet,
+      safety_note: "This is a local session wallet for small x402 API budgets. No private key is returned to Claude.",
+      next_step: "Fund this local EVM wallet with a small Base USDC budget before real x402 settlement."
+    };
+  }
+
+  if (name === "agentrouter_wallet_init") {
+    try {
+      const wallet = await initWallet({ force: Boolean(args.force) });
+      return {
+        ok: true,
+        wallet,
+        next_step: "Fund this local EVM wallet with a small Base USDC budget before real x402 settlement."
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: /ADN_WALLET_PASSPHRASE/.test(error.message) ? "needs_wallet_passphrase_env" : "wallet_init_failed",
+        message: error.message,
+        setup_hint: "Use agentrouter_wallet_create for the default in-Claude session wallet flow, or agentrouter_wallet_setup for advanced passphrase mode."
+      };
+    }
+  }
+
+  if (name === "agentrouter_wallet_setup") {
+    return startWalletSetupSession({ force: Boolean(args.force) });
+  }
+
   return {
     ok: false,
     status: "unknown_tool",
     tool: name,
     available_tools: tools.map((tool) => tool.name)
+  };
+}
+
+async function requestWithLocalWallet(args) {
+  const quote = await post("/agent-router/quote", {
+    capability: args.capability,
+    params: args.params || {},
+    constraints: args.constraints || {},
+    budget: args.budget || {},
+    consumer_context: args.consumer_context || {}
+  });
+  if (!quote.ok) return quote;
+  const invocation = await invokePaidServiceWithLocalWallet({
+    baseUrl,
+    serviceId: quote.selected_service.service_id,
+    input: quote.input,
+    budget: {
+      max_amount: args.constraints?.max_price_usdc || args.budget?.max_amount || "0.05",
+      currency: args.budget?.currency || "USDC"
+    }
+  });
+  return {
+    ok: true,
+    status: "paid_with_local_wallet",
+    request: quote.request,
+    selected_service: quote.selected_service,
+    input: quote.input,
+    quote: quote.quote,
+    result: invocation.result,
+    feedback: invocation.feedback,
+    local_payment: invocation.local_payment
   };
 }
 
@@ -231,4 +357,274 @@ function sendError(id, code, message) {
     id,
     error: { code, message }
   });
+}
+
+async function ensureAutoWallet() {
+  if (process.env.AGENT_ROUTER_AUTO_WALLET === "0") {
+    return {
+      enabled: false,
+      status: "disabled"
+    };
+  }
+  const status = await walletStatus();
+  if (status.initialized) {
+    return {
+      enabled: true,
+      created: false,
+      status: "wallet_ready",
+      address: status.address,
+      address_type: status.address_type,
+      network_hint: status.network_hint,
+      key_management: status.key_management
+    };
+  }
+  const wallet = await initSessionWallet();
+  return {
+    enabled: true,
+    created: true,
+    status: "wallet_ready",
+    address: wallet.address,
+    address_type: wallet.address_type,
+    network_hint: wallet.network_hint,
+    key_management: wallet.key_management
+  };
+}
+
+async function startWalletSetupSession({ force = false } = {}) {
+  if (walletSetupSession && Date.now() < walletSetupSession.expiresAtMs) {
+    return walletSetupSession.publicPayload;
+  }
+  if (walletSetupSession) closeWalletSetupSession();
+
+  const token = crypto.randomBytes(24).toString("base64url");
+  const expiresAtMs = Date.now() + 10 * 60 * 1000;
+  const server = http.createServer(async (request, response) => {
+    try {
+      await handleWalletSetupRequest({ request, response, token, force, expiresAtMs });
+    } catch (error) {
+      sendSetupHtml(response, 500, renderSetupPage({
+        title: "Setup failed",
+        message: error.message,
+        token,
+        force,
+        isError: true
+      }));
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  const setupUrl = `http://127.0.0.1:${address.port}/?token=${encodeURIComponent(token)}`;
+  const publicPayload = {
+    ok: true,
+    status: "wallet_setup_pending",
+    setup_url: setupUrl,
+    expires_at: new Date(expiresAtMs).toISOString(),
+    instructions: "Open this local URL in a browser and enter a wallet encryption passphrase there. Do not paste the passphrase into Claude or any chat."
+  };
+  walletSetupSession = { server, token, expiresAtMs, publicPayload };
+  server.on("close", () => {
+    if (walletSetupSession?.token === token) walletSetupSession = null;
+  });
+  return publicPayload;
+}
+
+async function handleWalletSetupRequest({ request, response, token, force, expiresAtMs }) {
+  const url = new URL(request.url, "http://127.0.0.1");
+  if (url.searchParams.get("token") !== token || Date.now() > expiresAtMs) {
+    sendSetupHtml(response, 403, renderSetupPage({
+      title: "Setup link expired",
+      message: "Ask Claude to start wallet setup again.",
+      token,
+      force,
+      isError: true
+    }));
+    return;
+  }
+
+  if (request.method === "GET") {
+    sendSetupHtml(response, 200, renderSetupPage({ token, force }));
+    return;
+  }
+
+  if (request.method !== "POST" || url.pathname !== "/setup") {
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    response.end("Not found");
+    return;
+  }
+
+  const body = await readSetupBody(request);
+  const form = new URLSearchParams(body);
+  const passphrase = form.get("passphrase") || "";
+  const confirm = form.get("confirm") || "";
+  if (passphrase.length < 8) {
+    sendSetupHtml(response, 400, renderSetupPage({
+      title: "Use a longer passphrase",
+      message: "The wallet encryption passphrase must be at least 8 characters.",
+      token,
+      force,
+      isError: true
+    }));
+    return;
+  }
+  if (passphrase !== confirm) {
+    sendSetupHtml(response, 400, renderSetupPage({
+      title: "Passphrases do not match",
+      message: "Please re-enter the same passphrase in both fields.",
+      token,
+      force,
+      isError: true
+    }));
+    return;
+  }
+
+  const wallet = await createOrUnlockWalletWithPassphrase({ passphrase, force });
+  sendSetupHtml(response, 200, renderSuccessPage(wallet));
+  setTimeout(closeWalletSetupSession, 500);
+}
+
+async function createOrUnlockWalletWithPassphrase({ passphrase, force }) {
+  const previous = process.env.ADN_WALLET_PASSPHRASE;
+  process.env.ADN_WALLET_PASSPHRASE = passphrase;
+  try {
+    const status = await walletStatus();
+    if (status.initialized && !force) {
+      const wallet = await readWallet();
+      return {
+        ok: true,
+        status: "wallet_unlocked",
+        wallet: publicWalletFromUnlocked(wallet)
+      };
+    }
+    const wallet = await initWallet({ force });
+    return {
+      ok: true,
+      status: status.initialized ? "wallet_replaced" : "wallet_created",
+      wallet
+    };
+  } catch (error) {
+    if (previous === undefined) delete process.env.ADN_WALLET_PASSPHRASE;
+    else process.env.ADN_WALLET_PASSPHRASE = previous;
+    throw error;
+  }
+}
+
+function publicWalletFromUnlocked(wallet) {
+  return {
+    wallet_version: wallet.wallet_version,
+    address_type: wallet.address_type,
+    network_hint: wallet.network_hint,
+    address: wallet.address,
+    public_key_hex: wallet.public_key_hex,
+    public_key_pem: wallet.public_key_pem,
+    created_at: wallet.created_at
+  };
+}
+
+function closeWalletSetupSession() {
+  if (!walletSetupSession) return;
+  const session = walletSetupSession;
+  walletSetupSession = null;
+  session.server.close();
+}
+
+function readSetupBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 4096) {
+        reject(new Error("Setup form is too large."));
+        request.destroy();
+      }
+    });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function sendSetupHtml(response, status, html) {
+  response.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store"
+  });
+  response.end(html);
+}
+
+function renderSetupPage({ title = "Create AgentRouter wallet", message = "", token, force, isError = false }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f7f3; color: #17231d; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    main { width: min(520px, 100%); background: #fff; border: 1px solid #d9dfd7; border-radius: 12px; padding: 28px; box-shadow: 0 18px 45px rgba(23, 35, 29, 0.08); }
+    h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.15; }
+    p { color: #5f6b62; line-height: 1.5; }
+    .notice { border-left: 4px solid ${isError ? "#c0392b" : "#89b8b2"}; background: ${isError ? "#fff1ee" : "#edf6f4"}; padding: 12px 14px; border-radius: 8px; margin: 18px 0; color: #24352c; }
+    label { display: block; font-weight: 700; margin-top: 18px; }
+    input { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 13px 14px; border: 1px solid #cbd4ca; border-radius: 8px; font: inherit; }
+    button { margin-top: 22px; width: 100%; border: 0; border-radius: 8px; padding: 14px 18px; font: inherit; font-weight: 800; color: #fff; background: #17231d; cursor: pointer; }
+    small { display: block; margin-top: 14px; color: #68736b; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${escapeHtml(title)}</h1>
+    <p>This creates or unlocks a local encrypted EVM wallet for future x402 payments. The passphrase is submitted only to the local AgentRouter MCP process on this machine.</p>
+    ${message ? `<div class="notice">${escapeHtml(message)}</div>` : ""}
+    <form method="post" action="/setup?token=${encodeURIComponent(token)}">
+      <label for="passphrase">Encryption passphrase</label>
+      <input id="passphrase" name="passphrase" type="password" autocomplete="new-password" minlength="8" required autofocus>
+      <label for="confirm">Confirm passphrase</label>
+      <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" required>
+      <button type="submit">${force ? "Replace wallet" : "Create or unlock wallet"}</button>
+      <small>Do not use this page for a wallet that already holds meaningful funds. This MVP wallet is intended for small x402 budgets.</small>
+    </form>
+  </main>
+</body>
+</html>`;
+}
+
+function renderSuccessPage(result) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wallet ready</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f7f3; color: #17231d; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    main { width: min(560px, 100%); background: #fff; border: 1px solid #d9dfd7; border-radius: 12px; padding: 28px; box-shadow: 0 18px 45px rgba(23, 35, 29, 0.08); }
+    h1 { margin: 0 0 10px; font-size: 28px; }
+    p { color: #5f6b62; line-height: 1.5; }
+    code { display: block; overflow-wrap: anywhere; background: #102019; color: #eff8f2; padding: 14px; border-radius: 8px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Wallet ready</h1>
+    <p>AgentRouter can now use this local encrypted EVM wallet in the current MCP session. You can close this tab and return to Claude.</p>
+    <code>${escapeHtml(result.wallet.address)}</code>
+  </main>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }

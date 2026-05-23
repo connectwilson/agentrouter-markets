@@ -1,6 +1,6 @@
 export function getX402ProductionPlan() {
   return {
-    status: "not_enabled_in_mvp",
+    status: "buyer_client_integrated",
     current_mode: process.env.ADN_PAYMENT_MODE || "dev",
     target_packages: [
       "@x402/core",
@@ -8,13 +8,13 @@ export function getX402ProductionPlan() {
       "@x402/fetch"
     ],
     buyer_side: [
-      "Replace createWalletPaymentProof with an x402 exact EVM client payment authorization.",
-      "Use Alice's local Agent Wallet or a session wallet as the signer.",
+      "Set ADN_PAYMENT_BACKEND=x402 or ADN_PAYMENT_MODE=real to route demand-side paid calls through the official x402 buyer SDK.",
+      "Use Alice's local Agent Wallet or a session wallet as the EVM signer.",
       "Keep wallet policy checks before signing any x402 payload.",
-      "Send the resulting x402 payment payload in the protocol-defined payment header."
+      "The official @x402/fetch wrapper handles 402 PAYMENT-REQUIRED parsing, PAYMENT-SIGNATURE creation, retry, and PAYMENT-RESPONSE parsing."
     ],
     seller_side: [
-      "Replace verifyDevPaymentProof with facilitator /verify and /settle calls.",
+      "Next step: replace provider-side verifyDevPaymentProof with official x402 resource-server middleware or facilitator /verify and /settle calls.",
       "Set provider receiving wallet from manifest or ADN_PROVIDER_RECEIVE_ADDRESS.",
       "Return official x402 payment requirements in HTTP 402 responses.",
       "Only serve the resource after facilitator verification/settlement succeeds."
