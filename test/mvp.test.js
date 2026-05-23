@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import http from "node:http";
 import { spawn } from "node:child_process";
 
 const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "adn-mvp-test-"));
@@ -13,6 +14,7 @@ process.env.ADN_WALLET_PASSPHRASE = "test-passphrase";
 const { createServer, seedDemoService } = await import("../src/server.js");
 const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
+const { discoverApiServices } = await import("../src/openapi-import.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
 const { readWallet } = await import("../src/wallet.js");
 const { createWalletPaymentProof } = await import("../src/payment.js");
@@ -65,7 +67,7 @@ test("home page and Provider Studio render separately", async () => {
     assert.equal(agent.status, 200);
     const agentHtml = await agent.text();
     assert.match(agentHtml, /API Hub for agents/);
-    assert.match(agentHtml, /Playground/);
+    assert.match(agentHtml, /Available services/);
     assert.match(agentHtml, /claude mcp add AgentRouter/);
 
     const studio = await fetch(`${baseUrl}/studio`);
@@ -1229,6 +1231,120 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
     const observations = await observationsResponse.json();
     assert.ok(observations.observations.some((event) => event.observation_id === routed.observation.observation_id));
   });
+});
+
+test("Provider Studio imports endpoint drafts from a Skill document", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/blockbeats-skill") {
+      res.writeHead(200, { "content-type": "text/markdown" });
+      res.end(`# BlockBeats API Skill
+
+Base URL: \`http://127.0.0.1:${upstream.address().port}\` Auth: All requests require Header \`api-key: $BLOCKBEATS_API_KEY\`
+
+# 1. BTC ETF net inflow
+curl -s -H "api-key: $BLOCKBEATS_API_KEY" \\
+  "http://127.0.0.1:${upstream.address().port}/v1/data/btc_etf"
+
+### Data Endpoints
+BTC ETF net inflow \`GET /v1/data/btc_etf\` none
+Top 10 on-chain net inflow \`GET /v1/data/top10_netflow\` \`network=solana/base/ethereum\`
+`);
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: 0, message: "", data: { rows: [{ value: 1 }] } }));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/blockbeats-skill`,
+      default_price: "0.01",
+      secret_value: "bbp_test_key"
+    }, baseUrl);
+    assert.equal(discovered.mode, "skill_document");
+    assert.equal(discovered.provider.provider_name, "BlockBeats");
+    assert.ok(discovered.drafts.some((draft) => draft.path === "/v1/data/btc_etf"));
+    const netflow = discovered.drafts.find((draft) => draft.path === "/v1/data/top10_netflow");
+    assert.equal(netflow.auth_header, "api-key");
+    assert.equal(netflow.sample_request.network, "solana");
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+test("Provider Studio imports loose endpoint references from a Skill document", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/loose-skill") {
+      res.writeHead(200, { "content-type": "text/markdown" });
+      res.end(`# Loose Market Skill
+
+Base URL: http://127.0.0.1:${upstream.address().port}
+Auth: Header x-api-key: $MARKET_API_KEY
+
+## Available data calls
+
+Name: Exchange overview
+Endpoint: GET /api/market/exchanges
+
+The ticker endpoint is also available at http://127.0.0.1:${upstream.address().port}/api/market/ticker?symbol=BTC
+`);
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: "success", data: [{ symbol: "BTC", price: 1 }] }));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/loose-skill`,
+      default_price: "0.01",
+      secret_value: "market_test_key"
+    }, baseUrl);
+    assert.equal(discovered.mode, "skill_document");
+    assert.ok(discovered.drafts.some((draft) => draft.path === "/api/market/exchanges"));
+    const ticker = discovered.drafts.find((draft) => draft.path === "/api/market/ticker");
+    assert.equal(ticker.sample_request.symbol, "BTC");
+    assert.equal(ticker.auth_header, "x-api-key");
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+test("Provider Studio imports ClawHub-style HTML embedded Skill readme", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/clawhub-skill") {
+      const readme = `---\r\nname: blockbeats-skill\r\n---\r\n\r\n# BlockBeats API Skill\r\n\r\n**Base URL**: \`http://127.0.0.1:${upstream.address().port}\`\r\n**Auth**: All requests require Header \`api-key: $BLOCKBEATS_API_KEY\`\r\n\r\n### Data Endpoints\r\n\r\n| Endpoint | URL | Key Parameters |\r\n|----------|-----|----------------|\r\n| BTC ETF net inflow | \`GET /v1/data/btc_etf\` | none |\r\n| Top 10 on-chain net inflow | \`GET /v1/data/top10_netflow\` | \`network=solana/base/ethereum\` |\r\n`;
+      const escaped = readme
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+        .replace(/</g, "\\x3C");
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><html><body><script>window.__SSR={readme:"${escaped}",ssr:!0}</script></body></html>`);
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: 0, message: "", data: { rows: [{ value: 1 }] } }));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/clawhub-skill`,
+      default_price: "0.01",
+      secret_value: "bbp_test_key"
+    }, baseUrl);
+    assert.equal(discovered.mode, "skill_document");
+    assert.ok(discovered.drafts.some((draft) => draft.path === "/v1/data/btc_etf"));
+    const netflow = discovered.drafts.find((draft) => draft.path === "/v1/data/top10_netflow");
+    assert.equal(netflow.auth_header, "api-key");
+    assert.equal(netflow.sample_request.network, "solana");
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
 });
 
 test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {

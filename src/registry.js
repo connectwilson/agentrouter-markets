@@ -42,7 +42,11 @@ export function registerService(store, manifest, baseUrl) {
     manifest: normalized,
     verification_status: "pending",
     validation_runs: [],
-    feedback_events: []
+    feedback_events: [],
+    quality_events: [],
+    health_checks: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
   store.providers.set(normalized.provider.provider_id, normalized.provider);
   store.services.set(normalized.service_id, record);
@@ -561,6 +565,7 @@ function validateManifest(manifest) {
 function storeValidation(record, result) {
   record.validation_runs.push(result);
   record.verification_status = result.ok ? "verified" : "failed";
+  record.updated_at = new Date().toISOString();
   return result;
 }
 

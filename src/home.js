@@ -7,58 +7,108 @@ export function homeHtml() {
     body: `
       <header class="hero">
         <div class="dot-grid" aria-hidden="true"></div>
-        <div class="shell hero-center">
-          <span class="eyebrow">Agent-native API hub</span>
+        <div class="shell wide-shell hero-center">
+          <span class="eyebrow">Agent-native data access</span>
           <h1>AgentRouter Markets</h1>
-          <p class="lead">Discover, call, and verify data APIs for AI agents. Providers publish working endpoints. Agents install once, route by task, and feed quality signals back into the network.</p>
-          <form class="hero-search" action="/agent" method="GET">
-            <input name="q" placeholder="Search APIs, providers, capabilities, or tasks..." />
-            <button type="submit">Search</button>
-          </form>
-          <div class="home-panel">
-            <strong>Network snapshot</strong>
-            <div class="metrics compact">
-              <div class="metric"><strong id="home-services">--</strong><span>Services</span></div>
-              <div class="metric"><strong id="home-verified">--</strong><span>Verified</span></div>
-              <div class="metric"><strong id="home-calls">--</strong><span>Calls</span></div>
-              <div class="metric"><strong id="home-usdc">--</strong><span>USDC</span></div>
+          <p class="lead">A service registry where agents can find working data APIs, call them through one interface, and turn every result into quality feedback.</p>
+
+          <div class="install-strip" aria-label="AgentRouter install command">
+            <div>
+              <span>One-line install</span>
+              <code id="home-install-command">${html(installCommand)}</code>
             </div>
+            <button type="button" id="home-copy-install">Copy</button>
+          </div>
+
+          <div class="hero-paths">
+            <a class="path-card" href="/human">
+              <span class="path-label">For human</span>
+              <h2>Data provider studio</h2>
+              <p>Import a working API endpoint, verify the response, and publish it as an agent-callable paid service.</p>
+              <span class="path-action">Open provider dashboard</span>
+            </a>
+            <a class="path-card" href="/agent">
+              <span class="path-label">For agent</span>
+              <h2>Install once, route on demand</h2>
+              <p>Connect an AI client once, then discover services dynamically without pre-installing every provider tool.</p>
+              <span class="path-action">Open agent API hub</span>
+            </a>
+            <a class="path-card" href="/agent-router/trust">
+              <span class="path-label">Network</span>
+              <h2>Verified service quality</h2>
+              <p>Every paid call returns validation metadata and feeds the trust loop for future routing decisions.</p>
+              <span class="path-action">See reputation data</span>
+            </a>
           </div>
         </div>
       </header>
 
       <main>
-        <div class="shell landing-grid">
-          <a class="path-card" href="/human">
-            <span class="path-label">For human</span>
-            <h2>Publish and manage data APIs</h2>
-            <p>See your provided APIs, edit listings, add endpoints, and track total calls and USDC received.</p>
-            <span class="path-action">Open provider dashboard</span>
-          </a>
-          <a class="path-card" href="/agent">
-            <span class="path-label">For agent</span>
-            <h2>Install once and route to services</h2>
-            <p>Search registered services, inspect trust signals, and copy the MCP install command for AI clients.</p>
-            <span class="path-action">Open agent API hub</span>
-          </a>
-          <a class="path-card" href="/agent-router/trust">
-            <span class="path-label">Trust</span>
-            <h2>Audit service quality</h2>
-            <p>Inspect trust snapshots, feedback counts, verification status, quality events, and route observations.</p>
-            <span class="path-action">See reputation data</span>
-          </a>
-        </div>
-
-        <div class="shell">
-          <section class="card overview">
+        <section class="shell wide-shell stats-section">
+          <div class="stats-heading">
             <div>
-              <h2>Why this exists</h2>
-              <p>Traditional API hubs assume a human developer chooses an API, subscribes, manages keys, and wires clients manually. AgentRouter is for the moment an AI agent knows it needs data but should not force the user to pre-install every provider-specific tool.</p>
+              <span class="eyebrow">Network snapshot</span>
+              <h2>Overall stats</h2>
+              <p>Live registry activity for AgentRouter Markets.</p>
+            </div>
+            <a class="button ghost" href="/agent-router/stats">Raw stats</a>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-block">
+              <span>Registered services</span>
+              <strong id="home-services">--</strong>
+              <small>Published API cards</small>
+              <div class="spark" id="spark-services"></div>
+            </div>
+            <div class="stat-block">
+              <span>Verified services</span>
+              <strong id="home-verified">--</strong>
+              <small>Validation passed</small>
+              <div class="spark" id="spark-verified"></div>
+            </div>
+            <div class="stat-block">
+              <span>Service calls</span>
+              <strong id="home-calls">--</strong>
+              <small>Observed demand</small>
+              <div class="spark" id="spark-calls"></div>
+            </div>
+            <div class="stat-block">
+              <span>Estimated USDC</span>
+              <strong id="home-usdc">--</strong>
+              <small>Price × call count</small>
+              <div class="spark" id="spark-usdc"></div>
+            </div>
+          </div>
+
+          <div class="network-tables">
+            <section>
+              <div class="table-head">
+                <h3>Featured services</h3>
+                <a href="/agent">View hub -></a>
+              </div>
+              <div class="service-table" id="featured-services"></div>
+            </section>
+            <section>
+              <div class="table-head">
+                <h3>Recently registered</h3>
+                <a href="/human">Provider view -></a>
+              </div>
+              <div class="service-table" id="recent-services"></div>
+            </section>
+          </div>
+        </section>
+
+        <div class="shell wide-shell overview-wrap">
+          <section class="overview">
+            <div>
+              <span class="eyebrow">Core loop</span>
+              <h2>Built for the moment an agent hits a data wall</h2>
+              <p>Traditional API hubs assume a human chooses an API, subscribes, manages keys, and wires clients manually. AgentRouter gives the agent a live market of callable services instead.</p>
             </div>
             <div class="step-row">
-              <div><b>1</b><span>Provider publishes a verified endpoint</span></div>
-              <div><b>2</b><span>Agent discovers and routes by task</span></div>
-              <div><b>3</b><span>Call results update trust signals</span></div>
+              <div><b>01</b><span>Provider publishes a verified endpoint</span></div>
+              <div><b>02</b><span>Agent discovers and routes by task</span></div>
+              <div><b>03</b><span>Call results update trust signals</span></div>
             </div>
           </section>
         </div>
@@ -72,8 +122,58 @@ export function homeHtml() {
           setText("home-verified", stats.verified_services || 0);
           setText("home-calls", stats.total_calls || 0);
           setText("home-usdc", formatUsdc(usdc));
+          renderSparks(stats, usdc);
+          renderHomeTables(stats.services || []);
         }
         ${sharedClientHelpers()}
+        document.getElementById("home-copy-install").addEventListener("click", async () => {
+          const button = document.getElementById("home-copy-install");
+          try {
+            await navigator.clipboard.writeText(${JSON.stringify(installCommand)});
+            button.textContent = "Copied";
+            setTimeout(() => button.textContent = "Copy", 1200);
+          } catch {
+            button.textContent = "Select";
+          }
+        });
+        function renderSparks(stats, usdc) {
+          const values = [
+            ["spark-services", Number(stats.registered_services || 0)],
+            ["spark-verified", Number(stats.verified_services || 0)],
+            ["spark-calls", Number(stats.total_calls || 0)],
+            ["spark-usdc", Number(usdc || 0)]
+          ];
+          for (const [id, value] of values) {
+            const node = document.getElementById(id);
+            const seed = Math.max(1, value);
+            node.innerHTML = Array.from({ length: 28 }, (_, index) => {
+              const height = 8 + ((seed + index * 7) % 34);
+              return '<i style="height:' + height + 'px"></i>';
+            }).join("");
+          }
+        }
+        function renderHomeTables(services) {
+          const sorted = [...services].sort((a, b) =>
+            Number(b.trust_score || 0) + Number(b.total_calls || 0) - Number(a.trust_score || 0) - Number(a.total_calls || 0)
+          );
+          const recent = [...services].slice(-8).reverse();
+          document.getElementById("featured-services").innerHTML = renderRows(sorted.slice(0, 8), "score");
+          document.getElementById("recent-services").innerHTML = renderRows(recent.slice(0, 8), "when");
+        }
+        function renderRows(services, mode) {
+          if (!services.length) return '<div class="empty-row">No registered services yet.</div>';
+          return [
+            '<div class="service-row table-labels"><span>Service</span><span>Provider</span><span>' + (mode === "score" ? "Score" : "Calls") + '</span></div>',
+            ...services.map((service) => {
+              const score = service.trust_score == null ? "--" : Math.round(Number(service.trust_score) * 100);
+              return '<div class="service-row">' +
+                '<span><b>' + escapeHtml(service.service_id || service.title || "service") + '</b><small>' + escapeHtml(service.title || "Untitled service") + '</small></span>' +
+                '<span><mark>' + escapeHtml(service.provider_id || "provider") + '</mark></span>' +
+                '<span>' + (mode === "score" ? score : Number(service.total_calls || 0)) + '</span>' +
+              '</div>';
+            })
+          ].join("");
+        }
         loadHomeStats();
       </script>
     `
@@ -87,42 +187,152 @@ export function humanHtml() {
     active: "human",
     body: `
       <main>
-        <div class="shell human-layout">
-          <section class="card">
-            <h2>Provider Dashboard</h2>
-            <p>Track services published in this registry. The MVP shows all providers until account-level ownership is added.</p>
-            <div class="metrics">
-              <div class="metric"><strong id="human-services">--</strong><span>Provided APIs</span></div>
-              <div class="metric"><strong id="human-verified">--</strong><span>Verified APIs</span></div>
-              <div class="metric"><strong id="human-calls">--</strong><span>Total calls received</span></div>
-              <div class="metric"><strong id="human-usdc">--</strong><span>USDC received</span></div>
+        <div class="shell wide-shell provider-console">
+          <section class="provider-hero">
+            <div>
+              <span class="eyebrow">Provider Dashboard</span>
+              <h2>Turn working APIs into agent-callable services</h2>
+              <p>Import an endpoint, validate the real response, and publish it into the AgentRouter service hub. The dashboard keeps the RapidAPI-style inventory visible: cards, health, calls, and USDC earned.</p>
             </div>
-            <div class="actions">
+            <div class="provider-actions">
               <a class="button primary" href="/studio">Add data/API</a>
               <a class="button" href="/studio">Edit services</a>
               <a class="button ghost" href="/agent-router/stats">Open stats JSON</a>
             </div>
           </section>
-          <section>
-            <div class="section-head card">
-              <h2>Your API cards</h2>
-              <a class="button" href="/studio">New service</a>
+
+          <section class="provider-metrics">
+            <div class="provider-metric"><span>Provided APIs</span><strong id="human-services">--</strong><small>Published service cards</small></div>
+            <div class="provider-metric"><span>Verified APIs</span><strong id="human-verified">--</strong><small>Live validation passed</small></div>
+            <div class="provider-metric"><span>Total calls received</span><strong id="human-calls">--</strong><small>Demand-side invocations</small></div>
+            <div class="provider-metric"><span>USDC received</span><strong id="human-usdc">--</strong><small>Estimated paid volume</small></div>
+          </section>
+
+          <section class="provider-imports">
+            <div>
+              <span class="eyebrow">Fast import</span>
+              <h2>Start with any provider asset</h2>
+              <p>Paste a live endpoint, OpenAPI URL, Skill page, or API docs URL. Studio generates metadata and contracts, then blocks publish until a real response validates.</p>
             </div>
-            <div class="service-grid" id="human-api-cards"></div>
+            <div class="import-options">
+              <a href="/studio" class="import-option"><b>Single endpoint</b><span>Best for one data API URL.</span></a>
+              <a href="/studio" class="import-option"><b>OpenAPI / Swagger</b><span>Batch import many endpoints.</span></a>
+              <a href="/studio" class="import-option"><b>Skill / ClawHub</b><span>Convert existing agent skills into data services.</span></a>
+              <a href="/studio" class="import-option"><b>Manual override</b><span>Only for edge cases.</span></a>
+            </div>
+          </section>
+
+          <section class="provider-workbench">
+            <aside class="provider-rail">
+              <a class="rail-action primary" href="/studio">+ Publish API</a>
+              <a class="rail-action" href="/agent">View marketplace</a>
+              <a class="rail-action" href="/agent-router/trust">Trust feed</a>
+              <div class="rail-note">
+                <strong>Publish checklist</strong>
+                <span>Source imported</span>
+                <span>Metadata generated</span>
+                <span>Data contract generated</span>
+                <span>Endpoint reachable</span>
+                <span>Real non-empty data returned</span>
+                <span>Agent envelope verified</span>
+              </div>
+              <div class="rail-note" id="provider-profile-summary"></div>
+            </aside>
+            <div>
+              <div class="market-section-head">
+                <div>
+                  <h2>Your API cards</h2>
+                  <p>Provider inventory shown as buyer-facing cards, with live quality signals.</p>
+                </div>
+                <a class="button" href="/studio">New service</a>
+              </div>
+              <div class="provider-toolbar">
+                <input id="human-service-search" placeholder="Search your APIs by service, provider, or capability" />
+                <select id="human-service-sort">
+                  <option value="recent">Recently registered</option>
+                  <option value="calls">Most called</option>
+                  <option value="trust">Highest trust</option>
+                </select>
+              </div>
+              <div class="market-grid provider-grid" id="human-api-cards"></div>
+              <div class="ops-panel">
+                <div class="market-section-head">
+                  <div>
+                    <h2>Service operations</h2>
+                    <p>Use this table to spot broken endpoints, stale verification, and services earning demand.</p>
+                  </div>
+                </div>
+                <div class="ops-table" id="human-ops-table"></div>
+              </div>
+            </div>
           </section>
         </div>
       </main>
       <script>
         ${serviceClientScript()}
+        let providerStats = { services: [] };
+        document.addEventListener("input", (event) => {
+          if (event.target?.id === "human-service-search") renderProviderCards(providerStats);
+        });
+        document.addEventListener("change", (event) => {
+          if (event.target?.id === "human-service-sort") renderProviderCards(providerStats);
+        });
         function renderPage(stats) {
+          providerStats = stats;
           const services = stats.services || [];
           const totalUsdc = services.reduce((sum, service) => sum + serviceRevenue(service), 0);
           setText("human-services", services.length);
           setText("human-verified", stats.verified_services || 0);
           setText("human-calls", stats.total_calls || 0);
           setText("human-usdc", formatUsdc(totalUsdc));
+          renderProviderCards(stats);
+          renderProviderSummary(stats);
+          renderOpsTable(stats);
+        }
+        function renderProviderCards(stats) {
+          const query = (document.getElementById("human-service-search")?.value || "").trim().toLowerCase();
+          const sort = document.getElementById("human-service-sort")?.value || "recent";
+          let services = [...(stats.services || [])].filter((service) => {
+            const haystack = [service.title, service.service_id, service.provider_id, service.description_for_agent, ...(service.capabilities || [])].join(" ").toLowerCase();
+            return !query || haystack.includes(query);
+          });
+          services.sort((a, b) => {
+            if (sort === "calls") return Number(b.total_calls || 0) - Number(a.total_calls || 0);
+            if (sort === "trust") return Number(b.trust_score || 0) - Number(a.trust_score || 0);
+            return String(b.service_id || "").localeCompare(String(a.service_id || ""));
+          });
           document.getElementById("human-api-cards").innerHTML = services.map((service) => apiCard(service, { human: true })).join("") ||
-            '<div class="card muted">No services yet. Add your first API in Provider Studio.</div>';
+            '<div class="empty-market">No services yet. Add your first API in Provider Studio.</div>';
+          renderOpsTable({ ...stats, services });
+        }
+        function renderProviderSummary(stats) {
+          const providers = stats.providers || [];
+          const top = [...providers].sort((a, b) => Number(b.estimated_revenue || 0) - Number(a.estimated_revenue || 0))[0];
+          document.getElementById("provider-profile-summary").innerHTML = top
+            ? '<strong>Top provider</strong><span>' + escapeHtml(top.provider_id) + '</span><span>' + top.service_count + ' services · ' + top.total_calls + ' calls</span><span>' + formatUsdc(top.estimated_revenue) + ' USDC</span>'
+            : '<strong>Provider profile</strong><span>No services published yet.</span>';
+        }
+        function renderOpsTable(stats) {
+          const services = stats.services || [];
+          const rows = services.map((service) => {
+            const validation = service.latest_validation || {};
+            const issue = validation.ok === false
+              ? (validation.error || validation.result_errors?.[0]?.message || validation.provider_error?.message || "Validation failed")
+              : service.health_status === "degraded" ? "Recent failures detected" : "OK";
+            const statusClass = service.verification_status === "verified" && service.health_status !== "degraded" ? "good" : "warn";
+            return '<div class="ops-row">' +
+              '<span><b>' + escapeHtml(service.title || service.service_id) + '</b><small>' + escapeHtml(service.service_id) + '</small></span>' +
+              '<span><mark class="' + statusClass + '">' + escapeHtml(service.health_status || service.verification_status || "unknown") + '</mark></span>' +
+              '<span>' + Number(service.total_calls || 0) + '</span>' +
+              '<span>' + formatUsdc(service.estimated_revenue || 0) + '</span>' +
+              '<span>' + escapeHtml(issue) + '</span>' +
+              '<span><a href="/studio?service_id=' + encodeURIComponent(service.service_id) + '">Edit</a></span>' +
+            '</div>';
+          });
+          document.getElementById("human-ops-table").innerHTML = [
+            '<div class="ops-row ops-labels"><span>Service</span><span>Status</span><span>Calls</span><span>USDC</span><span>Latest issue</span><span>Action</span></div>',
+            rows.join("") || '<div class="empty-row">No service operations yet.</div>'
+          ].join("");
         }
         loadStats().then(renderPage);
       </script>
@@ -137,56 +347,58 @@ export function agentHtml() {
     active: "agent",
     body: `
       <main>
-        <div class="shell hub-layout">
-          <section>
-            <div class="card search-card">
-              <h2>API Hub for agents</h2>
-              <p>Search registered services by capability, provider, or task. Pick a service to inspect the agent playground.</p>
-              <div class="install-banner">
-                <strong>One-line install</strong>
+        <div class="shell wide-shell agent-market">
+          <section class="market-hero">
+            <div>
+              <span class="eyebrow">API Hub for agents</span>
+              <h2>Discover callable services</h2>
+              <p>Search by task, provider, or capability. AgentRouter returns a buyer-friendly marketplace card plus the request shape an AI client can invoke.</p>
+            </div>
+            <div class="install-banner compact-install">
+              <strong>One-line install</strong>
+              <div class="command-wrap static-command">
+                <button class="copy-button" type="button" id="copy-install-top">Copy</button>
                 <code>${html(installCommand)}</code>
-                <details>
-                  <summary>Local development endpoint</summary>
-                  <code>${html(localInstallCommand)}</code>
-                </details>
               </div>
-              <div class="search-row">
-                <input id="service-search" placeholder="Search APIs, providers, or capabilities" />
-                <select id="sort-services">
-                  <option value="relevance">By relevance</option>
-                  <option value="calls">Most called</option>
-                  <option value="trust">Highest trust</option>
-                  <option value="price">Lowest price</option>
-                </select>
-              </div>
-              <div class="category-row" id="category-row"></div>
+              <details>
+                <summary>Local development endpoint</summary>
+                <code>${html(localInstallCommand)}</code>
+              </details>
             </div>
-            <div class="service-grid" id="agent-api-cards"></div>
           </section>
-          <aside class="playground">
-            <div class="playground-head">
-              <h2>Playground</h2>
-              <span class="muted" id="playground-status">Select a service</span>
-            </div>
-            <div class="playground-body">
-              <div class="endpoint-list" id="endpoint-list"></div>
-              <div class="play-content">
-                <div class="kv" id="playground-kv"></div>
-                <div>
-                  <strong>Install command</strong>
-                  <div class="command-wrap">
-                    <button class="copy-button" type="button" id="copy-install">Copy</button>
-                    <code class="command" id="install-command">${html(installCommand)}</code>
-                  </div>
-                </div>
-                <div>
-                  <strong>Structured request</strong>
-                  <code class="command" id="request-preview">{}</code>
-                </div>
-                <p class="note">In Claude or Codex, ask: "Use AgentRouter to query this data." The router handles discovery, quote, paid invocation, and verification feedback.</p>
+
+          <div class="market-toolbar">
+            <input id="service-search" placeholder="Search APIs, providers, categories, or capabilities" />
+            <select id="sort-services">
+              <option value="relevance">By relevance</option>
+              <option value="calls">Most called</option>
+              <option value="trust">Highest trust</option>
+              <option value="price">Lowest price</option>
+            </select>
+          </div>
+
+          <div class="market-shell list-only">
+            <aside class="filter-rail">
+              <strong>Categories</strong>
+              <div class="category-row vertical" id="category-row"></div>
+              <div class="rail-note">
+                <strong>AgentRouter adds</strong>
+                <span>Dynamic discovery</span>
+                <span>Paid invocation</span>
+                <span>Post-call feedback</span>
               </div>
-            </div>
-          </aside>
+            </aside>
+
+            <section>
+              <div class="market-section-head">
+                <div>
+                  <h2>Available services</h2>
+                  <p id="agent-result-count">Loading services...</p>
+                </div>
+              </div>
+              <div class="market-grid" id="agent-api-cards"></div>
+            </section>
+          </div>
         </div>
       </main>
       <script>
@@ -195,27 +407,28 @@ export function agentHtml() {
         const localInstallCommand = ${JSON.stringify(localInstallCommand)};
         const categories = ["All", "Data", "Crypto", "Market Data", "On-chain", "Derivatives", "Wallet"];
         let latestStats = { services: [] };
-        let selectedServiceId = null;
         let activeCategory = "All";
-        document.getElementById("copy-install").addEventListener("click", async () => {
+        document.getElementById("copy-install-top").addEventListener("click", async () => {
+          copyInstallCommand("copy-install-top");
+        });
+        async function copyInstallCommand(id) {
+          const button = document.getElementById(id);
           try {
             await navigator.clipboard.writeText(installCommand);
-            document.getElementById("copy-install").textContent = "Copied";
-            setTimeout(() => document.getElementById("copy-install").textContent = "Copy", 1200);
+            button.textContent = "Copied";
+            setTimeout(() => button.textContent = "Copy", 1200);
           } catch {
-            document.getElementById("copy-install").textContent = "Select text";
+            button.textContent = "Select text";
           }
-        });
+        }
         document.getElementById("service-search").addEventListener("input", renderAgentHub);
         document.getElementById("sort-services").addEventListener("change", renderAgentHub);
         function renderPage(stats) {
           latestStats = stats;
-          selectedServiceId = stats.services?.[0]?.service_id || null;
           const query = new URLSearchParams(location.search).get("q") || "";
           document.getElementById("service-search").value = query;
           renderCategories();
           renderAgentHub();
-          renderPlayground(selectedService());
         }
         function renderCategories() {
           document.getElementById("category-row").innerHTML = categories.map((category) =>
@@ -231,19 +444,9 @@ export function agentHtml() {
         }
         function renderAgentHub() {
           const services = filteredServices();
-          if (!services.some((service) => service.service_id === selectedServiceId)) {
-            selectedServiceId = services[0]?.service_id || null;
-          }
-          document.getElementById("agent-api-cards").innerHTML = services.map((service) => apiCard(service, { selected: service.service_id === selectedServiceId })).join("") ||
-            '<div class="card muted">No matching services found.</div>';
-          document.querySelectorAll("[data-service-id]").forEach((card) => {
-            card.addEventListener("click", () => {
-              selectedServiceId = card.dataset.serviceId;
-              renderAgentHub();
-              renderPlayground(selectedService());
-            });
-          });
-          renderPlayground(selectedService());
+          document.getElementById("agent-api-cards").innerHTML = services.map((service) => apiCard(service, { link: true })).join("") ||
+            '<div class="empty-market">No matching services found.</div>';
+          setText("agent-result-count", services.length + " services match this view");
         }
         function filteredServices() {
           const query = document.getElementById("service-search").value.trim().toLowerCase();
@@ -271,30 +474,6 @@ export function agentHtml() {
           if (category === "Wallet") return /wallet|address/.test(text);
           return true;
         }
-        function renderPlayground(service) {
-          if (!service) {
-            document.getElementById("endpoint-list").innerHTML = '<div class="endpoint-item">No service</div>';
-            document.getElementById("playground-kv").innerHTML = '<div>Status</div><div>No registered services</div>';
-            document.getElementById("request-preview").textContent = "{}";
-            return;
-          }
-          document.getElementById("playground-status").textContent = service.service_id;
-          document.getElementById("endpoint-list").innerHTML = '<div class="endpoint-item active">POST route</div><div class="endpoint-item">GET manifest</div><div class="endpoint-item">POST invoke</div>';
-          document.getElementById("playground-kv").innerHTML = [
-            ["Service", service.title || service.service_id],
-            ["Provider", service.provider_id],
-            ["Price", formatUsdc(Number(service.price || 0)) + " " + (service.currency || "USDC")],
-            ["Calls", service.total_calls || 0],
-            ["Trust", formatTrust(service.trust_score)],
-            ["Endpoint", service.endpoint_url || "/connector/invoke_paid_service"]
-          ].map(([key, value]) => '<div>' + escapeHtml(key) + '</div><div>' + escapeHtml(value) + '</div>').join("");
-          const request = { service_id: service.service_id, input: service.sample_request || {}, budget: { max_amount: "0.05", currency: "USDC" } };
-          document.getElementById("request-preview").textContent = JSON.stringify(request, null, 2);
-        }
-        function selectedService() {
-          if (!selectedServiceId) return null;
-          return (latestStats.services || []).find((service) => service.service_id === selectedServiceId) || null;
-        }
         loadStats().then(renderPage);
       </script>
     `
@@ -306,7 +485,7 @@ function appPage({ title, subtitle, active, body }) {
     title: `${title} · AgentRouter Markets`,
     body: `
       <header class="app-header">
-        <div class="shell app-title">
+        <div class="shell wide-shell app-title">
           <div>
             <span class="eyebrow">${html(active === "human" ? "Provider workspace" : "Agent API hub")}</span>
             <h1>${html(title)}</h1>
@@ -359,126 +538,243 @@ function page({ title, body }) {
 
 function styles() {
   return `
-    :root { color-scheme: light; --ink:#25272a; --muted:#737373; --faint:#a8a8a8; --line:#e3e3e3; --strong-line:#d4d4d4; --panel:#f7f7f7; --bg:#ffffff; --soft:#f3f3f3; --code:#202124; --accent:#5cff73; --accent-ink:#0c240f; }
+    /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 */
+    :root {
+      color-scheme: light;
+      --color-ink:#202124;
+      --color-muted:#696f72;
+      --color-faint:#9aa0a6;
+      --color-line:#dedede;
+      --color-strong-line:#c9ced1;
+      --color-panel:#f6f7f5;
+      --color-bg:#ffffff;
+      --color-soft:#eef2ef;
+      --color-code:#151917;
+      --color-accent:#5cff73;
+      --color-accent-warm:#ffd66b;
+      --color-accent-cool:#dffcff;
+      --color-accent-ink:#0b240f;
+      --shadow-lift:0 14px 34px rgba(23, 28, 25, .08);
+      --font-body:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     * { box-sizing: border-box; }
-    body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+    html, body { overflow-x: clip; }
+    body { margin:0; font-family:var(--font-body); background:var(--color-bg); color:var(--color-ink); }
     a { color:inherit; text-decoration:none; }
     button, input, select { font:inherit; }
     .shell { max-width:1160px; margin:0 auto; padding:0 24px; }
-    .topbar { position:sticky; top:0; z-index:20; border-top:4px solid #dffcff; border-bottom:1px solid var(--line); background:rgba(255,255,255,.96); backdrop-filter:blur(10px); }
+    .wide-shell { max-width:1520px; }
+    .topbar { position:sticky; top:0; z-index:20; border-top:4px solid var(--color-accent-cool); border-bottom:1px solid var(--color-line); background:rgba(255,255,255,.96); backdrop-filter:blur(10px); }
     .nav { min-height:68px; display:grid; grid-template-columns:220px minmax(240px, 1fr) auto auto; align-items:center; gap:16px; }
     .brand { display:grid; gap:0; font-weight:780; line-height:1.05; font-size:18px; }
-    .brand small { color:#111; font-weight:520; font-size:13px; }
-    .top-search input { width:100%; min-height:36px; border:1px solid var(--line); background:#fbfbfb; color:var(--ink); padding:8px 13px; outline:none; border-radius:0; }
-    .top-search input:focus, .hero-search input:focus, .search-row input:focus, .search-row select:focus { border-color:#999; background:#fff; }
+    .brand small { color:var(--color-ink); font-weight:520; font-size:13px; }
+    .top-search input { width:100%; min-height:36px; border:1px solid var(--color-line); background:#fbfbfb; color:var(--color-ink); padding:8px 13px; outline:none; border-radius:0; }
+    .top-search input:focus, .hero-search input:focus, .search-row input:focus, .search-row select:focus { border-color:var(--color-faint); background:#fff; }
     .nav-links { display:flex; align-items:center; gap:22px; color:#5f5f5f; font-size:12px; font-weight:650; white-space:nowrap; }
     .nav-tools { display:flex; gap:12px; }
-    .nav-tools span { width:35px; height:35px; border:1px solid var(--line); background:#fff; display:block; position:relative; }
-    .nav-tools span:first-child::after { content:""; width:10px; height:10px; border:2px solid #222; border-radius:50%; position:absolute; inset:0; margin:auto; }
-    .nav-tools span:last-child::after { content:""; width:14px; height:14px; border-radius:50%; border-right:2px solid #f6cb36; border-bottom:2px solid #f6cb36; position:absolute; inset:0; margin:auto; }
-    .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; border:2px solid #252525; border-radius:0; background:#fff; color:var(--ink); padding:9px 16px; font-weight:760; cursor:pointer; text-transform:uppercase; font-size:12px; letter-spacing:0; }
+    .nav-tools span { width:35px; height:35px; border:1px solid var(--color-line); background:#fff; display:block; position:relative; }
+    .nav-tools span:first-child::after { content:""; width:10px; height:10px; border:2px solid var(--color-ink); border-radius:50%; position:absolute; inset:0; margin:auto; }
+    .nav-tools span:last-child::after { content:""; width:14px; height:14px; border-radius:50%; border-right:2px solid var(--color-accent-warm); border-bottom:2px solid var(--color-accent-warm); position:absolute; inset:0; margin:auto; }
+    .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; border:2px solid var(--color-ink); border-radius:0; background:#fff; color:var(--color-ink); padding:9px 16px; font-weight:760; cursor:pointer; text-transform:uppercase; font-size:12px; letter-spacing:0; }
     .button::before, .path-action::before { content:">"; margin-right:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .button.primary { background:var(--accent); border-color:var(--accent); color:#002b08; }
+    .button.primary { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-accent-ink); }
     .button.ghost { background:#fff; }
-    .hero { padding:0 0 34px; }
-    .dot-grid { height:96px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; background-position:0 3px; }
-    .hero-center { text-align:center; padding-top:82px; display:grid; justify-items:center; }
-    .eyebrow { display:inline-flex; color:#686868; font-size:12px; font-weight:760; text-transform:uppercase; letter-spacing:0; }
-    h1 { margin:14px 0 14px; font-size:clamp(42px,5vw,62px); line-height:1.04; font-weight:720; letter-spacing:0; }
-    .lead { margin:0; color:#a3a3a3; font-size:18px; line-height:1.72; max-width:760px; }
+    .hero { padding:0 0 34px; min-height:calc(100vh - 68px); }
+    .dot-grid { height:126px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; background-position:0 3px; }
+    .hero-center { text-align:center; padding-top:94px; display:grid; justify-items:center; }
+    .eyebrow { display:inline-flex; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; letter-spacing:0; }
+    h1 { margin:16px 0 16px; font-size:64px; line-height:1.04; font-weight:720; letter-spacing:0; overflow-wrap:anywhere; }
+    .lead { margin:0; color:var(--color-muted); font-size:20px; line-height:1.72; max-width:860px; }
+    .install-strip { width:min(980px, 100%); margin-top:64px; border:2px solid var(--color-line); background:#f7f7f7; display:grid; grid-template-columns:minmax(0, 1fr) 128px; text-align:left; }
+    .install-strip div { min-width:0; padding:20px 24px; display:grid; gap:8px; }
+    .install-strip span { color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    .install-strip code { display:block; color:var(--color-ink); font-family:var(--font-mono); font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .install-strip button { border:0; border-left:2px solid var(--color-line); background:#fff; color:var(--color-ink); cursor:pointer; font-weight:800; text-transform:uppercase; font-size:12px; }
+    .install-strip button:hover { background:var(--color-accent); }
+    .hero-paths { width:100%; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:32px; margin-top:74px; text-align:left; }
     .hero-search { width:min(680px, 100%); margin-top:58px; display:grid; grid-template-columns:minmax(0,1fr) 124px; }
-    .hero-search input { min-height:64px; border:2px solid var(--line); background:#fafafa; color:var(--ink); padding:0 20px; font-size:18px; outline:none; border-radius:0; }
-    .hero-search button { border:2px solid #252525; border-left:0; background:#fff; color:#252525; font-weight:760; text-transform:uppercase; font-size:12px; cursor:pointer; }
+    .hero-search input { min-height:64px; border:2px solid var(--color-line); background:#fafafa; color:var(--color-ink); padding:0 20px; font-size:18px; outline:none; border-radius:0; min-width:0; }
+    .hero-search button { border:2px solid var(--color-ink); border-left:0; background:#fff; color:var(--color-ink); font-weight:760; text-transform:uppercase; font-size:12px; cursor:pointer; }
     .hero-actions, .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
-    main { padding:22px 0 42px; }
+    main { padding:0 0 42px; }
     .home-panel { width:min(720px, 100%); margin-top:34px; text-align:left; }
-    .home-panel, .card { border:1px solid var(--line); border-radius:0; background:var(--panel); padding:20px; }
-    .metrics { display:grid; grid-template-columns:repeat(4, 1fr); gap:0; margin-top:14px; border:1px solid var(--line); background:#fff; }
-    .metric { border-right:1px solid var(--line); background:#fff; padding:16px; }
+    .home-panel, .card { border:1px solid var(--color-line); border-radius:0; background:var(--color-panel); padding:20px; }
+    .metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0; margin-top:14px; border:1px solid var(--color-line); background:#fff; }
+    .metric { border-right:1px solid var(--color-line); background:#fff; padding:16px; min-width:0; }
     .metric:last-child { border-right:0; }
     .metric strong { display:block; font-size:27px; line-height:1; font-weight:720; }
-    .metric span { display:block; margin-top:8px; color:var(--muted); font-size:11px; font-weight:760; text-transform:uppercase; }
+    .metric span { display:block; margin-top:8px; color:var(--color-muted); font-size:11px; font-weight:760; text-transform:uppercase; }
     .landing-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-bottom:18px; }
-    .path-card { border:1px solid var(--line); border-radius:0; background:var(--panel); padding:28px 24px 22px; min-height:236px; display:flex; flex-direction:column; justify-content:space-between; transition:border-color 140ms ease, background 140ms ease; }
-    .path-card:hover { border-color:#b8b8b8; background:#fff; }
-    .path-card h2, .card h2 { margin:0 0 14px; font-size:19px; font-weight:650; letter-spacing:0; }
-    .path-card p, .card p { margin:0; color:var(--muted); line-height:1.48; }
-    .path-label { display:inline-flex; width:max-content; color:#111; font-size:12px; font-weight:760; text-transform:uppercase; }
-    .path-action { display:inline-flex; width:max-content; border:2px solid #252525; background:#fff; color:#252525; font-weight:760; margin-top:18px; padding:10px 16px; font-size:12px; text-transform:uppercase; }
-    .path-card:nth-child(3) .path-action { background:var(--accent); border-color:var(--accent); color:#002b08; }
-    .overview { display:grid; grid-template-columns:.9fr 1.1fr; gap:18px; align-items:center; margin-bottom:26px; }
+    .path-card { border:1px solid var(--color-line); border-radius:0; background:var(--color-panel); padding:34px 30px 28px; min-height:268px; display:flex; flex-direction:column; justify-content:space-between; transition:border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+    .path-card:hover { border-color:var(--color-strong-line); background:#fff; transform:translateY(-2px); box-shadow:var(--shadow-lift); }
+    .path-card h2, .card h2 { margin:0 0 18px; font-size:22px; font-weight:650; letter-spacing:0; }
+    .path-card p, .card p { margin:0; color:var(--color-muted); line-height:1.55; font-size:16px; }
+    .path-label { display:inline-flex; width:max-content; color:var(--color-ink); font-size:12px; font-weight:760; text-transform:uppercase; }
+    .path-action { display:inline-flex; width:max-content; border:2px solid var(--color-ink); background:#fff; color:var(--color-ink); font-weight:760; margin-top:28px; padding:12px 18px; font-size:12px; text-transform:uppercase; }
+    .path-card:nth-child(3) .path-action { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-accent-ink); }
+    .stats-section { padding-top:92px; }
+    .stats-heading { display:flex; align-items:start; justify-content:space-between; gap:24px; margin-bottom:56px; }
+    .stats-heading h2 { margin:6px 0 10px; font-size:34px; font-weight:720; letter-spacing:0; }
+    .stats-heading p { margin:0; color:var(--color-muted); font-size:18px; }
+    .stats-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:64px; margin-bottom:56px; }
+    .stat-block { min-width:0; }
+    .stat-block span { display:block; color:var(--color-muted); font-size:16px; margin-bottom:14px; }
+    .stat-block strong { display:block; color:var(--color-ink); font-size:72px; line-height:.95; font-weight:650; letter-spacing:0; overflow-wrap:anywhere; }
+    .stat-block small { display:block; color:var(--color-faint); font-size:13px; margin-top:8px; }
+    .spark { height:118px; display:flex; align-items:end; gap:6px; margin-top:22px; overflow:hidden; }
+    .spark i { display:block; width:5px; min-width:5px; background:#b7ffc0; border-radius:3px 3px 0 0; }
+    .network-tables { display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:start; }
+    .table-head { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:16px; }
+    .table-head h3 { margin:0; font-size:22px; font-weight:650; letter-spacing:0; }
+    .table-head a { color:var(--color-muted); font-family:var(--font-mono); font-size:12px; text-transform:uppercase; text-decoration:underline; text-underline-offset:3px; }
+    .service-table { border-top:1px solid var(--color-line); }
+    .service-row { display:grid; grid-template-columns:minmax(0, 1.35fr) minmax(140px, .8fr) 82px; gap:22px; align-items:center; min-height:52px; border-bottom:1px solid var(--color-line); color:var(--color-muted); font-size:16px; }
+    .service-row span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .service-row b { color:var(--color-ink); font-weight:520; margin-right:8px; }
+    .service-row small { color:var(--color-muted); font-size:15px; }
+    .service-row mark { border:1px solid var(--color-line); background:#fff; color:var(--color-ink); padding:4px 8px; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; }
+    .service-row span:last-child { color:var(--color-ink); font-weight:780; text-align:left; }
+    .table-labels { min-height:36px; color:var(--color-faint); font-size:11px; font-family:var(--font-mono); text-transform:uppercase; }
+    .empty-row { color:var(--color-muted); border-bottom:1px solid var(--color-line); padding:18px 0; }
+    .overview-wrap { padding-top:78px; }
+    .overview { display:grid; grid-template-columns:.9fr 1.1fr; gap:32px; align-items:center; margin-bottom:34px; border:1px solid var(--color-line); background:var(--color-panel); padding:34px; }
     .step-row { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
-    .step-row div { border:1px solid var(--line); border-radius:0; padding:12px; background:#fff; }
+    .step-row div { border:1px solid var(--color-line); border-radius:0; padding:12px; background:#fff; }
     .step-row b { display:block; color:#111; margin-bottom:8px; }
-    .step-row span { color:var(--muted); font-size:13px; line-height:1.4; }
-    .app-header { padding:0 0 18px; }
-    .app-header::before { content:""; display:block; height:72px; margin-bottom:42px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; }
+    .step-row span { color:var(--color-muted); font-size:13px; line-height:1.4; }
+    .app-header { padding:0 0 22px; }
+    .app-header::before { content:""; display:block; height:54px; margin-bottom:26px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; }
     .app-title { display:flex; align-items:end; justify-content:space-between; gap:18px; }
-    .app-title h1 { font-size:clamp(36px,4vw,54px); }
-    .section-nav { display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--line); background:#fff; min-width:320px; }
-    .section-nav a { padding:13px 16px; color:var(--muted); font-weight:760; text-align:center; text-transform:uppercase; font-size:12px; border-right:1px solid var(--line); }
+    .app-title h1 { margin:6px 0 6px; font-size:36px; }
+    .app-title .lead { font-size:16px; line-height:1.45; max-width:680px; }
+    .section-nav { display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--color-line); background:#fff; min-width:320px; }
+    .section-nav a { padding:13px 16px; color:var(--color-muted); font-weight:760; text-align:center; text-transform:uppercase; font-size:12px; border-right:1px solid var(--color-line); }
     .section-nav a:last-child { border-right:0; }
     .section-nav a.active { background:#222; color:#fff; }
+    .agent-market, .provider-console { padding-top:14px; }
+    .market-hero, .provider-hero { display:grid; grid-template-columns:minmax(0, 1fr) minmax(420px, .52fr); gap:28px; align-items:end; margin-bottom:26px; }
+    .market-hero h2, .provider-hero h2 { margin:8px 0 10px; font-size:38px; line-height:1.08; letter-spacing:0; }
+    .market-hero p, .provider-hero p, .market-section-head p { margin:0; color:var(--color-muted); font-size:17px; line-height:1.58; max-width:760px; }
+    .compact-install { padding:18px; align-self:stretch; justify-content:center; }
+    .market-toolbar, .provider-toolbar { display:grid; grid-template-columns:minmax(0, 1fr) 190px; gap:12px; margin-bottom:22px; }
+    .market-toolbar input, .market-toolbar select, .provider-toolbar input, .provider-toolbar select { width:100%; min-height:52px; border:1px solid var(--color-line); border-radius:8px; background:#fff; color:var(--color-ink); padding:0 16px; outline:none; }
+    .market-toolbar input:focus, .market-toolbar select:focus, .provider-toolbar input:focus, .provider-toolbar select:focus { border-color:var(--color-faint); box-shadow:0 0 0 3px rgba(223,252,255,.9); }
+    .market-shell { display:grid; grid-template-columns:210px minmax(0, 1fr) 430px; gap:24px; align-items:start; }
+    .market-shell.list-only { grid-template-columns:230px minmax(0, 1fr); }
+    .filter-rail, .provider-rail { position:sticky; top:88px; border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:18px; display:grid; gap:16px; }
+    .filter-rail > strong, .provider-rail > strong { font-size:13px; text-transform:uppercase; color:var(--color-muted); }
+    .category-row.vertical { display:grid; gap:7px; }
+    .category-row.vertical .category { width:100%; min-height:38px; text-align:left; border-radius:8px; }
+    .rail-note { border-top:1px solid var(--color-line); padding-top:14px; display:grid; gap:8px; color:var(--color-muted); font-size:13px; line-height:1.35; }
+    .rail-note strong { color:var(--color-ink); }
+    .market-section-head { display:flex; align-items:end; justify-content:space-between; gap:16px; margin-bottom:16px; }
+    .market-section-head h2 { margin:0 0 5px; font-size:28px; line-height:1.1; }
+    .market-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:18px; }
+    .empty-market { border:1px dashed var(--color-strong-line); border-radius:8px; padding:24px; color:var(--color-muted); background:#fff; }
+    .provider-hero { border:1px solid var(--color-line); border-radius:8px; background:var(--color-panel); padding:32px; }
+    .provider-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+    .provider-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; margin-bottom:24px; }
+    .provider-metric { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:20px; min-width:0; }
+    .provider-metric span { display:block; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    .provider-metric strong { display:block; margin-top:10px; font-size:38px; line-height:1; font-weight:720; overflow-wrap:anywhere; }
+    .provider-metric small { display:block; margin-top:10px; color:var(--color-faint); }
+    .provider-imports { display:grid; grid-template-columns:minmax(0,.82fr) minmax(520px,1.18fr); gap:22px; border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:26px; margin-bottom:24px; align-items:start; }
+    .provider-imports h2 { margin:8px 0 10px; font-size:28px; line-height:1.12; }
+    .provider-imports p { margin:0; color:var(--color-muted); line-height:1.55; }
+    .import-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .import-option { border:1px solid var(--color-line); border-radius:8px; background:var(--color-panel); padding:16px; display:grid; gap:8px; transition:border-color 140ms ease, transform 140ms ease; }
+    .import-option:hover { border-color:var(--color-strong-line); transform:translateY(-1px); background:#fff; }
+    .import-option b { font-size:15px; }
+    .import-option span { color:var(--color-muted); font-size:13px; line-height:1.4; }
+    .provider-workbench { display:grid; grid-template-columns:230px minmax(0, 1fr); gap:24px; align-items:start; }
+    .provider-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+    .rail-action { display:flex; align-items:center; justify-content:center; min-height:42px; border:1px solid var(--color-line); border-radius:8px; background:#fff; font-weight:760; color:var(--color-ink); }
+    .rail-action.primary { border-color:var(--color-accent); background:var(--color-accent); color:var(--color-accent-ink); }
+    .ops-panel { margin-top:28px; }
+    .ops-table { border-top:1px solid var(--color-line); background:#fff; }
+    .ops-row { display:grid; grid-template-columns:minmax(220px,1.2fr) 120px 74px 96px minmax(180px,1fr) 74px; gap:14px; align-items:center; min-height:56px; border-bottom:1px solid var(--color-line); color:var(--color-muted); font-size:14px; }
+    .ops-row span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ops-row b { display:block; color:var(--color-ink); font-weight:650; overflow:hidden; text-overflow:ellipsis; }
+    .ops-row small { display:block; margin-top:2px; font-family:var(--font-mono); font-size:11px; color:var(--color-faint); overflow:hidden; text-overflow:ellipsis; }
+    .ops-row mark { border:1px solid var(--color-line); border-radius:999px; background:#fff; color:var(--color-muted); padding:4px 8px; font-size:11px; font-weight:780; text-transform:uppercase; }
+    .ops-row mark.good { border-color:#afe9bb; background:#f2fff4; color:#174d24; }
+    .ops-row mark.warn { border-color:#ead4a6; background:#fff9ec; color:#734d00; }
+    .ops-row a { color:var(--color-ink); font-weight:780; text-transform:uppercase; font-size:12px; text-decoration:underline; text-underline-offset:3px; }
+    .ops-labels { min-height:34px; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; color:var(--color-faint); }
     .hub-layout, .human-layout { display:grid; grid-template-columns:minmax(0,.92fr) minmax(420px,1.08fr); gap:16px; align-items:start; }
     .section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
     .search-card { display:grid; gap:12px; }
     .search-row { display:grid; grid-template-columns:minmax(0,1fr) 154px; gap:10px; }
-    .search-row input, .search-row select { width:100%; border:1px solid var(--line); border-radius:0; background:#fff; color:var(--ink); min-height:44px; padding:10px 12px; outline:none; }
-    .install-banner { border:1px solid var(--line); border-radius:0; padding:13px; background:#fff; display:grid; gap:8px; }
-    .install-banner code, .command { display:block; white-space:pre-wrap; word-break:break-word; border-radius:0; background:var(--code); color:#f8fafc; padding:14px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; line-height:1.45; }
-    .install-banner details { color:var(--muted); font-size:12px; }
+    .search-row input, .search-row select { width:100%; border:1px solid var(--color-line); border-radius:0; background:#fff; color:var(--color-ink); min-height:44px; padding:10px 12px; outline:none; }
+    .install-banner { border:1px solid var(--color-line); border-radius:0; padding:13px; background:#fff; display:grid; gap:8px; }
+    .install-banner code, .command { display:block; white-space:pre-wrap; word-break:break-word; border-radius:0; background:var(--color-code); color:#f8fafc; padding:14px; font-family:var(--font-mono); font-size:12px; line-height:1.45; }
+    .install-banner details { color:var(--color-muted); font-size:12px; }
     .install-banner summary { cursor:pointer; font-weight:760; width:max-content; }
     .install-banner details code { margin-top:7px; background:#343434; }
     .category-row { display:flex; flex-wrap:wrap; gap:8px; }
-    .category { border:1px solid var(--line); border-radius:0; background:#fff; color:#555; padding:8px 11px; font-size:12px; font-weight:760; cursor:pointer; }
+    .category { border:1px solid var(--color-line); border-radius:8px; background:#fff; color:#555; padding:8px 11px; font-size:12px; font-weight:760; cursor:pointer; }
     .category.active { background:#222; border-color:#222; color:#fff; }
     .service-grid { display:grid; gap:12px; margin-top:12px; }
-    .api-card { position:relative; border:1px solid var(--line); border-radius:0; background:#fff; padding:20px; cursor:pointer; transition:border-color 140ms ease, box-shadow 140ms ease; }
-    .api-card:hover, .api-card.selected { border-color:#b8b8b8; box-shadow:0 10px 20px rgba(0,0,0,.04); }
+    .api-card { position:relative; border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:24px; cursor:pointer; transition:border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; min-height:286px; }
+    .api-card:hover, .api-card.selected { border-color:var(--color-strong-line); box-shadow:var(--shadow-lift); transform:translateY(-1px); }
+    .api-card.selected { outline:2px solid var(--color-accent-cool); outline-offset:2px; }
     .api-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:13px; }
-    .type-badge { display:inline-flex; border-radius:0; background:#f0edff; color:#9f1239; padding:7px 10px; font-weight:780; }
+    .type-badge { display:inline-flex; border-radius:8px; background:#f0edff; color:#9f1239; padding:7px 10px; font-weight:780; }
     .heart { color:#667085; font-size:22px; line-height:1; }
     .api-main { display:grid; grid-template-columns:54px minmax(0,1fr); gap:13px; }
     .logo { width:54px; height:54px; border-radius:50%; display:grid; place-items:center; background:#ff7a45; color:#111827; font-weight:900; font-size:16px; border:1px solid #f3a179; }
-    .api-card h3 { margin:0 0 5px; font-size:21px; letter-spacing:0; }
-    .api-card p { margin:0; color:var(--muted); line-height:1.42; }
-    .byline { display:flex; justify-content:space-between; gap:12px; margin-top:14px; color:var(--muted); font-size:13px; }
+    .api-card h3 { margin:0 0 7px; font-size:24px; line-height:1.15; letter-spacing:0; }
+    .api-card p { margin:0; color:var(--color-muted); line-height:1.45; font-size:15px; }
+    .byline { display:flex; justify-content:space-between; gap:12px; margin-top:18px; color:var(--color-muted); font-size:14px; }
     .stat-row { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
-    .stat-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:8px; background:#fff; color:#667085; padding:8px 11px; font-weight:730; }
+    .stat-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--color-line); border-radius:8px; background:#fff; color:#667085; padding:8px 11px; font-weight:730; }
     .pill-row { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
     .pill { display:inline-flex; border:1px solid #d5dde5; border-radius:999px; background:#fff; color:#475467; padding:3px 7px; font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .playground { position:sticky; top:82px; border:1px solid var(--line); border-radius:0; background:#fff; overflow:hidden; }
-    .playground-head { padding:15px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .playground-head h2 { margin:0; font-size:20px; }
-    .playground-body { display:grid; grid-template-columns:170px minmax(0,1fr); min-height:420px; }
-    .endpoint-list { border-right:1px solid var(--line); background:#fbfcfe; padding:12px; display:grid; gap:8px; align-content:start; }
-    .endpoint-item { border:1px solid var(--line); border-radius:0; background:#fff; padding:9px; font-size:12px; font-weight:780; }
+    .detail-link { display:inline-flex; margin-top:16px; color:var(--color-ink); font-size:12px; font-weight:780; text-transform:uppercase; }
+    .detail-link::before { content:">"; margin-right:8px; font-family:var(--font-mono); }
+    .playground { position:sticky; top:88px; border:1px solid var(--color-line); border-radius:8px; background:#fff; overflow:hidden; }
+    .playground-head { padding:18px; border-bottom:1px solid var(--color-line); display:flex; align-items:start; justify-content:space-between; gap:12px; }
+    .playground-head h2 { margin:4px 0 0; font-size:22px; }
+    .playground-body { display:grid; grid-template-columns:132px minmax(0,1fr); min-height:520px; }
+    .endpoint-list { border-right:1px solid var(--color-line); background:#fbfcfe; padding:12px; display:grid; gap:8px; align-content:start; }
+    .endpoint-item { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:10px; font-size:12px; font-weight:780; }
     .endpoint-item.active { border-color:#222; background:#222; color:#fff; }
-    .play-content { padding:14px; display:grid; gap:12px; align-content:start; }
+    .play-content { padding:18px; display:grid; gap:15px; align-content:start; }
     .kv { display:grid; grid-template-columns:94px minmax(0,1fr); gap:7px 10px; font-size:13px; }
-    .kv div:nth-child(odd) { color:var(--muted); }
+    .kv div:nth-child(odd) { color:var(--color-muted); }
     .kv div:nth-child(even) { font-weight:720; overflow-wrap:anywhere; }
     .command-wrap { position:relative; }
+    .static-command code { padding-right:74px; }
     .copy-button { position:absolute; top:8px; right:8px; border:1px solid #555; color:#fff; background:#343434; border-radius:0; padding:6px 8px; font-size:12px; cursor:pointer; }
     .trust { font-weight:850; color:#111; }
-    .muted { color:var(--muted); }
-    .note { color:var(--muted); font-size:13px; line-height:1.45; }
-    .footer { border-top:1px solid var(--line); color:var(--muted); padding:26px 0 36px; }
+    .muted { color:var(--color-muted); }
+    .note { color:var(--color-muted); font-size:13px; line-height:1.45; }
+    .footer { border-top:1px solid var(--color-line); color:var(--color-muted); padding:26px 0 36px; }
     @media (max-width:980px) {
       .nav { grid-template-columns:1fr auto; gap:12px; padding:10px 24px; }
       .top-search { grid-column:1 / -1; order:3; }
       .nav-tools { order:2; }
-      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview { grid-template-columns:1fr; }
-      .landing-grid, .metrics, .search-row, .step-row { grid-template-columns:1fr; }
+      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview, .market-hero, .provider-hero, .market-shell, .provider-workbench { grid-template-columns:1fr; }
+      .landing-grid, .metrics, .search-row, .step-row, .hero-paths, .stats-grid, .network-tables, .market-grid, .provider-grid, .provider-metrics, .market-toolbar, .provider-toolbar, .provider-imports, .import-options { grid-template-columns:1fr; }
       .nav-links { display:none; }
       .app-title { display:grid; }
       .section-nav { min-width:0; }
-      .playground { position:static; }
-      .endpoint-list { border-right:0; border-bottom:1px solid var(--line); }
+      .playground, .filter-rail, .provider-rail { position:static; }
+      .endpoint-list { border-right:0; border-bottom:1px solid var(--color-line); }
       .hero-search { grid-template-columns:1fr; }
       .hero-search button { min-height:48px; border:2px solid #252525; border-top:0; }
+      .install-strip { grid-template-columns:1fr; }
+      .install-strip button { min-height:46px; border-left:0; border-top:2px solid var(--color-line); }
       .hero-center { padding-top:48px; }
       .dot-grid { height:72px; }
+      h1 { font-size:42px; }
+      .app-title h1 { font-size:38px; }
+      .stat-block strong { font-size:46px; }
+      .service-row { grid-template-columns:minmax(0, 1fr) 74px; }
+      .service-row span:nth-child(2) { display:none; }
+      .ops-row { grid-template-columns:minmax(0,1fr) 80px; gap:8px; padding:10px 0; }
+      .ops-row span:nth-child(3), .ops-row span:nth-child(4), .ops-row span:nth-child(5) { display:none; }
     }
   `;
 }
@@ -494,25 +790,29 @@ function serviceClientScript() {
       const description = service.description_for_agent || "Agent-callable data API with verified response envelope.";
       const logo = initials(service.title || service.service_id);
       const selected = options.selected ? " selected" : "";
+      const detailHref = "/agent-router/service?service_id=" + encodeURIComponent(service.service_id);
+      const tagName = options.link ? "a" : "article";
+      const hrefAttr = options.link ? ' href="' + detailHref + '"' : "";
       return \`
-        <article class="api-card\${selected}" data-service-id="\${escapeAttr(service.service_id)}">
+        <\${tagName} class="api-card\${selected}" data-service-id="\${escapeAttr(service.service_id)}"\${hrefAttr}>
           <div class="api-top"><span class="type-badge">Data</span><span class="heart">♡</span></div>
           <div class="api-main">
             <div class="logo">\${escapeHtml(logo)}</div>
             <div>
               <h3>\${escapeHtml(service.title || service.service_id)}</h3>
               <p>\${escapeHtml(truncate(description, 106))}</p>
-              <div class="byline"><span>By \${escapeHtml(service.provider_id || "provider")}</span><span>Verified now</span></div>
+              <div class="byline"><span>By \${escapeHtml(service.provider_id || "provider")}</span><span>Updated now</span></div>
               <div class="stat-row">
                 <span class="stat-pill">↗ \${formatRating(service.trust_score)}</span>
-                <span class="stat-pill">◷ \${service.total_calls ? "live" : "MVP"}</span>
+                <span class="stat-pill">◷ \${service.total_calls ? service.total_calls + " calls" : "MVP"}</span>
                 <span class="stat-pill">◌ \${service.verification_status === "verified" ? "99%" : "test"}</span>
+                <span class="stat-pill">\${formatUsdc(Number(service.price || 0))} \${escapeHtml(service.currency || "USDC")}</span>
               </div>
               <div class="pill-row">\${renderPills(service.capabilities || [])}</div>
-              \${options.human ? '<div class="actions"><a class="button ghost" href="/studio">Edit</a><a class="button" href="/agent-router/stats">Analytics</a></div>' : ""}
+              \${options.human ? '<div class="actions"><a class="button ghost" href="/studio?service_id=' + encodeURIComponent(service.service_id) + '">Edit</a><a class="button" href="/agent-router/service?service_id=' + encodeURIComponent(service.service_id) + '">Details</a></div>' : '<span class="detail-link">View service details</span>'}
             </div>
           </div>
-        </article>
+        </\${tagName}>
       \`;
     }
     function renderPills(tags) {

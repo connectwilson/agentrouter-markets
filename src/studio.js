@@ -107,8 +107,9 @@ function validateStudioInput(body, store) {
   }
 }
 
-export function studioHtml({ draft } = {}) {
+export function studioHtml({ draft, loadedService } = {}) {
   const formDefaults = defaultsFromDraft(draft);
+  const loadedNotice = loadedService ? `<div class="notice success">Loaded published service <strong>${html(loadedService.service_id)}</strong>. Use the advanced editor to inspect generated metadata and contract. To publish a separate copy, change the Service ID under Advanced routing metadata.</div>` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -116,105 +117,156 @@ export function studioHtml({ draft } = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ADN Provider Studio</title>
   <style>
-    :root { color-scheme: light; --ink:#17201a; --muted:#617168; --line:#d8dfd9; --panel:#ffffff; --bg:#f7f6f1; --soft:#eef4f0; --accent:#0f766e; --accent2:#315f9f; --warn:#9a6a12; --bad:#b42318; --code:#101714; }
+    /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 */
+    :root {
+      color-scheme: light;
+      --color-ink:#202124;
+      --color-muted:#696f72;
+      --color-faint:#9aa0a6;
+      --color-line:#dedede;
+      --color-strong-line:#c9ced1;
+      --color-panel:#ffffff;
+      --color-bg:#ffffff;
+      --color-soft:#f6f7f5;
+      --color-accent:#5cff73;
+      --color-accent-2:#222222;
+      --color-warn:#9a6a12;
+      --color-bad:#b42318;
+      --color-code:#101714;
+      --color-success:#f2faf6;
+      --color-accent-cool:#dffcff;
+      --color-accent-ink:#0b240f;
+      --shadow-lift:0 14px 34px rgba(23, 28, 25, .08);
+      --font-body:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+    html, body { overflow-x: clip; }
+    body { margin: 0; font-family: var(--font-body); background: var(--color-bg); color: var(--color-ink); }
     a { color: inherit; text-decoration: none; }
-    header { border-bottom: 1px solid var(--line); background: #fbfaf6; }
-    .topbar { height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 28px; border-bottom: 1px solid var(--line); }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 820; }
-    .mark { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; background: var(--code); color: #eaf7ee; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
-    .nav-links { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; font-weight: 650; }
-    .hero-copy { padding: 26px 32px 22px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 26px; align-items: end; }
-    h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: 0; line-height: 1.05; }
-    p { margin: 0; color: var(--muted); line-height: 1.5; }
-    .hero-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .hero-point { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 11px 12px; }
-    .hero-point strong { display: block; margin-bottom: 3px; font-size: 13px; }
-    .hero-point span { color: var(--muted); font-size: 12px; line-height: 1.35; display: block; }
-    main { display: grid; grid-template-columns: minmax(430px, 0.95fr) minmax(380px, 1.05fr); gap: 18px; padding: 20px 28px 32px; align-items: start; max-width: 1480px; margin: 0 auto; }
-    form, .output { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
-    .output { position: sticky; top: 76px; }
-    fieldset { border: 0; padding: 0; margin: 0 0 18px; }
-    legend { font-weight: 780; margin-bottom: 10px; font-size: 17px; }
-    label { display: grid; gap: 6px; margin-bottom: 12px; font-size: 13px; font-weight: 650; color: #28332b; }
-    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 10px 11px; font: inherit; background: #fff; color: var(--ink); }
-    input:focus, select:focus, textarea:focus { outline: 3px solid #dbeee8; border-color: #7fb4a5; }
-    input.invalid, textarea.invalid, select.invalid { border-color: var(--bad); box-shadow: 0 0 0 2px #ffe1de; }
-    input[readonly] { background: #f6f8f5; color: var(--muted); }
-    textarea { min-height: 86px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
-    code, .code-preview { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .code-preview { display: block; margin: 8px 0 14px; white-space: pre-wrap; word-break: break-word; background: var(--code); color: #edf8f0; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.45; max-height: 260px; overflow: auto; }
+    header { border-bottom: 1px solid var(--color-line); background: #fff; }
+    .topbar { height: 68px; max-width: 1520px; margin: 0 auto; display: grid; grid-template-columns: 240px minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 0 24px; border-top: 4px solid var(--color-accent-cool); }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 820; line-height: 1.05; }
+    .mark { width: 35px; height: 35px; border: 1px solid var(--color-line); border-radius: 0; display: grid; place-items: center; background: #fff; color: var(--color-ink); font-family: var(--font-mono); font-size: 13px; }
+    .nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 22px; color: #5f5f5f; font-size: 12px; font-weight: 720; text-transform: uppercase; }
+    .hero-copy { max-width: 1520px; margin: 0 auto; padding: 54px 24px 34px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 34px; align-items: end; position: relative; }
+    .hero-copy::before { content:""; position:absolute; top:0; left:0; right:0; height:54px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; }
+    h1 { margin: 0 0 10px; font-size: 42px; letter-spacing: 0; line-height: 1.05; }
+    p { margin: 0; color: var(--color-muted); line-height: 1.55; }
+    .hero-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .hero-point { border: 1px solid var(--color-line); border-radius: 8px; background: #fff; padding: 16px; min-height: 98px; }
+    .hero-point strong { display: block; margin-bottom: 7px; font-size: 14px; }
+    .hero-point span { color: var(--color-muted); font-size: 13px; line-height: 1.42; display: block; }
+    main { display: grid; grid-template-columns: minmax(640px, 1fr) minmax(420px, .54fr); gap: 24px; padding: 24px 24px 44px; align-items: start; max-width: 1520px; margin: 0 auto; }
+    form, .output { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 8px; padding: 24px; box-shadow: none; }
+    form { display: grid; gap: 6px; }
+    .output { position: sticky; top: 88px; }
+    fieldset { border: 0; padding: 0; margin: 0 0 20px; }
+    legend { font-weight: 780; margin-bottom: 12px; font-size: 22px; letter-spacing: 0; }
+    label { display: grid; gap: 7px; margin-bottom: 14px; font-size: 13px; font-weight: 720; color: var(--color-ink); }
+    input, select, textarea { width: 100%; border: 1px solid var(--color-line); border-radius: 8px; padding: 12px 13px; font: inherit; background: #fff; color: var(--color-ink); }
+    input:focus, select:focus, textarea:focus { outline: 3px solid rgba(223,252,255,.9); border-color: var(--color-faint); }
+    input.invalid, textarea.invalid, select.invalid { border-color: var(--color-bad); box-shadow: 0 0 0 2px #ffe1de; }
+    input[readonly] { background: #f6f8f5; color: var(--color-muted); }
+    textarea { min-height: 86px; resize: vertical; font-family: var(--font-mono); font-size: 12px; line-height: 1.45; }
+    code, .code-preview { font-family: var(--font-mono); }
+    .code-preview { display: block; margin: 8px 0 14px; white-space: pre-wrap; word-break: break-word; background: var(--color-code); color: #edf8f0; border-radius: 8px; padding: 14px; font-size: 12px; line-height: 1.45; max-height: 260px; overflow: auto; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .quick-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 116px 132px; gap: 12px; align-items: end; }
-    details { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfa; margin-bottom: 14px; }
+    details { border: 1px solid var(--color-line); border-radius: 8px; padding: 14px; background: #fbfbfb; margin-bottom: 14px; }
     summary { cursor: pointer; font-weight: 700; }
     details .grid { margin-top: 12px; }
     .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    button { border: 0; border-radius: 6px; padding: 10px 14px; font: inherit; font-weight: 760; cursor: pointer; background: var(--accent); color: white; }
-    button.secondary { background: #e6ebff; color: #20396b; }
-    button.ghost { background: #edf2ef; color: #29372f; }
+    button { border: 2px solid var(--color-ink); border-radius: 0; padding: 10px 15px; font: inherit; font-weight: 780; cursor: pointer; background: var(--color-ink); color: white; text-transform: uppercase; font-size: 12px; }
+    button::before { content:">"; margin-right: 9px; font-family: var(--font-mono); }
+    button.secondary { background: #e8e7ff; border-color: #e8e7ff; color: #27215e; }
+    button.ghost { background: #eef2ef; border-color: #eef2ef; color: #29372f; }
     button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
-    pre { margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; background: var(--code); color: #edf8f0; border-radius: 8px; padding: 14px; max-height: 360px; overflow: auto; font-size: 12px; line-height: 1.45; }
-    .hint { font-size: 12px; color: var(--muted); font-weight: 500; }
-    .section-note { margin: -4px 0 14px; font-size: 12px; color: var(--muted); }
+    pre { margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; background: var(--color-code); color: #edf8f0; border-radius: 8px; padding: 14px; max-height: 360px; overflow: auto; font-size: 12px; line-height: 1.45; }
+    .hint { font-size: 12px; color: var(--color-muted); font-weight: 500; }
+    .section-note { margin: -4px 0 14px; font-size: 12px; color: var(--color-muted); }
     .hidden { display: none; }
-    .status { margin-left: auto; font-size: 13px; color: var(--muted); }
-    .error { color: var(--bad); }
-    .notice { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 12px 0; font-size: 13px; color: var(--muted); background: #fbfcfa; }
+    .status { margin-left: auto; font-size: 13px; color: var(--color-muted); }
+    .error { color: var(--color-bad); }
+    .notice { border: 1px solid var(--color-line); border-radius: 8px; padding: 12px 13px; margin: 12px 0; font-size: 13px; color: var(--color-muted); background: #fbfbfb; }
     .notice.success { border-color: #9bc9b8; color: #173d2f; background: #f2faf6; }
-    .notice.error { border-color: #efb3ad; color: var(--bad); background: #fff6f5; }
-    .confirm-panel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+    .notice.error { border-color: #efb3ad; color: var(--color-bad); background: #fff6f5; }
+    .confirm-panel { margin-top: 14px; border-top: 1px solid var(--color-line); padding-top: 14px; }
     .confirm-panel button { width: 100%; }
-    .divider { height: 1px; background: var(--line); margin: 20px 0; }
-    .draft-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 4px; }
-    .draft-list { display: grid; gap: 10px; margin: 12px 0; }
-    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 92px 110px 112px; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
+    .divider { height: 1px; background: var(--color-line); margin: 20px 0; }
+    .draft-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0 6px; }
+    .draft-list { display: grid; gap: 12px; margin: 14px 0; }
+    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 104px 122px 126px; gap: 12px; align-items: start; border: 1px solid var(--color-line); border-radius: 8px; padding: 16px; background: #fff; transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
+    .draft-row:hover { border-color: var(--color-strong-line); transform: translateY(-1px); box-shadow: 0 10px 22px rgba(23, 32, 26, .06); }
     .draft-row.selected { border-color: #81b7a7; background: #f4fbf8; }
     .draft-row.published { border-color: #cbd8d1; background: #f5f7f5; opacity: 0.78; }
+    .draft-row.failed { border-color:#efb3ad; background:#fff8f7; }
     .draft-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 4px; }
-    .draft-title { font-weight: 790; overflow-wrap: anywhere; }
-    .draft-meta { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+    .draft-title { font-weight: 790; overflow-wrap: anywhere; font-size: 16px; }
+    .draft-meta { color: var(--color-muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+    .draft-contract { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+    .draft-chip { display:inline-flex; align-items:center; border:1px solid #d7ded9; background:#fff; border-radius:999px; padding:3px 8px; color:#516158; font-size:11px; font-weight:650; }
+    .draft-chip.ready { border-color:#afe9bb; background:#f2fff4; color:#174d24; }
+    .draft-chip.warn { border-color:#ead4a6; background:#fff9ec; color:#734d00; }
+    .draft-chip.error { border-color:#efb3ad; background:#fff1ef; color:#9f1d14; }
+    .draft-error { margin-top:9px; color:#9f1d14; font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
+    .contract-status { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 2px 0 10px; }
+    .contract-pill { display:inline-flex; align-items:center; border:1px solid #afe9bb; background:#f2fff4; color:#174d24; border-radius:999px; padding:5px 9px; font-size:12px; font-weight:760; }
+    .contract-pill.neutral { border-color:#d7ded9; background:#fff; color:#516158; }
     .draft-price input { padding: 8px; }
-    .mini-button { padding: 8px 10px; font-size: 12px; background: #29372f; align-self: center; }
-    .tiny-button { padding: 7px 9px; font-size: 12px; background: #edf2ef; color: #29372f; }
+    .mini-button { padding: 9px 10px; font-size: 12px; background: #29372f; align-self: center; }
+    .tiny-button { padding: 8px 10px; font-size: 12px; background: #edf2ef; border-color: #edf2ef; color: #29372f; }
     .draft-badge { display: inline-flex; margin-top: 6px; border: 1px solid #bfd9cf; border-radius: 999px; padding: 2px 7px; font-size: 11px; color: #174235; background: #ffffff; }
-    .flow-note { border-left: 3px solid var(--accent); padding: 8px 10px; background: #f1f8f5; border-radius: 0 6px 6px 0; margin: 10px 0 12px; }
+    .flow-note { border-left: 3px solid var(--color-accent); padding: 10px 12px; background: #f4fff6; border-radius: 0 6px 6px 0; margin: 12px 0 12px; }
     .side-grid { display: grid; gap: 12px; margin-top: 12px; }
-    .side-card { border: 1px solid var(--line); background: #fbfcfa; border-radius: 8px; padding: 12px; }
-    .side-card h3 { margin: 0 0 8px; font-size: 15px; }
+    .side-card { border: 1px solid var(--color-line); background: #fbfbfb; border-radius: 8px; padding: 16px; }
+    .side-card h3 { margin: 0 0 10px; font-size: 16px; }
     .check-list { display: grid; gap: 7px; font-size: 13px; }
-    .check-item { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+    .check-item { display: flex; gap: 8px; align-items: center; color: var(--color-muted); }
     .check-item.done { color: #173d2f; font-weight: 650; }
+    .issue-list { display:grid; gap:8px; margin-top:12px; }
+    .issue-item { border-top:1px solid var(--color-line); padding-top:8px; display:grid; gap:4px; }
+    .issue-item strong { font-size:12px; color:var(--color-ink); overflow-wrap:anywhere; }
+    .issue-item span { font-size:12px; color:#9f1d14; line-height:1.42; overflow-wrap:anywhere; }
     .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .pill { border: 1px solid #cbd8d1; background: #fff; border-radius: 999px; padding: 4px 8px; font-size: 12px; color: #34443a; }
     .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: 13px; }
-    .kv div:nth-child(odd) { color: var(--muted); }
+    .kv div:nth-child(odd) { color: var(--color-muted); }
     .kv div:nth-child(even) { overflow-wrap: anywhere; font-weight: 650; }
-    .step-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px; }
-    .step { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
-    .step b { display: block; color: var(--accent); font-size: 12px; margin-bottom: 4px; }
-    .step span { color: var(--muted); font-size: 12px; line-height: 1.35; display: block; }
-    @media (max-width: 980px) { main, .hero-copy { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; } .topbar { padding: 0 16px; } .output { position: static; } .grid, .quick-grid, .hero-points, .step-strip { grid-template-columns: 1fr; } .nav-links { display: none; } }
+    .step-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 18px; }
+    .step { border: 1px solid var(--color-line); border-radius: 8px; padding: 14px; background: var(--color-soft); }
+    .step b { display: block; color: var(--color-ink); font-size: 12px; margin-bottom: 5px; }
+    .step span { color: var(--color-muted); font-size: 12px; line-height: 1.35; display: block; }
+    @media (max-width: 980px) {
+      main, .hero-copy { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
+      .topbar { grid-template-columns: 1fr; height: auto; min-height: 68px; padding: 10px 16px; }
+      .output { position: static; }
+      .grid, .quick-grid, .hero-points, .step-strip { grid-template-columns: 1fr; }
+      .draft-row { grid-template-columns: 28px minmax(0, 1fr); }
+      .draft-price, .mini-button { grid-column: 2; }
+      .nav-links { display: none; }
+      h1 { font-size: 36px; }
+    }
   </style>
 </head>
 <body>
   <header>
     <div class="topbar">
-      <a class="brand" href="/"><span class="mark">AR</span><span>AgentRouter Markets</span></a>
+      <a class="brand" href="/"><span class="mark">AR</span><span>AgentRouter<br/>Markets</span></a>
       <nav class="nav-links" aria-label="Studio navigation">
         <a href="/">Home</a>
-        <a href="/demo">Demand demo</a>
+        <a href="/agent">Services</a>
+        <a href="/human">Providers</a>
         <a href="/agent-router/stats">Stats</a>
       </nav>
     </div>
     <div class="hero-copy">
       <div>
         <h1>Provider Studio</h1>
-        <p>Connect a working data API, verify the real response, and publish it as an Agent-callable paid service.</p>
+        <p>Connect a working data API, verify the real response, and publish it as an agent-callable paid service.</p>
       </div>
       <div class="hero-points">
-        <div class="hero-point"><strong>Import</strong><span>Paste one endpoint or an OpenAPI URL.</span></div>
+        <div class="hero-point"><strong>Import</strong><span>Paste one endpoint, OpenAPI URL, or Skill page.</span></div>
         <div class="hero-point"><strong>Verify</strong><span>AgentRouter calls the upstream API before publish.</span></div>
         <div class="hero-point"><strong>Route</strong><span>Buyer agents can discover it immediately.</span></div>
       </div>
@@ -229,9 +281,10 @@ export function studioHtml({ draft } = {}) {
       </div>
       <fieldset>
         <legend>Import API</legend>
-        <p class="section-note">Paste a real data endpoint or OpenAPI URL. AgentRouter tests the upstream response before publishing, so broken APIs are blocked before they enter the registry.</p>
+        <p class="section-note">Paste a real data endpoint, OpenAPI URL, or Skill page. AgentRouter extracts endpoint drafts, then tests the upstream response before publishing.</p>
+        ${loadedNotice}
         <div class="quick-grid">
-        <label>API URL
+        <label>API / OpenAPI / Skill URL
           <input name="import_api_url" value="/mock/api" />
         </label>
         <label>Method
@@ -264,8 +317,8 @@ export function studioHtml({ draft } = {}) {
           <button type="button" class="tiny-button" id="clear-drafts">Clear Selection</button>
           <span class="hint" id="selected-drafts-status">0 selected</span>
         </div>
-        <p class="flow-note">Select endpoint cards and click <strong>Verify & Publish Selected</strong>. Service name, routing tags, data contract, and runtime wrapper are generated for you.</p>
-        <p class="hint" id="import-status">Use a concrete endpoint for one API, or an OpenAPI/Swagger URL for many endpoints.</p>
+        <p class="flow-note">Select endpoint cards and click <strong>Verify & Publish Selected</strong>. Service metadata, routing tags, data contract, and runtime wrapper are generated before validation.</p>
+        <p class="hint" id="import-status">Use a concrete endpoint for one API, an OpenAPI/Swagger URL for many endpoints, or a Skill page such as a ClawHub skill.</p>
         <div id="draft-list" class="draft-list"></div>
         <details>
           <summary>Developer debug JSON</summary>
@@ -277,7 +330,7 @@ export function studioHtml({ draft } = {}) {
       </fieldset>
       <details id="service-editor" class="editor-details">
         <summary>Advanced manual editor</summary>
-        <p class="section-note">Most providers should not need this. Use it only to override generated names, routing tags, sample JSON, or endpoint details.</p>
+        <p class="section-note">Generated automatically from the imported endpoint. Most providers should only open this to override names, routing tags, input JSON, or endpoint details.</p>
         <fieldset>
           <legend>Service Metadata</legend>
           <div class="grid">
@@ -318,8 +371,13 @@ export function studioHtml({ draft } = {}) {
         </details>
         <fieldset>
           <legend>Data Contract</legend>
-          <label>Example input JSON
+          <p class="section-note">Generated from endpoint parameters and the validation preview. Buyer agents use this to form requests and parse the paid response.</p>
+          <div class="contract-status" id="input-contract-status"></div>
+          <label>Example input JSON <span class="hint">auto-generated from endpoint parameters</span>
             <textarea name="sample_request">${html(formDefaults.sampleRequest)}</textarea>
+          </label>
+          <label>Generated contract
+            <code class="code-preview" id="contract-preview"></code>
           </label>
           <label id="live-data-label" class="${formDefaults.mode === "hosted-http" ? "hidden" : ""}">Paid result JSON
             <textarea name="live_data">${html(formDefaults.liveData)}</textarea>
@@ -418,6 +476,8 @@ export function studioHtml({ draft } = {}) {
     let singleServiceReady = false;
     const previewSettings = document.querySelector("#preview-settings");
     const previewDataView = document.querySelector("#preview-data-view");
+    const contractPreview = document.querySelector("#contract-preview");
+    const inputContractStatus = document.querySelector("#input-contract-status");
     const envelopePreview = document.querySelector("#envelope-preview");
     const titleInput = form.elements.namedItem("title");
     const providerNameInput = form.elements.namedItem("provider_name");
@@ -623,7 +683,11 @@ export function studioHtml({ draft } = {}) {
       syncPreviewData();
       syncEnvelopePreview();
     });
-    sampleRequestInput.addEventListener("input", () => { markInvalid(sampleRequestInput, false); syncEnvelopePreview(); });
+    sampleRequestInput.addEventListener("input", () => {
+      markInvalid(sampleRequestInput, false);
+      syncInputContractStatus();
+      syncEnvelopePreview();
+    });
     summaryInput.addEventListener("input", () => { markInvalid(summaryInput, false); syncEnvelopePreview(); });
     upstreamUrlInput.addEventListener("input", () => markInvalid(upstreamUrlInput, false));
     serviceEditor.addEventListener("toggle", () => {
@@ -682,7 +746,9 @@ export function studioHtml({ draft } = {}) {
         }
         lastImportMeta = {
           skipped: payload.skipped?.length || 0,
-          source: payload.source
+          source: payload.source,
+          mode: payload.mode || "openapi",
+          provider: payload.provider?.provider_name || payload.provider?.provider_id || ""
         };
         importDrafts.value = JSON.stringify(discoveredDrafts, null, 2);
         renderDraftList(discoveredDrafts);
@@ -692,11 +758,13 @@ export function studioHtml({ draft } = {}) {
             found: discoveredDrafts.length,
             selected: selectedDraftCount(),
             skipped: payload.skipped?.length || 0,
-            source: payload.source
+            source: payload.source,
+            mode: payload.mode || "openapi",
+            provider: payload.provider?.provider_name || payload.provider?.provider_id || ""
           }
         });
         importStatus.textContent = discoveredDrafts.length
-          ? "Found " + discoveredDrafts.length + " data endpoints to verify before publishing. Skipped " + (payload.skipped?.length || 0) + "."
+          ? "Found " + discoveredDrafts.length + " generated service drafts from " + importModeLabel(payload.mode) + ". Each selected endpoint will be live-validated before publishing. Skipped " + (payload.skipped?.length || 0) + "."
           : "No data endpoints found.";
         importStatus.classList.remove("error");
         status.textContent = "Drafts generated";
@@ -732,19 +800,26 @@ export function studioHtml({ draft } = {}) {
         });
         const payload = await response.json();
         result.textContent = JSON.stringify(payload, null, 2);
-        status.textContent = payload.ok ? "Remote verified " + payload.published.length + " services" : "Remote verification failed";
-        status.classList.toggle("error", !payload.ok);
+        const publishedCount = payload.published?.length || 0;
+        const failedCount = payload.failed?.length || 0;
+        status.textContent = failedCount
+          ? "Verified " + publishedCount + ", failed " + failedCount
+          : "Remote verified " + publishedCount + " services";
+        status.classList.toggle("error", failedCount > 0);
         showNotice(
           formMessage,
-          payload.ok
+          failedCount === 0
             ? "Verified and published to " + (payload.remote_registry_url || "this registry") + ". Buyer agents can route to it now."
-            : "Not published to remote registry: " + (formatPublishFailures(payload.failed || []) || "Validation failed."),
-          payload.ok ? "success" : "error"
+            : "Some endpoints were not published. Failed cards now show the exact reason; verified cards are already routable.",
+          failedCount === 0 ? "success" : "error"
         );
         for (const item of payload.published || []) publishedServiceIds.add(item.service_id);
+        const failedById = new Map((payload.failed || []).map((item) => [item.service_id, item]));
         discoveredDrafts = discoveredDrafts.map((draft) => publishedServiceIds.has(draft.service_id)
           ? { ...draft, selected: false, published: true }
-          : draft);
+          : failedById.has(draft.service_id)
+            ? { ...draft, selected: true, published: false, publish_error: failedById.get(draft.service_id) }
+            : { ...draft, publish_error: undefined });
         renderDraftList(discoveredDrafts);
         updateDraftSelectionUi();
         setSingleServiceReady(false);
@@ -770,7 +845,9 @@ export function studioHtml({ draft } = {}) {
         '<div class="draft-title">' + escapeHtml(draft.title || draft.service_id) + "</div>",
         '<div class="draft-meta">' + escapeHtml(draft.method || "GET") + " " + escapeHtml(draft.path || draft.upstream_url || "") + "</div>",
         '<div class="draft-meta">' + escapeHtml((draft.capabilities || []).join(", ")) + "</div>",
+        '<div class="draft-contract">' + draftContractChips(draft) + '</div>',
         '<span class="draft-badge">' + draftBadge(draft) + "</span>",
+        draft.publish_error ? '<div class="draft-error">' + escapeHtml(publishFailureReason(draft.publish_error)) + '</div>' : "",
         "</div>",
         '<label class="draft-price">Method',
         '<select class="draft-method-input" ' + (draft.published ? "disabled" : "") + '>',
@@ -788,6 +865,7 @@ export function studioHtml({ draft } = {}) {
 
     function draftRowClass(draft) {
       if (draft.published) return "published";
+      if (draft.publish_error) return "failed selected";
       return draft.selected === false ? "" : "selected";
     }
 
@@ -800,8 +878,31 @@ export function studioHtml({ draft } = {}) {
 
     function draftBadge(draft) {
       if (draft.published) return "Verified and routable";
+      if (draft.publish_error) return "Validation failed";
       if (draft.existing_service_status && draft.existing_service_status !== "verified") return "Needs verification";
       return draft.selected === false ? "Not selected" : "Selected for verification";
+    }
+
+    function draftContractChips(draft) {
+      const inputKeys = Object.keys(draft.sample_request || {});
+      const hasContract = Boolean(draft.data_contract);
+      const source = draft.source_type === "skill_import" ? "Skill import" : draft.discovery_note ? "Direct endpoint" : "OpenAPI";
+      return [
+        '<span class="draft-chip ready">Metadata auto-filled</span>',
+        '<span class="draft-chip ' + (hasContract ? "ready" : "warn") + '">' + (hasContract ? "Contract generated" : "Contract inferred") + '</span>',
+        '<span class="draft-chip">' + inputKeys.length + ' input fields</span>',
+        '<span class="draft-chip">' + escapeHtml(source) + '</span>',
+        draft.publish_error ? '<span class="draft-chip error">Fix before publish</span>' : ''
+      ].join("");
+    }
+
+    function publishFailureReason(item) {
+      return item?.message
+        || item?.validation?.result_errors?.[0]?.message
+        || item?.validation?.provider_error?.message
+        || item?.validation?.error
+        || item?.error
+        || "Validation failed";
     }
 
     function methodOption(method, current) {
@@ -855,7 +956,7 @@ export function studioHtml({ draft } = {}) {
       publishDrafts.disabled = total > 0 && selected === 0;
       selectedDraftsStatus.textContent = selected + " of " + total + " endpoints selected" + (published ? " · " + published + " published" : "");
       importStatus.textContent = total
-        ? "Found " + total + " data endpoints. " + selected + " selected for verification. " + published + " already verified and routable. Skipped " + (lastImportMeta?.skipped || 0) + "."
+        ? "Found " + total + " generated drafts from " + importModeLabel(lastImportMeta?.mode) + ". " + selected + " selected for live verification. " + published + " already verified and routable. Skipped " + (lastImportMeta?.skipped || 0) + "."
         : importStatus.textContent;
       importStatus.classList.remove("error");
       importDrafts.value = JSON.stringify(discoveredDrafts, null, 2);
@@ -865,9 +966,18 @@ export function studioHtml({ draft } = {}) {
           selected,
           published,
           skipped: lastImportMeta?.skipped || 0,
-          source: lastImportMeta?.source || importApiUrl.value
+          source: lastImportMeta?.source || importApiUrl.value,
+          mode: lastImportMeta?.mode || "",
+          provider: lastImportMeta?.provider || ""
         }
       });
+    }
+
+    function importModeLabel(mode) {
+      if (mode === "skill_document") return "Skill document";
+      if (mode === "direct_endpoint") return "single endpoint";
+      if (mode === "openapi") return "OpenAPI";
+      return mode || "API source";
     }
 
     function syncDraftsFromList() {
@@ -878,6 +988,7 @@ export function studioHtml({ draft } = {}) {
         discoveredDrafts[index].selected = row.querySelector(".draft-selected").checked;
         discoveredDrafts[index].price = row.querySelector(".draft-price-input").value;
         discoveredDrafts[index].method = row.querySelector(".draft-method-input").value;
+        if (!discoveredDrafts[index].selected) discoveredDrafts[index].publish_error = undefined;
       }
       importDrafts.value = JSON.stringify(discoveredDrafts, null, 2);
     }
@@ -934,6 +1045,7 @@ export function studioHtml({ draft } = {}) {
       capabilitiesInput.value = (draft.capabilities || []).join(",");
       priceInput.value = draft.price || importDefaultPrice.value || "0.01";
       sampleRequestInput.value = JSON.stringify(draft.sample_request || {}, null, 2);
+      syncInputContractStatus(draft);
       sampleDataInput.value = JSON.stringify(draft.preview_data ?? { ok: true }, null, 2);
       previewDataView.textContent = sampleDataInput.value;
       liveDataInput.value = JSON.stringify(draft.preview_data ?? { ok: true }, null, 2);
@@ -944,13 +1056,15 @@ export function studioHtml({ draft } = {}) {
       secretValueInput.value = draft.secret_value || importSecretValue.value || "";
       authHeaderInput.value = draft.auth_header || (secretValueInput.value ? "auto" : "authorization");
       syncMode();
+      syncContractPreview(draft);
       syncEnvelopePreview();
       updateSidePanel({ selectedDraft: draft });
-      status.textContent = "Draft filled into the service form";
+      status.textContent = "Generated metadata and contract";
       status.classList.remove("error");
       result.textContent = JSON.stringify({
         filled_from_draft: draft.service_id,
-        next_step: "Review the single-service editor, then click Publish This Service."
+        generated: ["service metadata", "routing tags", "input contract", "preview response"],
+        next_step: "Only edit fields if you need to override the generated service."
       }, null, 2);
     }
 
@@ -959,6 +1073,38 @@ export function studioHtml({ draft } = {}) {
         sampleDataInput.value = liveDataInput.value;
       }
       previewDataView.textContent = sampleDataInput.value;
+      syncContractPreview();
+    }
+
+    function syncContractPreview(draft = null) {
+      if (!contractPreview) return;
+      const sample = safeJson(sampleRequestInput.value, {});
+      const preview = safeJson(sampleDataInput.value, { example: "preview" });
+      const contract = draft?.data_contract || {
+        request: {
+          method: upstreamMethodInput.value || (mode.value === "hosted-http" ? "GET" : "STATIC"),
+          path: mode.value === "hosted-http" ? endpointPath(upstreamUrlInput.value) : "provider-hosted-json",
+          example: sample
+        },
+        response: {
+          content_type: "application/json",
+          preview_shape: shapeFor(preview)
+        }
+      };
+      contractPreview.textContent = JSON.stringify(contract, null, 2);
+      syncInputContractStatus(draft);
+    }
+
+    function syncInputContractStatus(draft = null) {
+      if (!inputContractStatus) return;
+      const sample = draft?.sample_request || safeJson(sampleRequestInput.value, {});
+      const keys = Object.keys(sample || {});
+      const source = draft?.source_type === "skill_import" ? "Skill" : draft?.discovery_note ? "Endpoint URL" : draft ? "OpenAPI" : "Editor";
+      inputContractStatus.innerHTML = [
+        '<span class="contract-pill">Input auto-filled</span>',
+        '<span class="contract-pill neutral">' + (keys.length ? keys.length + ' field' + (keys.length === 1 ? '' : 's') + ': ' + escapeHtml(keys.slice(0, 4).join(", ")) : 'No input required') + '</span>',
+        '<span class="contract-pill neutral">Source: ' + escapeHtml(source) + '</span>'
+      ].join("");
     }
 
     function syncEnvelopePreview() {
@@ -990,7 +1136,25 @@ export function studioHtml({ draft } = {}) {
         summary: summaryInput.value || "Short result summary."
       };
       envelopePreview.textContent = JSON.stringify(envelope, null, 2);
+      syncContractPreview();
       updateSidePanel();
+    }
+
+    function endpointPath(value) {
+      try {
+        return new URL(value, window.location.origin).pathname;
+      } catch {
+        return value || "";
+      }
+    }
+
+    function shapeFor(value) {
+      if (Array.isArray(value)) return value.length ? [shapeFor(value[0])] : [];
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).slice(0, 12).map(([key, child]) => [key, shapeFor(child)]));
+      }
+      if (value === null) return "null";
+      return typeof value;
     }
 
     function updateSidePanel(extra = {}) {
@@ -1017,6 +1181,8 @@ export function studioHtml({ draft } = {}) {
           '<div>Selected</div><div>' + (extra.importSummary.selected ?? extra.importSummary.found) + '</div>' +
           '<div>Published</div><div>' + (extra.importSummary.published || 0) + '</div>' +
           '<div>Skipped</div><div>' + extra.importSummary.skipped + '</div>' +
+          '<div>Import type</div><div>' + escapeHtml(importModeLabel(extra.importSummary.mode)) + '</div>' +
+          '<div>Provider</div><div>' + escapeHtml(extra.importSummary.provider || "auto-detected") + '</div>' +
           '<div>Source</div><div>' + escapeHtml(extra.importSummary.source) + '</div>' +
           "</div></div>"
         );
@@ -1044,14 +1210,18 @@ export function studioHtml({ draft } = {}) {
         );
       }
       if (extra.batchPublishResult) {
+        const failedList = (extra.batchPublishResult.failed || []).slice(0, 6).map((item) =>
+          '<div class="issue-item"><strong>' + escapeHtml(item.service_id) + '</strong><span>' + escapeHtml(publishFailureReason(item)) + '</span></div>'
+        ).join("");
         cards.push(
           '<div class="side-card"><h3>' + (extra.batchPublishResult.ok ? "Verified Services" : "Verification Issues") + '</h3><div class="kv">' +
           '<div>Registry</div><div>' + escapeHtml(extra.batchPublishResult.remote_registry_url || "current") + '</div>' +
           '<div>Verified</div><div>' + escapeHtml(extra.batchPublishResult.published?.length || 0) + '</div>' +
           '<div>Failed</div><div>' + escapeHtml(extra.batchPublishResult.failed?.length || 0) + '</div>' +
           '<div>Routable services</div><div>' + escapeHtml((extra.batchPublishResult.published || []).map((item) => item.service_id).join(", ") || "-") + '</div>' +
-          '<div>Issues</div><div>' + escapeHtml(formatPublishFailures(extra.batchPublishResult.failed || []) || "-") + '</div>' +
-          "</div></div>"
+          "</div>" +
+          (failedList ? '<div class="issue-list">' + failedList + '</div>' : '') +
+          "</div>"
         );
       }
       sidePanel.innerHTML = cards.join("");
@@ -1196,6 +1366,60 @@ function defaultsFromDraft(draft) {
     secretName: "PROVIDER_SECRET",
     secretValue: "demo-provider-secret"
   };
+}
+
+export function draftFromServiceRecord(record, config = null) {
+  const manifest = record?.manifest || {};
+  const source = config?.source || {};
+  const hosted = source.type === "hosted_http";
+  return {
+    selected: false,
+    published: true,
+    service_id: manifest.service_id,
+    provider_id: manifest.provider?.provider_id,
+    provider_name: manifest.provider?.provider_id,
+    title: manifest.title,
+    description_for_agent: manifest.description_for_agent,
+    capabilities: manifest.capabilities || [],
+    price: manifest.pricing?.amount || "0.01",
+    method: hosted ? source.upstream_method || "GET" : "POST",
+    path: hosted ? safePath(source.upstream_url) : "provider-hosted-json",
+    upstream_url: hosted ? source.upstream_url || "" : "",
+    auth_header: source.auth?.header || "",
+    secret_name: source.auth?.secret_name || "PROVIDER_SECRET",
+    secret_value: "",
+    sample_request: manifest.sample_request || {},
+    preview_data: manifest.sample_response?.data || {},
+    summary: manifest.agent_contract?.summary || source.summary || "",
+    data_contract: {
+      request: {
+        method: hosted ? source.upstream_method || "GET" : "STATIC",
+        path: hosted ? safePath(source.upstream_url) : "provider-hosted-json",
+        example: manifest.sample_request || {}
+      },
+      response: {
+        content_type: "application/json",
+        preview_shape: shapeForDraft(manifest.sample_response?.data || {})
+      }
+    }
+  };
+}
+
+function safePath(value) {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return value || "";
+  }
+}
+
+function shapeForDraft(value) {
+  if (Array.isArray(value)) return value.length ? [shapeForDraft(value[0])] : [];
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).slice(0, 12).map(([key, child]) => [key, shapeForDraft(child)]));
+  }
+  if (value === null) return "null";
+  return typeof value;
 }
 
 function prettyJson(value) {

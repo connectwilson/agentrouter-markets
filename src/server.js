@@ -8,8 +8,9 @@ import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedba
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
-import { createProviderFromStudio, studioHtml } from "./studio.js";
+import { createProviderFromStudio, draftFromServiceRecord, studioHtml } from "./studio.js";
 import { agentHtml, homeHtml, humanHtml } from "./home.js";
+import { readProviderConfig } from "./provider-config.js";
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -96,6 +97,17 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "GET" && url.pathname === "/studio") {
+    const serviceId = url.searchParams.get("service_id");
+    if (serviceId) {
+      const record = store.services.get(serviceId);
+      if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+      const config = await readProviderConfig(serviceId).catch(() => null);
+      sendHtml(res, 200, studioHtml({
+        draft: draftFromServiceRecord(record, config),
+        loadedService: { service_id: serviceId }
+      }));
+      return;
+    }
     sendHtml(res, 200, studioHtml());
     return;
   }

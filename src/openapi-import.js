@@ -27,6 +27,15 @@ export async function discoverApiServices(body, baseUrl) {
   const providerName = body.provider_name || null;
   const secretValue = body.secret_value || "";
   const authHeader = body.auth_header || "";
+  if (looksLikeSkillSource(apiUrl)) {
+    return discoverSkillServices({
+      skillUrl: apiUrl,
+      defaultPrice,
+      providerName,
+      secretValue,
+      authHeader
+    });
+  }
   const document = await fetchOpenApiDocument(apiUrl);
   if (document.directEndpoint) {
     const providerTitle = providerName || hostName(apiUrl);
@@ -85,6 +94,7 @@ export async function discoverApiServices(body, baseUrl) {
 
   return {
     ok: true,
+    mode: "openapi",
     source: document.source,
     api_url: upstreamBaseUrl,
     provider: {
@@ -93,6 +103,48 @@ export async function discoverApiServices(body, baseUrl) {
     },
     drafts,
     skipped
+  };
+}
+
+async function discoverSkillServices({ skillUrl, defaultPrice, providerName, secretValue, authHeader }) {
+  const skill = await fetchSkillDocument(skillUrl);
+  const parsed = parseSkillDocument(skill.text, skillUrl);
+  const upstreamBaseUrl = parsed.baseUrl;
+  if (!upstreamBaseUrl) {
+    const error = new Error("Skill import failed: no Base URL or API host could be found in the skill document.");
+    error.statusCode = 422;
+    throw error;
+  }
+  const providerTitle = providerName || parsed.providerName || hostName(upstreamBaseUrl);
+  const providerId = normalizeId(null, providerTitle, "provider");
+  const secretHeader = authHeader || parsed.authHeader || (secretValue ? "auto" : inferAuthHeader(upstreamBaseUrl));
+  const drafts = parsed.endpoints.map((endpoint) => createSkillEndpointDraft({
+    endpoint,
+    upstreamBaseUrl,
+    providerId,
+    providerTitle,
+    defaultPrice,
+    secretValue,
+    authHeader: secretHeader,
+    skillUrl,
+    skillTitle: parsed.title
+  }));
+  return {
+    ok: true,
+    mode: "skill_document",
+    source: skill.source,
+    api_url: upstreamBaseUrl,
+    provider: {
+      provider_id: providerId,
+      provider_name: providerTitle
+    },
+    skill: {
+      title: parsed.title,
+      auth_header: secretHeader,
+      endpoint_count: drafts.length
+    },
+    drafts,
+    skipped: parsed.skipped
   };
 }
 
@@ -371,11 +423,18 @@ function convertEndpointIndex(doc, apiUrl) {
 
 function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, doc, providerId, providerTitle, defaultPrice, secretValue }) {
   const title = operation.summary || titleFromPath(routePath, method);
-  const description = operation.description || `Use this service to call ${method.toUpperCase()} ${routePath} from ${providerTitle}.`;
   const serviceId = normalizeId(operation.operationId, title, "service");
   const upstreamUrl = `${apiUrl.replace(/\/$/, "")}${routePath}`;
   const sampleRequest = sampleRequestFor(operation, pathItem, doc);
   const previewData = previewDataFor(operation, doc);
+  const description = agentDescription({
+    title,
+    providerTitle,
+    method,
+    routePath,
+    sampleRequest,
+    baseDescription: operation.description
+  });
   const capabilities = suggestCapabilities(`${title} ${description} ${routePath}`);
 
   return {
@@ -395,7 +454,8 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
     secret_value: secretValue,
     sample_request: sampleRequest,
     preview_data: previewData,
-    summary: summaryFor(title, previewData)
+    summary: resultSummary({ title, providerTitle, routePath, previewData }),
+    data_contract: dataContractFor({ method: method.toUpperCase(), routePath, sampleRequest, previewData })
   };
 }
 
@@ -404,9 +464,9 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
   const routePath = url.pathname;
   const method = defaultMethod || inferMethodForEndpoint(apiUrl);
   const title = titleFromPath(routePath, method);
-  const description = `Use this service to call ${method.toUpperCase()} ${routePath} from ${providerTitle}.`;
   const sampleRequest = sampleRequestForDirectEndpoint(apiUrl);
   const previewData = previewDataForDirectEndpoint(apiUrl);
+  const description = agentDescription({ title, providerTitle, method, routePath, sampleRequest });
   return {
     selected: true,
     service_id: normalizeId(null, title, "service"),
@@ -424,9 +484,461 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
     secret_value: secretValue,
     sample_request: sampleRequest,
     preview_data: previewData,
-    summary: summaryFor(title, previewData),
+    summary: resultSummary({ title, providerTitle, routePath, previewData }),
+    data_contract: dataContractFor({ method: method.toUpperCase(), routePath, sampleRequest, previewData }),
     discovery_note: "Generated from a direct API endpoint URL because no OpenAPI/Swagger document was found."
   };
+}
+
+function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, providerTitle, defaultPrice, secretValue, authHeader, skillUrl, skillTitle }) {
+  const method = endpoint.method || "GET";
+  const routePath = endpoint.path.startsWith("/") ? endpoint.path : new URL(endpoint.path, `${upstreamBaseUrl}/`).pathname;
+  const title = endpoint.title || titleFromPath(routePath, method);
+  const sampleRequest = { ...endpoint.params };
+  const previewData = endpoint.previewData || { status: 0, message: "", data: { example: true } };
+  const description = agentDescription({
+    title,
+    providerTitle,
+    method,
+    routePath,
+    sampleRequest,
+    baseDescription: endpoint.description,
+    sourceTitle: skillTitle
+  });
+  const capabilities = suggestCapabilities(`${title} ${description} ${routePath}`).split(",");
+  return {
+    selected: true,
+    service_id: normalizeId(endpoint.operationId, title, "service"),
+    provider_id: providerId,
+    provider_name: providerTitle,
+    title,
+    description_for_agent: description,
+    capabilities,
+    price: defaultPrice,
+    method,
+    path: routePath,
+    upstream_url: `${upstreamBaseUrl.replace(/\/$/, "")}${routePath}`,
+    auth_header: authHeader,
+    secret_name: inferSecretName(upstreamBaseUrl),
+    secret_value: secretValue,
+    sample_request: sampleRequest,
+    preview_data: previewData,
+    summary: endpoint.summary || resultSummary({ title, providerTitle, routePath, previewData }),
+    data_contract: dataContractFor({ method, routePath, sampleRequest, previewData }),
+    source_type: "skill_import",
+    source_url: skillUrl,
+    discovery_note: "Generated from a Skill document. The skill text was parsed statically; publish still requires a real upstream validation call."
+  };
+}
+
+function agentDescription({ title, providerTitle, method, routePath, sampleRequest = {}, baseDescription = "", sourceTitle = "" }) {
+  const cleanBase = cleanDescription(baseDescription);
+  const params = Object.keys(sampleRequest);
+  const paramText = params.length
+    ? ` Accepts ${params.map((name) => `"${name}"`).join(", ")} as input.`
+    : " No input is required for the default request.";
+  const sourceText = sourceTitle ? ` Imported from ${sourceTitle}.` : "";
+  if (cleanBase && !/^use this service to call/i.test(cleanBase)) {
+    return `${cleanBase}${paramText}${sourceText}`;
+  }
+  return `Returns ${title} data from ${providerTitle} via ${String(method).toUpperCase()} ${routePath}.${paramText}${sourceText}`;
+}
+
+function cleanDescription(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/^use this service to call\s+/i, "")
+    .trim();
+}
+
+function dataContractFor({ method, routePath, sampleRequest, previewData }) {
+  return {
+    request: {
+      method: String(method || "GET").toUpperCase(),
+      path: routePath,
+      example: sampleRequest || {}
+    },
+    response: {
+      content_type: "application/json",
+      preview_shape: shapeFor(previewData)
+    }
+  };
+}
+
+function shapeFor(value) {
+  if (Array.isArray(value)) return value.length ? [shapeFor(value[0])] : [];
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).slice(0, 12).map(([key, child]) => [key, shapeFor(child)]));
+  }
+  if (value === null) return "null";
+  return typeof value;
+}
+
+function looksLikeSkillSource(apiUrl) {
+  try {
+    const url = new URL(apiUrl);
+    return /clawhub\.ai$/i.test(url.hostname) || /skill/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function fetchSkillDocument(skillUrl) {
+  const response = await fetch(skillUrl);
+  if (!response.ok) {
+    const error = new Error(`Skill import failed: ${skillUrl} returned HTTP ${response.status}`);
+    error.statusCode = 422;
+    throw error;
+  }
+  const contentType = response.headers.get("content-type") || "";
+  const raw = await response.text();
+  const text = contentType.includes("html") ? extractSkillReadmeFromHtml(raw) || htmlToText(raw) : raw;
+  return { source: skillUrl, text };
+}
+
+function parseSkillDocument(text, skillUrl) {
+  const title = extractSkillTitle(text, skillUrl);
+  const baseUrl = firstMatch(text, /Base URL\s*:\s*`?(https?:\/\/[^\s`]+)`?/i)
+    || firstMatch(text, /(https?:\/\/[a-z0-9.-]+(?:\/[a-z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?)/i)?.replace(/\/v\d+\/.*$/i, "");
+  const authHeader = firstMatch(text, /Header\s+`?([A-Za-z0-9_-]+)\s*:\s*\$?[A-Z0-9_]+`?/i)
+    || firstMatch(text, /Auth\s*:[^\n]*Header\s+`?([A-Za-z0-9_-]+)\s*:\s*\$?[A-Z0-9_]+`?/i)
+    || firstMatch(text, /-H\s+["']([^:"']+)\s*:\s*\$?[A-Z0-9_]+["']/i)
+    || "";
+  const endpoints = parseSkillEndpoints(text, baseUrl);
+  if (!endpoints.length) {
+    const error = new Error("Skill import failed: no HTTP API endpoints were found in the skill document.");
+    error.statusCode = 422;
+    throw error;
+  }
+  return {
+    title,
+    baseUrl: baseUrl ? baseUrl.replace(/\/$/, "") : "",
+    providerName: providerNameFromSkill(title, baseUrl),
+    authHeader,
+    endpoints,
+    skipped: []
+  };
+}
+
+function extractSkillTitle(text, skillUrl) {
+  const explicitTitle = firstMatch(text, /\b([A-Z][A-Za-z0-9 ._-]{2,80}\s+API Skill)\b/);
+  if (explicitTitle) return cleanEndpointTitle(explicitTitle);
+  const headings = [...String(text || "").matchAll(/^#\s+(.+)$/gm)]
+    .map((match) => cleanEndpointTitle(match[1]))
+    .filter((heading) => heading && !/^\d+\./.test(heading));
+  return headings.find((heading) => /api skill|skill/i.test(heading) && !/--/.test(heading))
+    || headings.find((heading) => /skill/i.test(heading))
+    || headings[0]
+    || titleFromSkillUrl(skillUrl);
+}
+
+function parseSkillEndpoints(text, baseUrl) {
+  const endpoints = new Map();
+  for (const endpoint of parseCurlEndpoints(text, baseUrl)) {
+    endpoints.set(`${endpoint.method} ${endpoint.path}`, endpoint);
+  }
+  for (const endpoint of parseReferenceEndpoints(text, baseUrl)) {
+    if (!endpoints.has(`${endpoint.method} ${endpoint.path}`)) endpoints.set(`${endpoint.method} ${endpoint.path}`, endpoint);
+  }
+  for (const endpoint of parseLooseUrlEndpoints(text, baseUrl)) {
+    if (!endpoints.has(`${endpoint.method} ${endpoint.path}`)) endpoints.set(`${endpoint.method} ${endpoint.path}`, endpoint);
+  }
+  for (const endpoint of parseLoosePathEndpoints(text)) {
+    if (!endpoints.has(`${endpoint.method} ${endpoint.path}`)) endpoints.set(`${endpoint.method} ${endpoint.path}`, endpoint);
+  }
+  return [...endpoints.values()].filter((endpoint) => !SKIP_PATH_RE.test(endpoint.path));
+}
+
+function parseCurlEndpoints(text, baseUrl) {
+  const lines = text.split(/\r?\n/);
+  const endpoints = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!isCurlUrlLine(lines, index)) continue;
+    const url = firstMatch(line, /(https?:\/\/[^\s"'`\\]+)/);
+    if (!url || (baseUrl && !url.startsWith(baseUrl))) continue;
+    const previous = previousComment(lines, index);
+    const nextLines = lines.slice(index + 1, index + 8);
+    const params = {};
+    for (const next of nextLines) {
+      if (/curl\s+-/.test(next) || /https?:\/\//.test(next)) break;
+      const param = firstMatch(next, /--data-urlencode\s+["']?([^="'\s]+)=([^"'\s]+)["']?/);
+      if (param) {
+        const match = next.match(/--data-urlencode\s+["']?([^="'\s]+)=([^"'\s]+)["']?/);
+        params[match[1]] = normalizeParamExample(match[2]);
+      }
+    }
+    endpoints.push(endpointFromUrl({
+      url,
+      method: inferMethodFromCurlContext(line, nextLines),
+      title: cleanEndpointTitle(previous) || titleFromPath(new URL(url).pathname, "GET"),
+      params,
+      description: previous ? cleanEndpointTitle(previous) : ""
+    }));
+  }
+  return endpoints;
+}
+
+function isCurlUrlLine(lines, index) {
+  const line = lines[index].trim();
+  if (/^curl\b/i.test(line)) return true;
+  if (/^["']?https?:\/\//i.test(line)) {
+    return lines.slice(Math.max(0, index - 4), index).some((previous) => /^curl\b/i.test(previous.trim()));
+  }
+  return false;
+}
+
+function parseReferenceEndpoints(text, baseUrl) {
+  const endpoints = [];
+  const re = /\b(GET|POST|PUT|PATCH)\s+((?:https?:\/\/[^\s`|"'\\]+)|(?:\/[a-z0-9._~:/?#[\]@!$&'()*+,;=%-]+))/gi;
+  let match;
+  while ((match = re.exec(text))) {
+    const method = match[1].toUpperCase();
+    const rawTarget = match[2].replace(/\s+$/, "");
+    const parsedTarget = endpointTarget(rawTarget, baseUrl);
+    if (!parsedTarget || !looksLikeDataPath(parsedTarget.path)) continue;
+    const windowText = text.slice(Math.max(0, match.index - 100), Math.min(text.length, match.index + 180));
+    const title = cleanEndpointTitle(firstMatch(windowText, /([A-Za-z0-9 /&()[\]_-]{4,80})\s+`?(?:GET|POST|PUT|PATCH)\s+(?:https?:\/\/|\/)/i)) || titleFromPath(parsedTarget.path, method);
+    endpoints.push({
+      method,
+      path: parsedTarget.path,
+      title,
+      description: `Use this service to call ${method} ${parsedTarget.path}.`,
+      params: paramsFromReferenceWindow(windowText),
+      operationId: normalizeId(null, `${method} ${parsedTarget.path}`, "service")
+    });
+  }
+  return endpoints.filter((endpoint) => !baseUrl || endpoint.path);
+}
+
+function parseLooseUrlEndpoints(text, baseUrl) {
+  if (!baseUrl) return [];
+  const endpoints = [];
+  const re = /https?:\/\/[^\s`|"'\\)]+/gi;
+  let match;
+  while ((match = re.exec(text))) {
+    const rawUrl = match[0].replace(/[.,;:]+$/g, "");
+    if (!rawUrl.startsWith(baseUrl)) continue;
+    const parsed = endpointTarget(rawUrl, baseUrl);
+    if (!parsed || !looksLikeDataPath(parsed.path)) continue;
+    if (parsed.path === "/" || parsed.path === new URL(baseUrl).pathname) continue;
+    const windowText = text.slice(Math.max(0, match.index - 120), Math.min(text.length, match.index + 220));
+    endpoints.push(endpointFromUrl({
+      url: rawUrl,
+      method: inferMethodFromTextWindow(windowText),
+      title: cleanEndpointTitle(firstMatch(windowText, /(?:^|\n)\s*(?:#+\s*)?([A-Za-z0-9 /&()[\]_-]{4,80})\s*(?:\n|$)/)) || titleFromPath(parsed.path, "GET"),
+      params: paramsFromReferenceWindow(windowText),
+      description: ""
+    }));
+  }
+  return endpoints;
+}
+
+function parseLoosePathEndpoints(text) {
+  const endpoints = [];
+  const re = /\b(?:endpoint|path|url|route)\s*[:=]\s*`?((?:GET|POST|PUT|PATCH)\s+)?(\/[a-z0-9._~:/?#[\]@!$&'()*+,;=%-]+)`?/gi;
+  let match;
+  while ((match = re.exec(text))) {
+    const method = (match[1] || "GET").trim().toUpperCase() || "GET";
+    const path = match[2].replace(/[.,;:]+$/g, "");
+    if (!looksLikeDataPath(path)) continue;
+    const windowText = text.slice(Math.max(0, match.index - 120), Math.min(text.length, match.index + 220));
+    endpoints.push({
+      method,
+      path,
+      title: cleanEndpointTitle(firstMatch(windowText, /(?:name|title|summary)\s*[:=]\s*`?([A-Za-z0-9 /&()[\]_-]{4,80})`?/i)) || titleFromPath(path, method),
+      description: `Use this service to call ${method} ${path}.`,
+      params: paramsFromReferenceWindow(windowText),
+      operationId: normalizeId(null, `${method} ${path}`, "service")
+    });
+  }
+  return endpoints;
+}
+
+function endpointTarget(rawTarget, baseUrl) {
+  try {
+    const parsed = rawTarget.startsWith("http")
+      ? new URL(rawTarget)
+      : new URL(rawTarget, `${baseUrl || "https://skill.local"}/`);
+    const params = {};
+    for (const [key, value] of parsed.searchParams.entries()) params[key] = normalizeParamExample(value);
+    return { path: parsed.pathname, params };
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeDataPath(path) {
+  if (!path || path === "/") return false;
+  if (SKIP_PATH_RE.test(path)) return false;
+  if (/\.(png|jpe?g|gif|svg|css|js|ico|xml|rss|atom|html?)$/i.test(path)) return false;
+  if (/\/(docs?|documentation|swagger|openapi|redoc)(\/|$)/i.test(path)) return false;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length < 2) return false;
+  return true;
+}
+
+function inferMethodFromTextWindow(text) {
+  const method = firstMatch(text, /\b(GET|POST|PUT|PATCH)\b/i);
+  return method ? method.toUpperCase() : "GET";
+}
+
+function endpointFromUrl({ url, method, title, params, description }) {
+  const parsed = new URL(url);
+  for (const [key, value] of parsed.searchParams.entries()) params[key] = normalizeParamExample(value);
+  return {
+    method,
+    path: parsed.pathname,
+    title,
+    description: description || `Use this service to call ${method} ${parsed.pathname}.`,
+    params,
+    operationId: normalizeId(null, `${method} ${parsed.pathname}`, "service")
+  };
+}
+
+function inferMethodFromCurlContext(_line, nextLines) {
+  return nextLines.some((line) => /-X\s+POST|--request\s+POST/i.test(line)) ? "POST" : "GET";
+}
+
+function previousComment(lines, index) {
+  for (let cursor = index - 1; cursor >= Math.max(0, index - 5); cursor -= 1) {
+    const line = lines[cursor].trim();
+    const comment = firstMatch(line, /^#\s*(.+)$/);
+    if (comment) return comment;
+    if (line && !/\\$/.test(line) && !/^curl\b/.test(line) && !/^-/.test(line)) return line;
+  }
+  return "";
+}
+
+function paramsFromReferenceWindow(text) {
+  const params = {};
+  const snippets = text.match(/`[a-zA-Z0-9_]+=[^`]+`|`[a-zA-Z0-9_]+`/g) || [];
+  for (const snippet of snippets) {
+    const clean = snippet.replace(/`/g, "");
+    if (/^GET |^POST |^\//i.test(clean)) continue;
+    if (clean.includes("=")) {
+      const [key, value] = clean.split("=");
+      params[key] = normalizeParamExample((value || "").split("/")[0]);
+    }
+  }
+  return params;
+}
+
+function normalizeParamExample(value) {
+  const cleaned = String(value || "").replace(/^\[|\]$/g, "");
+  if (/^\d+$/.test(cleaned)) return Number(cleaned);
+  if (cleaned.includes("/")) return cleaned.split("/")[0];
+  return cleaned || "example";
+}
+
+function cleanEndpointTitle(value) {
+  return String(value || "")
+    .replace(/^\d+\.\s*/, "")
+    .replace(/[:：]\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function htmlToText(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h\d|pre|code|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function extractSkillReadmeFromHtml(html) {
+  const readmeLiteral = extractJsStringProperty(html, "readme");
+  if (readmeLiteral) return decodeJsStringLiteral(readmeLiteral);
+  const markdownLiteral = extractJsStringProperty(html, "markdown")
+    || extractJsStringProperty(html, "content");
+  const markdown = markdownLiteral ? decodeJsStringLiteral(markdownLiteral) : "";
+  return /Base URL|curl\s+-|GET\s+\//i.test(markdown) ? markdown : "";
+}
+
+function extractJsStringProperty(source, propertyName) {
+  const input = String(source || "");
+  const property = `${propertyName}:`;
+  let cursor = input.indexOf(property);
+  while (cursor !== -1) {
+    cursor += property.length;
+    while (/\s/.test(input[cursor] || "")) cursor += 1;
+    if (input[cursor] === '"') {
+      let end = cursor + 1;
+      let escaped = false;
+      while (end < input.length) {
+        const char = input[end];
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          return input.slice(cursor + 1, end);
+        }
+        end += 1;
+      }
+    }
+    cursor = input.indexOf(property, cursor);
+  }
+  return "";
+}
+
+function decodeJsStringLiteral(value) {
+  const input = String(value || "");
+  let output = "";
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    if (char !== "\\") {
+      output += char;
+      continue;
+    }
+    const next = input[++index];
+    if (next === "n") output += "\n";
+    else if (next === "r") output += "\r";
+    else if (next === "t") output += "\t";
+    else if (next === "b") output += "\b";
+    else if (next === "f") output += "\f";
+    else if (next === "v") output += "\v";
+    else if (next === "0") output += "\0";
+    else if (next === "x") {
+      const hex = input.slice(index + 1, index + 3);
+      output += /^[0-9a-f]{2}$/i.test(hex) ? String.fromCharCode(parseInt(hex, 16)) : `\\x${hex}`;
+      if (/^[0-9a-f]{2}$/i.test(hex)) index += 2;
+    } else if (next === "u") {
+      const hex = input.slice(index + 1, index + 5);
+      output += /^[0-9a-f]{4}$/i.test(hex) ? String.fromCharCode(parseInt(hex, 16)) : `\\u${hex}`;
+      if (/^[0-9a-f]{4}$/i.test(hex)) index += 4;
+    } else {
+      output += next || "";
+    }
+  }
+  return output;
+}
+
+function firstMatch(value, re) {
+  const match = String(value || "").match(re);
+  return match?.[1] || "";
+}
+
+function titleFromSkillUrl(skillUrl) {
+  try {
+    const path = new URL(skillUrl).pathname.split("/").filter(Boolean).at(-1) || "Imported Skill";
+    return path.replace(/[-_]+/g, " ");
+  } catch {
+    return "Imported Skill";
+  }
+}
+
+function providerNameFromSkill(title, baseUrl) {
+  if (/blockbeats/i.test(title)) return "BlockBeats";
+  return baseUrl ? hostName(baseUrl) : title || "Imported Skill Provider";
 }
 
 function looksLikeCallableEndpoint(apiUrl) {
@@ -561,6 +1073,14 @@ function summaryFor(title, previewData) {
     ? Object.keys(previewData).slice(0, 3).join(", ")
     : "data";
   return `${title} returned ${keys}.`;
+}
+
+function resultSummary({ title, providerTitle, routePath, previewData }) {
+  const keys = previewData && typeof previewData === "object" && !Array.isArray(previewData)
+    ? Object.keys(previewData).slice(0, 4).filter(Boolean)
+    : [];
+  const keyText = keys.length ? ` Fields include ${keys.join(", ")}.` : "";
+  return `${title} from ${providerTitle} (${routePath}).${keyText}`;
 }
 
 function hostName(apiUrl) {

@@ -25,7 +25,9 @@ export function publicServiceRecord(record) {
     source_provenance: summarizeProvenance(record),
     quality_profile: summarizeQuality(record),
     health: summarizeHealth(record),
-    badges: summarizeBadges(record)
+    badges: summarizeBadges(record),
+    created_at: record.created_at || null,
+    updated_at: record.updated_at || null
   };
 }
 
@@ -218,12 +220,21 @@ export function summarizeRegistryStats(store) {
       capabilities: record.manifest.capabilities || [],
       sample_request: record.manifest.sample_request || {},
       endpoint_url: record.manifest.endpoint?.url || null,
+      upstream_source: record.manifest.registration?.source_fingerprint || null,
       price: record.manifest.pricing?.amount || "0",
       currency: record.manifest.pricing?.currency || "USDC",
       verification_status: record.verification_status,
       total_calls: trust.operational_feedback_count,
       consumer_feedback_count: trust.consumer_feedback_count,
       trust_score: trust.trust_score,
+      success_rate: trust.success_rate,
+      average_latency_ms: trust.average_latency_ms,
+      latest_validation: record.validation_runs?.at(-1) || null,
+      latest_quality_event: record.quality_events?.at(-1) || null,
+      latest_feedback_event: record.feedback_events?.at(-1) || null,
+      estimated_revenue: Number((Number(record.manifest.pricing?.amount || 0) * trust.operational_feedback_count).toFixed(8)),
+      created_at: record.created_at || null,
+      updated_at: record.updated_at || null,
       source_provenance_level: summarizeProvenance(record).source_provenance_level,
       health_status: summarizeHealth(record).status,
       badges: publicRecord.badges
@@ -235,10 +246,39 @@ export function summarizeRegistryStats(store) {
     verified_services: services.filter((service) => service.verification_status === "verified").length,
     total_calls: services.reduce((sum, service) => sum + service.total_calls, 0),
     total_consumer_feedback: services.reduce((sum, service) => sum + service.consumer_feedback_count, 0),
+    estimated_revenue: Number(services.reduce((sum, service) => sum + Number(service.estimated_revenue || 0), 0).toFixed(8)),
+    providers: summarizeProviders(services),
     route_observations: store.routeObservations?.length || 0,
     evidence_events: store.evidenceEvents?.length || 0,
     services
   };
+}
+
+function summarizeProviders(services) {
+  const providers = new Map();
+  for (const service of services) {
+    const provider = providers.get(service.provider_id) || {
+      provider_id: service.provider_id,
+      service_count: 0,
+      verified_services: 0,
+      total_calls: 0,
+      estimated_revenue: 0,
+      average_trust_score: 0
+    };
+    provider.service_count += 1;
+    if (service.verification_status === "verified") provider.verified_services += 1;
+    provider.total_calls += Number(service.total_calls || 0);
+    provider.estimated_revenue += Number(service.estimated_revenue || 0);
+    provider.average_trust_score += Number(service.trust_score || 0);
+    providers.set(service.provider_id, provider);
+  }
+  return [...providers.values()].map((provider) => ({
+    ...provider,
+    estimated_revenue: Number(provider.estimated_revenue.toFixed(8)),
+    average_trust_score: provider.service_count
+      ? Number((provider.average_trust_score / provider.service_count).toFixed(4))
+      : 0
+  }));
 }
 
 function inferProvenanceLevel(claim = {}) {
