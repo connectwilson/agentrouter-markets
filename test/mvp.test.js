@@ -10,6 +10,7 @@ const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "adn-mvp-test-"));
 process.env.ADN_DIR = path.join(runtimeRoot, ".adn");
 process.env.ADN_PROVIDER_DIR = path.join(runtimeRoot, "providers");
 process.env.ADN_WALLET_PASSPHRASE = "test-passphrase";
+process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = "1";
 
 const { createServer, seedDemoService } = await import("../src/server.js");
 const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
@@ -446,6 +447,73 @@ test("AgentRouter quote blocks payments above budget before invocation", async (
     assert.equal(quoted.quote.guard_result, "budget_too_low");
     assert.equal(quoted.quote.would_pay, false);
   });
+});
+
+test("public AgentRouter HTTP routes do not invoke paid services without protocol payment", async () => {
+  const previous = process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS;
+  delete process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS;
+  try {
+    await withServer(async ({ baseUrl }) => {
+      const structured = await fetch(`${baseUrl}/agent-router/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          capability: "perp_liquidation_max_pain",
+          params: {
+            asset: "BTC",
+            market_type: "perpetual_futures",
+            window: "current"
+          },
+          constraints: {
+            max_price_usdc: "0.05"
+          }
+        })
+      });
+      assert.equal(structured.status, 200);
+      const structuredPayload = await structured.json();
+      assert.equal(structuredPayload.ok, false);
+      assert.equal(structuredPayload.status, "payment_required");
+      assert.equal("result" in structuredPayload, false);
+      assert.equal(structuredPayload.protocol.invocation_policy, "quote_only_no_server_side_payment");
+
+      const natural = await fetch(`${baseUrl}/agent-router/ask`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          task: "BTC 当前最大爆仓痛点是多少",
+          max_price: "0.05"
+        })
+      });
+      assert.equal(natural.status, 200);
+      const naturalPayload = await natural.json();
+      assert.equal(naturalPayload.ok, false);
+      assert.equal(naturalPayload.status, "payment_required");
+      assert.equal("result" in naturalPayload, false);
+      assert.match(naturalPayload.next_step, /payment-capable backend/);
+
+      const connector = await fetch(`${baseUrl}/connector/invoke_paid_service`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          service_id: "btc_liquidation_max_pain_demo",
+          input: {
+            asset: "BTC",
+            market_type: "perpetual_futures",
+            window: "current"
+          },
+          budget: { max_amount: "0.05", currency: "USDC" }
+        })
+      });
+      assert.equal(connector.status, 402);
+      const connectorPayload = await connector.json();
+      assert.equal(connectorPayload.ok, false);
+      assert.equal(connectorPayload.status, "payment_required");
+      assert.equal("result" in connectorPayload, false);
+    });
+  } finally {
+    if (previous === undefined) process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = "1";
+    else process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = previous;
+  }
 });
 
 test("AgentRouter MCP server exposes Claude-callable tools", async () => {

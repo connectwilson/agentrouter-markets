@@ -1,11 +1,13 @@
 import { invokePaidService, searchServices } from "./registry.js";
-import { routeCapabilityRequest } from "./router.js";
+import { quoteCapabilityRequest, routeCapabilityRequest } from "./router.js";
+import { createPaymentQuote } from "./payment-adapter.js";
 import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
 
 export async function askAgentRouter(store, {
   task = "",
   max_price: maxPrice = "0.05",
-  currency = "USDC"
+  currency = "USDC",
+  invoke = true
 } = {}) {
   if (!String(task || "").trim()) {
     const error = new Error("task is required");
@@ -17,6 +19,17 @@ export async function askAgentRouter(store, {
   const intent = inferIntent(task);
   const structuredRequest = intentToCapabilityRequest(intent, { max_price: maxPrice });
   if (structuredRequest) {
+    if (!invoke) {
+      const quoted = quoteCapabilityRequest(store, {
+        ...structuredRequest,
+        budget: { max_amount: maxPrice, currency }
+      });
+      return paymentRequiredFromQuote({
+        task,
+        quoted,
+        protocol: "agent_router_ask_v1"
+      });
+    }
     const routed = await routeCapabilityRequest(store, {
       ...structuredRequest,
       budget: { max_amount: maxPrice, currency }
@@ -41,6 +54,30 @@ export async function askAgentRouter(store, {
   const selected = selectService(candidates, intent);
   const record = store.services.get(selected.service_id);
   const preview = record?.manifest?.sample_response || null;
+  if (!invoke) {
+    const serviceInput = buildServiceAwareInput(intent, record?.manifest);
+    const quote = createPaymentQuote({
+      manifest: record.manifest,
+      constraints: { max_price_usdc: maxPrice },
+      selectedService: selected
+    });
+    return {
+      ok: false,
+      status: quote.would_pay ? "payment_required" : "quote_blocked",
+      protocol: {
+        protocol_version: "agent_router_ask_v1",
+        invocation_policy: "quote_only_no_server_side_payment"
+      },
+      task,
+      selected_service: publicSelectedService(selected),
+      input: serviceInput,
+      preview_sample_type: preview?.sample_type || null,
+      quote,
+      next_step: quote.would_pay
+        ? "Use local MCP with a payment-capable backend, or call the provider endpoint with a valid x402/Arc payment proof."
+        : "Increase the max_price budget or choose a lower-cost service."
+    };
+  }
   const tokenResolution = await maybeResolveTokenAddressLocal(store, intent, record?.manifest, { maxPrice, currency });
   if (tokenResolution?.ok === false) {
     return {
@@ -93,6 +130,23 @@ export async function askAgentRouter(store, {
       verification
     }),
     answer: summarize(task, invocation.body.result)
+  };
+}
+
+function paymentRequiredFromQuote({ task, quoted, protocol }) {
+  if (!quoted.ok && quoted.status !== "quote_blocked") return { ...quoted, task };
+  return {
+    ...quoted,
+    ok: false,
+    status: quoted.status === "quote_blocked" ? "quote_blocked" : "payment_required",
+    protocol: {
+      protocol_version: protocol,
+      invocation_policy: "quote_only_no_server_side_payment"
+    },
+    task,
+    next_step: quoted.status === "quote_blocked"
+      ? "Increase the max_price budget or choose a lower-cost service."
+      : "Use local MCP with a payment-capable backend, or call the provider endpoint with a valid x402/Arc payment proof."
   };
 }
 

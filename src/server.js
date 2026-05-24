@@ -280,6 +280,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/connector/invoke_paid_service") {
     const body = await readJson(req);
+    if (!serverSideDevPaymentsAllowed()) {
+      const blocked = paymentRequiredForService(store, body.service_id, body.input || {}, body.budget || {});
+      sendJson(res, blocked.statusCode, blocked.body);
+      return;
+    }
     const result = await invokePaidService(store, body.service_id, body.input || {}, body.budget || {});
     sendJson(res, result.statusCode, result.body);
     return;
@@ -287,6 +292,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/router/route") {
     const body = await readJson(req);
+    if (!serverSideDevPaymentsAllowed()) {
+      const resolved = resolveRoute(store, body);
+      sendJson(res, 200, routePaymentRequired(resolved, body));
+      return;
+    }
     const result = await routeTask(store, body);
     sendJson(res, 200, result);
     return;
@@ -311,6 +321,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/agent-router/request") {
     const body = await readJson(req);
+    if (!serverSideDevPaymentsAllowed()) {
+      const result = quoteCapabilityRequest(store, body);
+      sendJson(res, result.ok === false && result.status === "invalid_request" ? 422 : 200, requestPaymentRequired(result));
+      return;
+    }
     const result = await routeCapabilityRequest(store, body);
     sendJson(res, result.ok === false && result.status === "invalid_request" ? 422 : 200, result);
     return;
@@ -328,7 +343,8 @@ async function routeRequest(req, res, store, baseUrl) {
     const result = await askAgentRouter(store, {
       task: body.task || body.query || "",
       max_price: body.max_price || body.maxPrice || "0.05",
-      currency: body.currency || "USDC"
+      currency: body.currency || "USDC",
+      invoke: serverSideDevPaymentsAllowed()
     });
     sendJson(res, 200, result);
     return;
@@ -482,6 +498,79 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   sendNotFound(res, "ROUTE_NOT_FOUND");
+}
+
+function serverSideDevPaymentsAllowed() {
+  return process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS === "1";
+}
+
+function requestPaymentRequired(result) {
+  if (!result.ok && result.status !== "quote_blocked") return result;
+  return {
+    ...result,
+    ok: false,
+    status: result.status === "quote_blocked" ? "quote_blocked" : "payment_required",
+    protocol: {
+      protocol_version: "agent_router_request_v1",
+      invocation_policy: "quote_only_no_server_side_payment"
+    },
+    next_step: result.status === "quote_blocked"
+      ? "Increase the max_price budget or choose a lower-cost service."
+      : "Use local MCP with a payment-capable backend, or call the provider endpoint with a valid x402/Arc payment proof."
+  };
+}
+
+function routePaymentRequired(resolved, body) {
+  if (resolved.status === "needs_clarification" || resolved.status === "no_match") return resolved;
+  return {
+    ...resolved,
+    ok: false,
+    status: "payment_required",
+    protocol: {
+      protocol_version: "agent_router_route_v1",
+      invocation_policy: "resolve_only_no_server_side_payment"
+    },
+    budget: body.budget || {},
+    next_step: "Use local MCP with a payment-capable backend, or call the provider endpoint with a valid x402/Arc payment proof."
+  };
+}
+
+function paymentRequiredForService(store, serviceId, input = {}, budget = {}) {
+  const record = store.services.get(serviceId);
+  if (!record) {
+    return {
+      statusCode: 404,
+      body: { error: { code: "SERVICE_NOT_FOUND" } }
+    };
+  }
+  const maxAmount = budget.max_amount || budget.max_price_usdc;
+  const price = Number(record.manifest.pricing.amount);
+  const max = maxAmount == null || maxAmount === "" ? null : Number(maxAmount);
+  const allowed = max == null || price <= max;
+  return {
+    statusCode: allowed ? 402 : 402,
+    body: {
+      ok: false,
+      status: allowed ? "payment_required" : "quote_blocked",
+      service_id: serviceId,
+      input,
+      quote: {
+        quote_version: "agent_router_payment_quote_v1",
+        service_id: serviceId,
+        provider_id: record.manifest.provider.provider_id,
+        pricing: record.manifest.pricing,
+        budget: {
+          max_price_usdc: maxAmount || null,
+          allowed
+        },
+        guard_result: allowed ? "pass" : "budget_too_low",
+        would_pay: allowed
+      },
+      next_step: allowed
+        ? "Call the provider endpoint with a valid x402/Arc payment proof. Server-side dev payment is disabled for this public connector."
+        : "Increase the max_price budget or choose a lower-cost service."
+    }
+  };
 }
 
 function wantsHtml(req, url) {
