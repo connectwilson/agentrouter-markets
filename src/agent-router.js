@@ -41,7 +41,21 @@ export async function askAgentRouter(store, {
   const selected = selectService(candidates, intent);
   const record = store.services.get(selected.service_id);
   const preview = record?.manifest?.sample_response || null;
-  const serviceInput = buildServiceAwareInput(intent, record?.manifest);
+  const tokenResolution = await maybeResolveTokenAddressLocal(store, intent, record?.manifest, { maxPrice, currency });
+  if (tokenResolution?.ok === false) {
+    return {
+      ok: false,
+      status: tokenResolution.status,
+      task,
+      selected_service: publicSelectedService(selected),
+      input: buildServiceAwareInput(intent, record?.manifest),
+      token_resolution: tokenResolution
+    };
+  }
+  const serviceInput = buildServiceAwareInput(
+    tokenResolution?.intent || intent,
+    record?.manifest
+  );
   const invocation = await invokePaidService(store, selected.service_id, serviceInput, {
     max_amount: maxPrice,
     currency
@@ -67,6 +81,7 @@ export async function askAgentRouter(store, {
     task,
     selected_service: publicSelectedService(selected),
     input: serviceInput,
+    token_resolution: tokenResolution || null,
     preview_sample_type: preview?.sample_type || null,
     result: invocation.body.result,
     feedback: invocation.body.feedback,
@@ -114,8 +129,20 @@ export async function askAgentRouterRemote({
     };
   }
   const selected = selectService(candidates, intent);
+  const selectedManifest = await post(baseUrl, "/connector/get_manifest", { service_id: selected.service_id });
   const preview = await post(baseUrl, "/connector/preview_service", { service_id: selected.service_id });
-  const serviceInput = buildServiceAwareInput(intent, selected);
+  const tokenResolution = await maybeResolveTokenAddressRemote(baseUrl, intent, selectedManifest, { maxPrice, currency });
+  if (tokenResolution?.ok === false) {
+    return {
+      ok: false,
+      status: tokenResolution.status,
+      task,
+      selected_service: publicSelectedService(selected),
+      input: buildServiceAwareInput(intent, selectedManifest),
+      token_resolution: tokenResolution
+    };
+  }
+  const serviceInput = buildServiceAwareInput(tokenResolution?.intent || intent, selectedManifest);
   const invocation = await post(baseUrl, "/connector/invoke_paid_service", {
     service_id: selected.service_id,
     input: serviceInput,
@@ -129,6 +156,7 @@ export async function askAgentRouterRemote({
     task,
     selected_service: publicSelectedService(selected),
     input: serviceInput,
+    token_resolution: tokenResolution || null,
     preview_sample_type: preview.sample_type || null,
     result: invocation.result,
     feedback: invocation.feedback,
@@ -138,9 +166,10 @@ export async function askAgentRouterRemote({
 
 export function inferIntent(task) {
   const tagMatch = task.match(/matrixport|binance|jump|wintermute|amber|okx|bybit/i);
-  const tokenMatch = task.match(/\$?(ETH|BTC|USDC|HYPE|SOL)\b/i);
+  const token = detectTokenSymbol(task);
   const address = detectAddress(task);
   const chain = detectChain(task);
+  const window = detectWindow(task);
   const dynamicTerms = extractDynamicSearchTerms(task);
   const wantsSingle = /一个|一条|任意|first|\bone\b|single/i.test(task);
   const wantsAddress = /地址|钱包|address|wallet/i.test(task);
@@ -148,15 +177,16 @@ export function inferIntent(task) {
   const wantsLiquidation = /爆仓|清算|liquidation|max[\s-]?pain/i.test(task);
   const wantsSmartMoneyHoldings = /smart[\s_-]?money/i.test(task) && /holdings?|持仓/i.test(task);
   const wantsSmartMoneyNetflow = /smart[\s_-]?money/i.test(task) && /net[\s_-]?flow|netflow|净流入|净流出|资金流/i.test(task);
+  const wantsSmartMoneyActivity = Boolean(token) && /smart[\s_-]?money|聪明钱/i.test(task) && /动向|动态|activity|flow|flows|买|卖|bought|sold|movement|近|过去|24\s*h|24\s*小时/i.test(task);
   const wantsNetflow = !wantsSmartMoneyNetflow && /net[\s_-]?flow|netflow|净流入|净流出/i.test(task);
-  const hasKnownIntent = wantsAddress || wantsLiquidation || wantsSmartMoneyHoldings || wantsSmartMoneyNetflow || wantsNetflow;
+  const hasKnownIntent = wantsAddress || wantsLiquidation || wantsSmartMoneyHoldings || wantsSmartMoneyNetflow || wantsSmartMoneyActivity || wantsNetflow;
   const limit = detectLimit(task, wantsSingle);
   const input = {
     limit,
     offset: 0
   };
   if (tagMatch) input.tag = tagMatch[0];
-  if (tokenMatch) input.token = tokenMatch[1].toUpperCase();
+  if (token) input.token = token;
   if (address) {
     input.address = address;
     input.chain = chain || "ethereum";
@@ -176,17 +206,26 @@ export function inferIntent(task) {
     input.chains = [chain || "ethereum"];
     input.pagination = { page: 1, per_page: limit };
   }
+  if (wantsSmartMoneyActivity) {
+    delete input.limit;
+    delete input.offset;
+    input.token_symbol = token;
+    input.chain = chain || chainForAsset(token) || "ethereum";
+    input.window = window || "24h";
+    input.timeframe = windowToTimeframe(input.window);
+    input.pagination = { page: 1, per_page: limit };
+  }
   if (wantsNetflow) {
     delete input.limit;
     delete input.offset;
     delete input.token;
-    input.asset = tokenMatch ? tokenMatch[1].toUpperCase() : undefined;
+    input.asset = token || undefined;
     input.chain = chain || chainForAsset(input.asset) || "ethereum";
     input.chains = [input.chain];
-    input.window = detectWindow(task) || "24h";
+    input.window = window || "24h";
   }
   if (wantsLiquidation) {
-    input.asset = tokenMatch ? tokenMatch[1].toUpperCase() : "BTC";
+    input.asset = token || "BTC";
     input.market_type = "perpetual_futures";
     input.window = "current";
     delete input.limit;
@@ -199,13 +238,14 @@ export function inferIntent(task) {
     wants_liquidation: wantsLiquidation,
     wants_smart_money_holdings: wantsSmartMoneyHoldings,
     wants_smart_money_netflow: wantsSmartMoneyNetflow,
+    wants_smart_money_activity: wantsSmartMoneyActivity,
     wants_netflow: wantsNetflow,
     has_known_intent: hasKnownIntent,
     dynamic_terms: dynamicTerms,
     tag: input.tag,
     address,
     chain: input.chain || chain,
-    token: input.token || input.asset,
+    token: input.token || input.token_symbol || input.asset,
     input,
     search_queries: [
       dynamicTerms.length ? dynamicTerms.join(" ") : "",
@@ -214,6 +254,10 @@ export function inferIntent(task) {
       wantsLiquidation ? "liquidation heatmap crypto derivatives" : "",
       wantsSmartMoneyHoldings ? "smart money holdings" : "",
       wantsSmartMoneyNetflow ? "smart money netflow" : "",
+      wantsSmartMoneyActivity ? `${token} token flow intelligence` : "",
+      wantsSmartMoneyActivity ? `${token} who bought sold` : "",
+      wantsSmartMoneyActivity ? "token god mode flow intelligence" : "",
+      wantsSmartMoneyActivity ? "token search" : "",
       wantsNetflow ? `${input.asset || input.chain || ""} netflow` : "",
       wantsNetflow ? "netflow" : "",
       wantsAddress && address ? `${address} related wallets address profile` : "",
@@ -252,6 +296,27 @@ export function buildServiceAwareInput(intent, manifestOrService = {}) {
   if (targetKeys.has("address") && input.address == null && intent.address) {
     input.address = intent.address;
   }
+  if (targetKeys.has("asset") && input.asset == null && (inferred.asset || intent.token)) {
+    input.asset = inferred.asset || intent.token;
+  }
+  if (targetKeys.has("token") && input.token == null && intent.token) {
+    input.token = intent.token;
+  }
+  if (targetKeys.has("token_symbol") && input.token_symbol == null && intent.token) {
+    input.token_symbol = intent.token;
+  }
+  if (targetKeys.has("token_address") && inferred.token_address) {
+    input.token_address = inferred.token_address;
+  }
+  if (targetKeys.has("window") && input.window == null && inferred.window) {
+    input.window = inferred.window;
+  }
+  if (targetKeys.has("timeframe") && (input.timeframe == null || isExampleValue(input.timeframe))) {
+    input.timeframe = inferred.timeframe || windowToTimeframe(inferred.window);
+  }
+  if (targetKeys.has("date") && (input.date == null || isExampleValue(input.date))) {
+    input.date = inferred.date || windowToDateRange(inferred.window);
+  }
   if (targetKeys.has("pagination")) {
     input.pagination = {
       ...(sample.pagination || {}),
@@ -269,6 +334,251 @@ export function buildServiceAwareInput(intent, manifestOrService = {}) {
   }
 
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== null));
+}
+
+async function maybeResolveTokenAddressLocal(store, intent, manifest, { maxPrice, currency }) {
+  if (!serviceNeedsTokenAddress(manifest) || intent.input?.token_address || !intent.token) return null;
+  const resolver = findTokenResolverLocal(store, maxPrice);
+  if (!resolver) {
+    return {
+      ok: false,
+      status: "token_address_required",
+      message: `The selected service requires token_address, but no token search resolver is registered for ${intent.token}.`
+    };
+  }
+  const resolverRecord = store.services.get(resolver.service_id);
+  const resolverInput = buildTokenResolverInput(intent, resolverRecord?.manifest);
+  const invocation = await invokePaidService(store, resolver.service_id, resolverInput, {
+    max_amount: maxPrice,
+    currency
+  });
+  if (invocation.statusCode >= 400) {
+    return {
+      ok: false,
+      status: "token_resolution_failed",
+      resolver_service_id: resolver.service_id,
+      resolver_input: resolverInput,
+      error: invocation.body.error
+    };
+  }
+  const resolved = extractTokenResolution(invocation.body.result, intent.token, intent.chain);
+  if (!resolved?.address) {
+    return {
+      ok: false,
+      status: "token_not_found",
+      resolver_service_id: resolver.service_id,
+      resolver_input: resolverInput,
+      token_symbol: intent.token
+    };
+  }
+  return withResolvedToken(intent, resolved, {
+    resolver_service_id: resolver.service_id,
+    resolver_input: resolverInput
+  });
+}
+
+async function maybeResolveTokenAddressRemote(baseUrl, intent, manifest, { maxPrice, currency }) {
+  if (!serviceNeedsTokenAddress(manifest) || intent.input?.token_address || !intent.token) return null;
+  const resolvers = await post(baseUrl, "/connector/search_services", {
+    query: "token search",
+    verified_only: true,
+    max_price: maxPrice
+  });
+  const resolver = resolvers.find((service) => /token[_\s-]?search|entity[_\s-]?search|search/.test(serviceSearchHaystack(service)));
+  if (!resolver) {
+    return {
+      ok: false,
+      status: "token_address_required",
+      message: `The selected service requires token_address, but no token search resolver is registered for ${intent.token}.`
+    };
+  }
+  const resolverManifest = await post(baseUrl, "/connector/get_manifest", { service_id: resolver.service_id });
+  const resolverInput = buildTokenResolverInput(intent, resolverManifest);
+  const invocation = await post(baseUrl, "/connector/invoke_paid_service", {
+    service_id: resolver.service_id,
+    input: resolverInput,
+    budget: {
+      max_amount: maxPrice,
+      currency
+    }
+  });
+  const resolved = extractTokenResolution(invocation.result, intent.token, intent.chain);
+  if (!resolved?.address) {
+    return {
+      ok: false,
+      status: "token_not_found",
+      resolver_service_id: resolver.service_id,
+      resolver_input: resolverInput,
+      token_symbol: intent.token
+    };
+  }
+  return withResolvedToken(intent, resolved, {
+    resolver_service_id: resolver.service_id,
+    resolver_input: resolverInput
+  });
+}
+
+function findTokenResolverLocal(store, maxPrice) {
+  return searchServices(store, {
+    query: "token search",
+    verifiedOnly: true,
+    maxPrice
+  }).find((service) => /token[_\s-]?search|entity[_\s-]?search|search/.test(serviceSearchHaystack(service)));
+}
+
+function buildTokenResolverInput(intent, manifest = {}) {
+  const base = buildServiceAwareInput({
+    ...intent,
+    input: {
+      search_query: intent.token,
+      query: intent.token,
+      q: intent.token,
+      keyword: intent.token,
+      symbol: intent.token,
+      result_type: "token",
+      type: "token",
+      chain: intent.chain || "ethereum",
+      limit: 5,
+      pagination: { page: 1, per_page: 5 }
+    }
+  }, manifest);
+  return Object.fromEntries(Object.entries({
+    ...base,
+    search_query: base.search_query ?? (hasInputKey(manifest, "search_query") ? intent.token : undefined),
+    query: base.query ?? (hasInputKey(manifest, "query") ? intent.token : undefined),
+    q: base.q ?? (hasInputKey(manifest, "q") ? intent.token : undefined),
+    result_type: base.result_type ?? (hasInputKey(manifest, "result_type") ? "token" : undefined),
+    type: base.type ?? (hasInputKey(manifest, "type") ? "token" : undefined),
+    chain: base.chain ?? (hasInputKey(manifest, "chain") ? intent.chain || "ethereum" : undefined),
+    limit: base.limit ?? (hasInputKey(manifest, "limit") ? 5 : undefined)
+  }).filter(([, value]) => value !== undefined && value !== null));
+}
+
+function withResolvedToken(intent, resolved, meta) {
+  const nextIntent = {
+    ...intent,
+    chain: resolved.chain || intent.chain,
+    input: {
+      ...(intent.input || {}),
+      chain: resolved.chain || intent.input?.chain || intent.chain || "ethereum",
+      token_symbol: intent.token,
+      token_address: resolved.address
+    }
+  };
+  return {
+    ok: true,
+    status: "resolved",
+    token_symbol: intent.token,
+    token_address: resolved.address,
+    chain: resolved.chain || intent.chain || null,
+    matched_name: resolved.name || null,
+    matched_symbol: resolved.symbol || null,
+    intent: nextIntent,
+    ...meta
+  };
+}
+
+function serviceNeedsTokenAddress(manifestOrService = {}) {
+  return hasInputKey(manifestOrService, "token_address");
+}
+
+function hasInputKey(manifestOrService = {}, key) {
+  const sample = manifestOrService.sample_request || {};
+  const schemaProperties = manifestOrService.input_schema?.properties || {};
+  return Object.prototype.hasOwnProperty.call(sample, key) || Object.prototype.hasOwnProperty.call(schemaProperties, key);
+}
+
+function extractTokenResolution(result, tokenSymbol, preferredChain) {
+  const symbol = String(tokenSymbol || "").toUpperCase();
+  const candidates = [];
+  walkJson(result, (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const address = firstString(value, ["token_address", "contract_address", "contractAddress", "address"]);
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) return;
+    const candidate = {
+      address: address.toLowerCase(),
+      symbol: firstString(value, ["symbol", "ticker", "token_symbol"]),
+      name: firstString(value, ["name", "token_name", "label"]),
+      chain: normalizeChain(firstString(value, ["chain", "network", "blockchain"]))
+    };
+    const haystack = [candidate.symbol, candidate.name].filter(Boolean).join(" ").toUpperCase();
+    const exactSymbol = String(candidate.symbol || "").toUpperCase() === symbol;
+    const nameMatch = haystack.split(/[^A-Z0-9]+/).includes(symbol);
+    const chainMatch = !preferredChain || !candidate.chain || candidate.chain === preferredChain;
+    candidates.push({
+      ...candidate,
+      score: (exactSymbol ? 4 : 0) + (nameMatch ? 2 : 0) + (chainMatch ? 1 : 0)
+    });
+  });
+  return candidates.sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function walkJson(value, visitor) {
+  visitor(value);
+  if (Array.isArray(value)) {
+    for (const item of value) walkJson(item, visitor);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) walkJson(item, visitor);
+  }
+}
+
+function firstString(object, keys) {
+  for (const key of keys) {
+    const value = object?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function normalizeChain(value) {
+  if (!value) return null;
+  const text = String(value).toLowerCase();
+  if (text === "eth" || text === "ethereum mainnet") return "ethereum";
+  if (text === "bnb" || text === "binance smart chain") return "bsc";
+  return text;
+}
+
+function detectTokenSymbol(task) {
+  const text = String(task || "");
+  const known = text.match(/\$?(ETH|BTC|USDC|USDT|HYPE|SOL|BNB)\b/i);
+  if (known) return known[1].toUpperCase();
+  const stopwords = new Set(["API", "HTTP", "JSON", "USDC", "USD", "NFT", "TVL", "DEX", "CEX", "L1", "L2", "AI"]);
+  const matches = text.match(/\$?[A-Z][A-Z0-9]{2,11}\b/g) || [];
+  for (const raw of matches) {
+    const token = raw.replace(/^\$/, "").toUpperCase();
+    if (!stopwords.has(token)) return token;
+  }
+  return null;
+}
+
+function isExampleValue(value) {
+  if (value === "example") return true;
+  if (typeof value === "string" && /^1970-/.test(value)) return true;
+  return false;
+}
+
+function windowToTimeframe(window) {
+  if (!window) return undefined;
+  const text = String(window).toLowerCase();
+  if (text === "24h") return "1d";
+  return text;
+}
+
+function windowToDateRange(window) {
+  const text = String(window || "").toLowerCase();
+  const now = new Date();
+  const from = new Date(now);
+  const hourMatch = text.match(/^(\d+)h$/);
+  const dayMatch = text.match(/^(\d+)d$/);
+  if (hourMatch) from.setHours(from.getHours() - Number(hourMatch[1]));
+  else if (dayMatch) from.setDate(from.getDate() - Number(dayMatch[1]));
+  else from.setDate(from.getDate() - 1);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: now.toISOString().slice(0, 10)
+  };
 }
 
 function extractDynamicSearchTerms(task) {
@@ -440,6 +750,12 @@ async function searchCandidatesRemote(baseUrl, intent, maxPrice) {
 }
 
 function filterDynamicCandidates(candidates, intent) {
+  if (intent.wants_smart_money_activity) {
+    return candidates.filter((service) => {
+      const haystack = serviceSearchHaystack(service);
+      return /token god mode|token_god_mode|flow intelligence|flow_intelligence|who bought|who_bought|bought_sold|buyer_seller|token flow|token_flow/.test(haystack);
+    });
+  }
   if (intent.has_known_intent) return candidates;
   const terms = intent.dynamic_terms || [];
   if (terms.length < 2) return candidates;
@@ -457,6 +773,9 @@ export function selectService(candidates, intent) {
     if (intent.wants_related_wallets && /related[\s_-]?wallets?|wallet[\s_-]?cluster|cluster/.test(haystack)) score += 6;
     if (intent.wants_liquidation && /liquidation|max pain|max-pain|derivatives|perp/.test(haystack)) score += 4;
     if ((intent.wants_netflow || intent.wants_smart_money_netflow) && /net[\s_-]?flow|netflow|净流入|净流出/.test(haystack)) score += 4;
+    if (intent.wants_smart_money_activity && /token god mode|token_god_mode|flow intelligence|flow_intelligence|who bought|who_bought|bought_sold|buyer_seller|token flow|token_flow/.test(haystack)) score += 8;
+    if (intent.wants_smart_money_activity && /capital_flow_analysis|chain fund flow|chain_fund_flow|market-wide|chain-level/.test(haystack)) score -= 8;
+    if (intent.wants_smart_money_activity && /token[_\s-]?search|entity[_\s-]?search/.test(haystack)) score -= 2;
     if (intent.wants_related_wallets && /leaderboard|ranking|rank|points/.test(haystack)) score -= 4;
     if (intent.wants_address && (/^list/.test(service.service_id) || /listlookonchainaddresses/.test(service.service_id))) score += 2;
     if (/getlookonchainaddress/.test(service.service_id) && !intent.input.address) score -= 2;

@@ -1051,6 +1051,67 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
   });
 });
 
+test("AgentRouter resolves token symbols before invoking token-address services", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const searchResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "token_search_resolver",
+        title: "Token Search Resolver",
+        provider_name: "Token Directory Lab",
+        description_for_agent: "Use this service to search token symbols and resolve contract addresses by chain.",
+        capabilities: "data_service,token_search,entity_search,token_metadata",
+        price: "0.01",
+        sample_request: "{\"search_query\":\"AZTEC\",\"result_type\":\"token\",\"chain\":\"ethereum\",\"limit\":5}",
+        sample_data: "{\"data\":[{\"symbol\":\"AZTEC\",\"name\":\"Aztec\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"chain\":\"ethereum\"}]}",
+        live_data: "{\"data\":[{\"symbol\":\"AZTEC\",\"name\":\"Aztec\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"chain\":\"ethereum\"}]}",
+        summary: "Resolve token symbols to token contract addresses."
+      })
+    });
+    assert.equal(searchResponse.status, 201);
+
+    const flowResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "token_flow_intelligence",
+        title: "Token God Mode Flow Intelligence",
+        provider_name: "Token Flow Lab",
+        description_for_agent: "Use this service for token-level smart money activity, token flow intelligence, buyer seller movement, and recent token flow analysis.",
+        capabilities: "data_service,token_god_mode,token_data,flow_intelligence,token_flow,buyer_seller_flow,smart_money",
+        price: "0.01",
+        sample_request: "{\"chain\":\"ethereum\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"1d\"}",
+        sample_data: "{\"token_symbol\":\"AZTEC\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"window\":\"24h\",\"smart_money_netflow_usd\":120000}",
+        live_data: "{\"token_symbol\":\"AZTEC\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"window\":\"24h\",\"smart_money_netflow_usd\":220000}",
+        summary: "Token-level smart money flow intelligence."
+      })
+    });
+    assert.equal(flowResponse.status, 201);
+
+    const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "通过 AgentRouter 查询 AZTEC 的聪明钱近24小时的动向",
+        max_price: "0.05"
+      })
+    });
+    assert.equal(askResponse.status, 200);
+    const routed = await askResponse.json();
+    assert.equal(routed.ok, true);
+    assert.equal(routed.selected_service.service_id, "token_flow_intelligence");
+    assert.equal(routed.token_resolution.status, "resolved");
+    assert.equal(routed.token_resolution.resolver_service_id, "token_search_resolver");
+    assert.equal(routed.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(routed.input.chain, "ethereum");
+    assert.equal(routed.input.timeframe, "1d");
+    assert.equal(routed.result.data.smart_money_netflow_usd, 220000);
+  });
+});
+
 test("AgentRouter builds service-aware input for address profile endpoints", async () => {
   await withServer(async ({ baseUrl }) => {
     const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
