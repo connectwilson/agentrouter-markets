@@ -280,7 +280,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/connector/invoke_paid_service") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed()) {
+    if (!serverSideDevPaymentsAllowed(baseUrl)) {
       const blocked = paymentRequiredForService(store, body.service_id, body.input || {}, body.budget || {});
       sendJson(res, blocked.statusCode, blocked.body);
       return;
@@ -292,7 +292,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/router/route") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed()) {
+    if (!serverSideDevPaymentsAllowed(baseUrl)) {
       const resolved = resolveRoute(store, body);
       sendJson(res, 200, routePaymentRequired(resolved, body));
       return;
@@ -321,7 +321,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/agent-router/request") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed()) {
+    if (!serverSideDevPaymentsAllowed(baseUrl)) {
       const result = quoteCapabilityRequest(store, body);
       sendJson(res, result.ok === false && result.status === "invalid_request" ? 422 : 200, requestPaymentRequired(result));
       return;
@@ -344,7 +344,7 @@ async function routeRequest(req, res, store, baseUrl) {
       task: body.task || body.query || "",
       max_price: body.max_price || body.maxPrice || "0.05",
       currency: body.currency || "USDC",
-      invoke: serverSideDevPaymentsAllowed()
+      invoke: serverSideDevPaymentsAllowed(baseUrl)
     });
     sendJson(res, 200, result);
     return;
@@ -500,8 +500,14 @@ async function routeRequest(req, res, store, baseUrl) {
   sendNotFound(res, "ROUTE_NOT_FOUND");
 }
 
-function serverSideDevPaymentsAllowed() {
-  return process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS === "1";
+function serverSideDevPaymentsAllowed(baseUrl) {
+  if (process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS !== "1") return false;
+  try {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function requestPaymentRequired(result) {
