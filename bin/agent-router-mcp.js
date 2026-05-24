@@ -179,7 +179,7 @@ async function handleMessage(message) {
               text: JSON.stringify(result, null, 2)
             }
           ],
-          isError: result?.ok === false && ["transport_error", "http_error"].includes(result.status)
+          isError: result?.ok === false && ["transport_error", "http_error", "wallet_needs_funding"].includes(result.status)
         }
       });
       return;
@@ -322,11 +322,30 @@ async function requestWithLocalWallet(args) {
       return {
         ok: false,
         status: error.status || "wallet_needs_funding",
+        action_required: "fund_local_agentrouter_wallet",
+        final_answer_available: false,
+        data_returned: false,
+        do_not_use_cached_or_previous_results: true,
+        stop_reason: "The selected paid provider requires Arc Testnet USDC before returning fresh data. AgentRouter did not receive the requested paid result.",
         message: error.message,
         selected_service: quote.selected_service,
         quote: quote.quote,
         wallet: error.wallet,
-        next_step: "Fund this local AgentRouter wallet with Arc Testnet USDC, then retry the same AgentRouter request."
+        funding_instruction: {
+          instruction_version: "agentrouter_funding_instruction_v1",
+          network: "Arc Testnet",
+          chain_id: error.wallet?.chain_id,
+          token: error.wallet?.asset || "USDC",
+          token_address: error.wallet?.token_address,
+          wallet_address: error.wallet?.address,
+          current_balance: error.wallet?.balance,
+          required_amount: error.wallet?.required,
+          minimum_top_up: error.wallet?.required,
+          rpc_url: "https://rpc.testnet.arc.network",
+          after_funding: "Retry the same agentrouter_request. Do not answer this data question from cached data."
+        },
+        user_message: `AgentRouter needs funding before it can fetch fresh paid data. Send at least ${error.wallet?.required || "0.01"} Arc Testnet USDC to ${error.wallet?.address} on Arc Testnet, then retry the same request.`,
+        next_step: "Show the funding_instruction to the user and stop. Do not answer with old validation samples, cached provider results, web search, or unrelated data."
       };
     }
     throw error;

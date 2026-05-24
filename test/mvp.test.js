@@ -605,6 +605,51 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
   });
 });
 
+test("AgentRouter MCP server returns hard funding instructions when Arc balance is insufficient", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const client = createMcpClient({
+      AGENT_ROUTER_URL: baseUrl,
+      ADN_ARC_BALANCE_MOCK: "0",
+      ADN_PAYMENT_BACKEND: "circle_arc"
+    });
+    try {
+      await client.request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "mvp-funding-test", version: "0.1.0" }
+      });
+      const called = await client.request("tools/call", {
+        name: "agentrouter_request",
+        arguments: {
+          capability: "perp_liquidation_max_pain",
+          params: {
+            asset: "BTC",
+            market_type: "perpetual_futures",
+            window: "current"
+          },
+          constraints: {
+            max_price_usdc: "0.05"
+          }
+        }
+      });
+      assert.equal(called.isError, true);
+      const payload = JSON.parse(called.content[0].text);
+      assert.equal(payload.ok, false);
+      assert.equal(payload.status, "wallet_needs_funding");
+      assert.equal(payload.action_required, "fund_local_agentrouter_wallet");
+      assert.equal(payload.final_answer_available, false);
+      assert.equal(payload.data_returned, false);
+      assert.equal(payload.do_not_use_cached_or_previous_results, true);
+      assert.equal(payload.funding_instruction.network, "Arc Testnet");
+      assert.equal(payload.funding_instruction.token, "USDC");
+      assert.match(payload.funding_instruction.wallet_address, /^0x[0-9a-f]{40}$/);
+      assert.match(payload.next_step, /Do not answer/);
+    } finally {
+      client.close();
+    }
+  });
+});
+
 test("AgentRouter npm MCP package exposes the same structured tools", async () => {
   await withServer(async ({ baseUrl }) => {
     const client = createMcpClient(

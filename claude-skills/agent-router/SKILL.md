@@ -96,7 +96,7 @@ If the user runs a local AgentRouter server, use:
 AGENT_ROUTER_URL=http://127.0.0.1:8800
 ```
 
-After MCP is installed, the local AgentRouter bridge automatically creates a local encrypted EVM/secp256k1 session wallet during MCP initialization if one does not already exist. Do not ask the user to trigger wallet creation, configure environment variables, or type a wallet passphrase into chat. If the user asks about wallet readiness, call `agentrouter_wallet_status` and show the public address. For `circle_arc` settlement, this address needs a small Arc Testnet USDC balance. Use `agentrouter_wallet_create` only as a manual fallback if auto-creation was disabled or failed. Use `agentrouter_wallet_setup` only if the user explicitly asks for an advanced self-chosen passphrase flow.
+After MCP is installed, the local AgentRouter bridge automatically creates a local encrypted EVM/secp256k1 session wallet during MCP initialization if one does not already exist. Do not ask the user to trigger wallet creation, configure environment variables, or type a wallet passphrase into chat. If the user asks about wallet readiness, call `agentrouter_wallet_status` and show the public address. For `circle_arc` settlement, this address needs a small Arc Testnet USDC balance. If a paid request returns `wallet_needs_funding`, `action_required: fund_local_agentrouter_wallet`, or `do_not_use_cached_or_previous_results: true`, stop immediately and show the returned `funding_instruction` or wallet address, network, token, current balance, and required amount. Do not answer the data question from previous AgentRouter results, validation samples, web search, or any fallback source. Use `agentrouter_wallet_create` only as a manual fallback if auto-creation was disabled or failed. Use `agentrouter_wallet_setup` only if the user explicitly asks for an advanced self-chosen passphrase flow.
 
 ## Client Guidance
 
@@ -131,4 +131,5 @@ If the response is `no_service_found`, `needs_clarification`, or `quote_blocked`
 - Do not silently install or modify local tools without user confirmation.
 - Prefer MCP tools over raw HTTP when both are available.
 - For Arc payment demos, do not use HTTP fallback to bypass local-wallet balance checks.
+- When AgentRouter says the wallet needs funding, present the recharge/funding instruction and stop; never use cached or previously returned data as the answer.
 - Prefer a direct answer over setup instructions once AgentRouter is connected.
