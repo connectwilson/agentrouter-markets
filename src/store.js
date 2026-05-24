@@ -31,8 +31,8 @@ export function publicServiceRecord(record) {
     request_data: requestData,
     response_data: responseData,
     pre_call_context: preCallContext(record, { trust, health, provenance, requestData, responseData }),
-    sample_response: record.manifest.sample_response,
-    validation_result_preview: record.validation_runs?.at(-1)?.result_preview || null,
+    sample_response: publicSampleResponse(record.manifest.sample_response),
+    validation_result_preview: publicValidationPreview(record.validation_runs?.at(-1)?.result_preview || null),
     source_provenance: provenance,
     quality_profile: summarizeQuality(record),
     health,
@@ -115,9 +115,87 @@ function responseDataContract(record) {
   const sampleData = record.manifest.sample_response?.data || {};
   return record.manifest.agent_contract?.response_data || {
     fields: collectFieldPaths(sampleData, 16),
-    preview: sampleData,
+    preview: redactDataPreview(sampleData),
     shape_summary: summarizeShape(sampleData)
   };
+}
+
+export function publicSampleResponse(sampleResponse) {
+  if (!sampleResponse || typeof sampleResponse !== "object") return null;
+  return {
+    schema_version: sampleResponse.schema_version || null,
+    status: sampleResponse.status || null,
+    sample_type: sampleResponse.sample_type || "redacted_shape_only",
+    query_shape: redactDataPreview(sampleResponse.query || {}),
+    data_shape: redactDataPreview(sampleResponse.data || {}),
+    metadata: publicMetadata(sampleResponse.metadata),
+    agent_hints: sampleResponse.agent_hints || null,
+    summary: sampleResponse.summary || null,
+    redaction: {
+      redacted: true,
+      reason: "Public discovery responses expose schema and shape only. Real values require paid invocation."
+    }
+  };
+}
+
+export function publicValidationRun(validationRun) {
+  if (!validationRun) return null;
+  return {
+    ok: validationRun.ok,
+    service_id: validationRun.service_id,
+    status: validationRun.status,
+    schema_errors: validationRun.schema_errors || [],
+    envelope_errors: validationRun.envelope_errors || [],
+    result_errors: validationRun.result_errors || [],
+    result_preview: publicValidationPreview(validationRun.result_preview),
+    created_at: validationRun.created_at,
+    redaction: {
+      redacted: true,
+      reason: "Latest validation proves the endpoint responded with JSON, but public output omits paid data values."
+    }
+  };
+}
+
+export function publicValidationPreview(preview) {
+  if (!preview) return null;
+  return {
+    shape: redactDataPreview(preview),
+    fields: collectFieldPaths(preview, 32),
+    shape_summary: summarizeShape(preview),
+    redacted: true
+  };
+}
+
+function publicMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") return null;
+  return {
+    data_sources: Array.isArray(metadata.data_sources) ? metadata.data_sources : undefined,
+    freshness_seconds: metadata.freshness_seconds ?? undefined,
+    is_estimated: metadata.is_estimated ?? undefined,
+    confidence: metadata.confidence ?? undefined,
+    limitations: Array.isArray(metadata.limitations) ? metadata.limitations : undefined
+  };
+}
+
+function redactDataPreview(value, depth = 0) {
+  if (value == null) return value;
+  if (depth > 5) return summarizeShape(value);
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      item_count_sample: value.length,
+      item_shape: value.length ? redactDataPreview(value[0], depth + 1) : null
+    };
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).slice(0, 30).map(([key, item]) => [key, redactDataPreview(item, depth + 1)])
+    );
+  }
+  if (typeof value === "number") return "<number>";
+  if (typeof value === "boolean") return "<boolean>";
+  if (typeof value === "string") return value.startsWith("0x") ? "<address_or_hash>" : "<string>";
+  return `<${typeof value}>`;
 }
 
 export function summarizeTrust(record) {

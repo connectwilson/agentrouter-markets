@@ -1,7 +1,7 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
-import { createMemoryStore, listServiceSummaries, publicServiceRecord, summarizeRegistryStats } from "./store.js";
+import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
 import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet } from "./registry.js";
@@ -89,7 +89,7 @@ async function routeRequest(req, res, store, baseUrl) {
       },
       service: publicServiceRecord(record),
       manifest: record.manifest,
-      latest_validation: record.validation_runs?.at(-1) || null,
+      latest_validation: publicValidationRun(record.validation_runs?.at(-1) || null),
       recent_quality_events: (record.quality_events || []).slice(-20),
       recent_feedback_events: (record.feedback_events || []).slice(-20),
       recent_health_checks: (record.health_checks || []).slice(-20)
@@ -231,7 +231,7 @@ async function routeRequest(req, res, store, baseUrl) {
     const serviceId = url.pathname.split("/")[2];
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
-    sendJson(res, 200, record.manifest.sample_response);
+    sendJson(res, 200, publicSampleResponse(record.manifest.sample_response));
     return;
   }
 
@@ -274,7 +274,7 @@ async function routeRequest(req, res, store, baseUrl) {
     const { service_id: serviceId } = await readJson(req);
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
-    sendJson(res, 200, record.manifest.sample_response);
+    sendJson(res, 200, publicSampleResponse(record.manifest.sample_response));
     return;
   }
 
