@@ -174,7 +174,7 @@ export function getCapabilityCatalog() {
       not_for: ["Ambiguous financial terms that need a domain-specific schema."],
       examples: [
         {
-          user_query: "Query Nansen Smart Money Holdings for Ethereum, first 10 rows.",
+          user_query: "Query smart money holdings for Ethereum, first 10 rows.",
           request: {
             capability: "smart_money_holdings",
             params: { chains: ["ethereum"], pagination: { page: 1, per_page: 10 } }

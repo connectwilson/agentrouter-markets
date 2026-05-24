@@ -1349,20 +1349,20 @@ test("Provider Studio imports ClawHub-style HTML embedded Skill readme", async (
 
 test("Provider Studio explains CLI-only Skill documents instead of treating them as HTTP APIs", async () => {
   const upstream = http.createServer((req, res) => {
-    if (req.url === "/nansen-cli-skill") {
+    if (req.url === "/cli-data-skill") {
       res.writeHead(200, { "content-type": "text/markdown" });
       res.end(`---
-name: nansen-smart-money-tracker
-allowed-tools: Bash(nansen:*)
+name: market-data-cli
+allowed-tools: Bash(marketdata:*)
 ---
 
-# Smart Money
+# Market Data
 
-All commands: \`nansen research smart-money <sub> [options]\`
+All commands: \`marketdata research flows <sub> [options]\`
 
 \`\`\`bash
-nansen research smart-money netflow --chain solana --limit 10
-nansen research smart-money holdings --chain solana --limit 10
+marketdata research flows netflow --chain solana --limit 10
+marketdata research flows holdings --chain solana --limit 10
 \`\`\`
 `);
       return;
@@ -1375,15 +1375,15 @@ nansen research smart-money holdings --chain solana --limit 10
     const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
     await assert.rejects(
       discoverApiServices({
-        api_url: `${baseUrl}/nansen-cli-skill`,
+        api_url: `${baseUrl}/cli-data-skill`,
         default_price: "0.01",
-        secret_value: "nansen_test_key"
+        secret_value: "provider_test_key"
       }, baseUrl),
       (error) => {
         assert.equal(error.statusCode, 422);
         assert.equal(error.code, "CLI_SKILL_NOT_HTTP_API");
         assert.match(error.message, /CLI-based Skill/);
-        assert.ok(error.validation.detected_cli_commands.some((command) => command.includes("nansen research smart-money")));
+        assert.ok(error.validation.detected_cli_commands.some((command) => command.includes("marketdata research flows")));
         return true;
       }
     );
@@ -1392,27 +1392,27 @@ nansen research smart-money holdings --chain solana --limit 10
   }
 });
 
-test("Provider Studio imports Nansen docs overview into POST API drafts", async () => {
+test("Provider Studio imports generic API docs overview into POST API drafts", async () => {
   const upstream = http.createServer((req, res) => {
     if (req.url === "/api/overview") {
       res.writeHead(200, { "content-type": "text/html" });
       res.end(`<!doctype html>
-        <a href="/api/smart-money/netflows">Netflows</a>
-        <a href="/api/smart-money/holdings">Holdings</a>
-        <a href="/api/smart-money">Smart Money parent</a>
+        <a href="/api/market/netflows">Netflows</a>
+        <a href="/api/market/holdings">Holdings</a>
+        <a href="/api/changelog">Changelog</a>
       `);
       return;
     }
-    if (req.url === "/api/smart-money/netflows") {
+    if (req.url === "/api/market/netflows") {
       res.writeHead(200, { "content-type": "text/html" });
       res.end(`<!doctype html><main>
         <h1>Netflows</h1>
-        <p>Get aggregated token flow analysis for smart money wallets.</p>
+        <p>Get aggregated token flow analysis.</p>
         <p>post</p>
-        <p>https://api.nansen.ai/api/v1/smart-money/netflow</p>
+        <p>https://api.example.com/api/v1/market/netflow</p>
         <p>Authorizations</p><p>ApiKeyAuth</p><p>apiKey string Required</p>
-        <pre>POST /api/v1/smart-money/netflow HTTP/1.1
-Host: api.nansen.ai
+        <pre>POST /api/v1/market/netflow HTTP/1.1
+Host: api.example.com
 apiKey: YOUR_API_KEY
 Content-Type: application/json
 {
@@ -1427,13 +1427,13 @@ Content-Type: application/json
       </main>`);
       return;
     }
-    if (req.url === "/api/smart-money/holdings") {
+    if (req.url === "/api/market/holdings") {
       res.writeHead(200, { "content-type": "text/html" });
       res.end(`<!doctype html><main>
         <h1>Holdings</h1>
-        <p>https://api.nansen.ai/api/v1/smart-money/holdings</p>
-        <pre>POST /api/v1/smart-money/holdings HTTP/1.1
-Host: api.nansen.ai
+        <p>https://api.example.com/api/v1/market/holdings</p>
+        <pre>POST /api/v1/market/holdings HTTP/1.1
+Host: api.example.com
 apiKey: YOUR_API_KEY
 Content-Type: application/json
 {
@@ -1453,15 +1453,18 @@ Content-Type: application/json
     const discovered = await discoverApiServices({
       api_url: `${baseUrl}/api/overview`,
       default_price: "0.01",
-      secret_value: "nansen_test_key"
+      provider_name: "Example Data",
+      secret_value: "provider_test_key"
     }, baseUrl);
-    assert.equal(discovered.mode, "nansen_docs");
-    assert.equal(discovered.provider.provider_name, "Nansen");
+    assert.equal(discovered.mode, "api_docs");
+    assert.equal(discovered.provider.provider_name, "Example Data");
+    assert.equal(discovered.api_url, "https://api.example.com");
     assert.equal(discovered.docs.auth_header, "apiKey");
     assert.equal(discovered.drafts.length, 2);
-    const netflow = discovered.drafts.find((draft) => draft.path === "/api/v1/smart-money/netflow");
+    const netflow = discovered.drafts.find((draft) => draft.path === "/api/v1/market/netflow");
     assert.equal(netflow.method, "POST");
     assert.equal(netflow.auth_header, "apiKey");
+    assert.equal(netflow.upstream_url, "https://api.example.com/api/v1/market/netflow");
     assert.deepEqual(netflow.sample_request.chains, ["ethereum", "solana"]);
     assert.equal(netflow.preview_data.data[0].token_symbol, "ETH");
   } finally {
