@@ -236,7 +236,13 @@ async function callTool(name, args) {
 
   if (name === "agentrouter_wallet_status") {
     const status = await walletStatus();
-    if (status.initialized && currentPaymentBackend() === "circle_arc") {
+    const paymentBackend = currentPaymentBackend();
+    status.payment_backend = paymentBackend;
+    status.arc_payment_active = paymentBackend === "circle_arc";
+    status.paid_request_behavior = status.arc_payment_active
+      ? "Paid AgentRouter requests use the local wallet and require Arc Testnet USDC before provider invocation."
+      : "Paid AgentRouter requests are not using Arc local-wallet settlement in this MCP session. Reinstall or restart the MCP server with ADN_PAYMENT_BACKEND=circle_arc for balance-gated calls.";
+    if (status.initialized && status.arc_payment_active) {
       try {
         status.arc_testnet_usdc = await getArcUsdcBalance(status.address);
       } catch (error) {

@@ -16,7 +16,7 @@ When the user asks to use AgentRouter:
    - `agentrouter_capabilities`: call this first when you are unsure which structured capability or params to use
    - `agentrouter_quote`: structured request -> route + quote + budget guard only
    - `agentrouter_ask`: last-resort fallback/demo; use only when you cannot produce a structured request from the user request and capability catalog
-   - `agentrouter_wallet_status`: check local encrypted EVM wallet readiness for future x402 payments
+   - `agentrouter_wallet_status`: check local encrypted EVM wallet readiness, active payment backend, and Arc Testnet USDC balance when Arc settlement is enabled
    - `agentrouter_wallet_create`: manual fallback wallet bootstrap; normally not needed because the local MCP bridge auto-creates a session wallet during initialization
    - `agentrouter_wallet_setup`: advanced wallet bootstrap; opens a one-time local setup page for a user-chosen encryption passphrase
    - `agentrouter_wallet_init`: advanced only; create a local encrypted EVM wallet when a local passphrase is already available in the MCP environment
@@ -79,14 +79,16 @@ AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com
 AGENT_ROUTER_MAX_PRICE=0.05
 ```
 
-For Arc hackathon demos with real local-wallet settlement, add:
+For Arc hackathon demos with real local-wallet settlement, install or restart the MCP bridge with:
 
 ```text
+AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com
+AGENT_ROUTER_MAX_PRICE=0.05
 ADN_PAYMENT_BACKEND=circle_arc
 ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
 ```
 
-In this mode AgentRouter still uses the same x402-style HTTP 402 challenge, but the local wallet sends Arc Testnet USDC directly to the provider payout wallet and the provider verifies the transaction before returning data.
+In this mode AgentRouter still uses the same x402-style HTTP 402 challenge, but the local wallet sends Arc Testnet USDC directly to the provider payout wallet and the provider verifies the transaction before returning data. For paid Arc demo calls, first call `agentrouter_wallet_status`. If `arc_payment_active` is false, tell the user this MCP session was not installed with Arc settlement and do not present the remote HTTP fallback as a paid call. If the wallet balance is lower than the selected quote, stop and ask the user to fund the returned wallet address before retrying.
 
 If the user runs a local AgentRouter server, use:
 
@@ -100,7 +102,7 @@ After MCP is installed, the local AgentRouter bridge automatically creates a loc
 
 Use this guidance only when installation is needed.
 
-- Claude Desktop / Claude Code: prefer local MCP bridge or `.mcpb`; if a CLI is available, the command is `claude mcp add AgentRouter -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com -e AGENT_ROUTER_MAX_PRICE=0.05 -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js`.
+- Claude Desktop / Claude Code: prefer local MCP bridge or `.mcpb`; for the Arc payment demo, use `claude mcp add AgentRouter -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com -e AGENT_ROUTER_MAX_PRICE=0.05 -e ADN_PAYMENT_BACKEND=circle_arc -e ADN_ARC_RPC_URL=https://rpc.testnet.arc.network -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js`.
 - Claude Desktop no-command path: ask the user to install `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` through Settings -> Extensions -> Install Extension, then use `agentrouter_request`.
 - Cursor / Windsurf / Cline / Continue / VS Code: add an MCP server named `AgentRouter` with command `node`, args `["/Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
 - Cross-client npm path after package publication: add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
@@ -128,4 +130,5 @@ If the response is `no_service_found`, `needs_clarification`, or `quote_blocked`
 - Do not claim data exists unless AgentRouter returns it.
 - Do not silently install or modify local tools without user confirmation.
 - Prefer MCP tools over raw HTTP when both are available.
+- For Arc payment demos, do not use HTTP fallback to bypass local-wallet balance checks.
 - Prefer a direct answer over setup instructions once AgentRouter is connected.

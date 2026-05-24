@@ -482,6 +482,9 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
       assert.equal(walletPayload.initialized, true);
       assert.equal(walletPayload.address_type, "evm");
       assert.equal(walletPayload.key_management, "local_session_secret");
+      assert.equal(walletPayload.payment_backend, "dev");
+      assert.equal(walletPayload.arc_payment_active, false);
+      assert.match(walletPayload.paid_request_behavior, /not using Arc local-wallet settlement/);
       assert.match(walletPayload.address, /^0x[0-9a-f]{40}$/);
       assert.equal("private_key_pem" in walletPayload, false);
 
