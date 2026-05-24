@@ -207,8 +207,8 @@ export function studioHtml({ draft, loadedService } = {}) {
     .draft-review { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 12px; padding: 12px; border: 1px solid #e3e7e4; border-radius: 8px; background: rgba(255,255,255,.82); }
     .draft-review-item { min-width: 0; display: grid; gap: 3px; }
     .draft-review-item b { color: #6b7370; font-size: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: .04em; }
-    .draft-review-item span { color: var(--color-ink); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
-    .draft-review-item code { font-size: 11px; color: #28342d; background: #f2f5f2; border: 1px solid #e2e7e3; border-radius: 5px; padding: 2px 4px; overflow-wrap: anywhere; }
+    .draft-review-item span { color: var(--color-ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+    .draft-review-item code { font-family: Menlo, Monaco, Consolas, monospace; font-size: 12px; color: #28342d; background: #f2f5f2; border: 1px solid #e2e7e3; border-radius: 5px; padding: 2px 4px; overflow-wrap: anywhere; }
     .draft-review-item.full { grid-column: 1 / -1; }
     .draft-contract { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
     .draft-chip { display:inline-flex; align-items:center; border:1px solid #d7ded9; background:#fff; border-radius:999px; padding:3px 8px; color:#516158; font-size:11px; font-weight:650; }
@@ -926,10 +926,40 @@ export function studioHtml({ draft, loadedService } = {}) {
         Object.keys(draft.sample_request || {}).join(" ")
       ].filter(Boolean).join(" ");
       const capabilities = suggestCapabilities(capabilityText).split(",").filter(Boolean);
+      const sampleRequest = draft.sample_request || {};
+      const previewData = draft.preview_data ?? draft.data_contract?.response_data?.preview ?? {};
       return {
         ...draft,
         capabilities,
-        summary: structuredDraftSummary(draft)
+        sample_request: sampleRequest,
+        preview_data: previewData,
+        summary: structuredDraftSummary({ ...draft, sample_request: sampleRequest, preview_data: previewData }),
+        data_contract: normalizedDataContract(draft, sampleRequest, previewData)
+      };
+    }
+
+    function normalizedDataContract(draft, sampleRequest, previewData) {
+      const existing = draft.data_contract || {};
+      return {
+        ...existing,
+        request: {
+          ...(existing.request || {}),
+          method: draft.method || existing.request?.method || "GET",
+          path: draft.path || existing.request?.path || endpointPath(draft.upstream_url || ""),
+          example: sampleRequest
+        },
+        request_data: {
+          ...(existing.request_data || {}),
+          fields: Object.keys(sampleRequest || {}),
+          example: sampleRequest,
+          shape: shapeFor(sampleRequest || {})
+        },
+        response_data: {
+          ...(existing.response_data || {}),
+          fields: responseKeys(previewData, 16),
+          preview: previewData,
+          shape: shapeFor(previewData)
+        }
       };
     }
 
@@ -958,7 +988,6 @@ export function studioHtml({ draft, loadedService } = {}) {
         draftReviewItem("Response", escapeHtml(draftResponseSummary(draft))),
         draftReviewItem("Source", escapeHtml(draftSourceLabel(draft))),
         draftReviewItem("Price", escapeHtml(draftPriceSummary(draft))),
-        draftReviewItem("Buyer auth", escapeHtml(draftBuyerAuthSummary(draft))),
         draftReviewItem("Freshness", escapeHtml(draftFreshnessSummary(draft))),
         draftReviewItem("Agent summary", escapeHtml(summary), true),
         draftReviewItem("Request data", '<code>' + escapeHtml(compactJson(draft.data_contract?.request_data?.example || draft.sample_request || {}, 220)) + '</code>', true),
@@ -998,11 +1027,6 @@ export function studioHtml({ draft, loadedService } = {}) {
       return price + " USDC/call";
     }
 
-    function draftBuyerAuthSummary(draft) {
-      const needsKey = draft.data_contract?.pre_call_context?.buyer_requirements?.needs_buyer_api_key;
-      return "buyer API key " + (needsKey ? "required" : "not required");
-    }
-
     function draftFreshnessSummary(draft) {
       return draft.data_contract?.pre_call_context?.freshness_hint || "validated live before publish";
     }
@@ -1038,6 +1062,26 @@ export function studioHtml({ draft, loadedService } = {}) {
       return compactText(text, maxLength);
     }
 
+    function responseKeys(value, limit = 8, prefix = "") {
+      if (limit <= 0) return [];
+      if (Array.isArray(value)) return value.length ? responseKeys(value[0], limit, prefix) : [];
+      if (!value || typeof value !== "object") return [];
+      const keys = [];
+      for (const [key, child] of Object.entries(value)) {
+        const path = prefix ? prefix + "." + key : key;
+        keys.push(path);
+        if (keys.length >= limit) break;
+        if (child && typeof child === "object") {
+          for (const nested of responseKeys(child, limit - keys.length, path)) {
+            keys.push(nested);
+            if (keys.length >= limit) break;
+          }
+        }
+        if (keys.length >= limit) break;
+      }
+      return keys;
+    }
+
     function draftRowClass(draft) {
       if (draft.published) return "published";
       if (draft.publish_error) return "failed selected";
@@ -1060,13 +1104,11 @@ export function studioHtml({ draft, loadedService } = {}) {
 
     function draftContractChips(draft) {
       const inputKeys = Object.keys(draft.sample_request || {});
-      const hasContract = Boolean(draft.data_contract);
       const source = draft.source_type === "skill_import" ? "Skill import" : draft.discovery_note ? "Direct endpoint" : "OpenAPI";
       return [
-        '<span class="draft-chip ready">Metadata auto-filled</span>',
-        '<span class="draft-chip ' + (hasContract ? "ready" : "warn") + '">' + (hasContract ? "Contract generated" : "Contract inferred") + '</span>',
         '<span class="draft-chip">' + inputKeys.length + ' input fields</span>',
         '<span class="draft-chip">' + escapeHtml(source) + '</span>',
+        draft.auth_header ? '<span class="draft-chip">Auth: ' + escapeHtml(draft.auth_header) + '</span>' : '',
         draft.publish_error ? '<span class="draft-chip error">Fix before publish</span>' : ''
       ].join("");
     }

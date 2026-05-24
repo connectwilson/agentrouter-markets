@@ -75,7 +75,7 @@ test("home page and Provider Studio render separately", async () => {
     const studioHtml = await studio.text();
     assert.match(studioHtml, /Provider Studio/);
     assert.match(studioHtml, /Verify & Publish Selected/);
-    assert.match(studioHtml, /Buyer auth/);
+    assert.doesNotMatch(studioHtml, /Buyer auth/);
   });
 });
 
