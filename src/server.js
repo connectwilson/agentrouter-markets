@@ -9,7 +9,7 @@ import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
 import { createProviderFromStudio, draftFromServiceRecord, studioHtml } from "./studio.js";
-import { agentHtml, homeHtml, humanHtml } from "./home.js";
+import { agentHtml, homeHtml, humanHtml, serviceDetailHtml } from "./home.js";
 import { readProviderConfig } from "./provider-config.js";
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
@@ -69,15 +69,27 @@ async function routeRequest(req, res, store, baseUrl) {
     const serviceId = url.searchParams.get("service_id");
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
-    sendJson(res, 200, {
+    const payload = {
       service_detail_version: "agent_router_service_detail_v1",
+      data_context: {
+        page_role: "service_capability_detail",
+        result_preview_role: "latest_validation_sample",
+        result_preview_is_live_user_query: false,
+        explanation: "latest_validation.result_preview is the last provider validation sample. It proves this service can return real JSON for its sample request, but it is not the result of the current buyer Agent task.",
+        live_query_instruction: "Buyer Agents should invoke this service with task-specific input through AgentRouter instead of reusing the validation sample as the final answer."
+      },
       service: publicServiceRecord(record),
       manifest: record.manifest,
       latest_validation: record.validation_runs?.at(-1) || null,
       recent_quality_events: (record.quality_events || []).slice(-20),
       recent_feedback_events: (record.feedback_events || []).slice(-20),
       recent_health_checks: (record.health_checks || []).slice(-20)
-    });
+    };
+    if (wantsHtml(req, url)) {
+      sendHtml(res, 200, serviceDetailHtml(payload));
+      return;
+    }
+    sendJson(res, 200, payload);
     return;
   }
 
@@ -453,6 +465,13 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   sendNotFound(res, "ROUTE_NOT_FOUND");
+}
+
+function wantsHtml(req, url) {
+  if (url.searchParams.get("format") === "json") return false;
+  if (url.searchParams.get("format") === "html") return true;
+  const accept = req.headers.accept || "";
+  return accept.includes("text/html") && !accept.includes("application/json");
 }
 
 function markExistingDrafts(result, store) {

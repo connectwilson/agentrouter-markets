@@ -480,6 +480,97 @@ export function agentHtml() {
   });
 }
 
+export function serviceDetailHtml(detail) {
+  const service = detail.service || {};
+  const manifest = detail.manifest || {};
+  const validation = detail.latest_validation || {};
+  const sampleRequest = manifest.sample_request || service.sample_request || {};
+  const resultPreview = validation.result_preview || null;
+  const serviceId = service.service_id || manifest.service_id || "";
+  const endpoint = manifest.endpoint || {};
+  const capabilities = manifest.capabilities || service.capabilities || [];
+  const price = manifest.pricing || {};
+  const rawJsonHref = `/agent-router/service?service_id=${encodeURIComponent(serviceId)}&format=json`;
+  const invokeExample = {
+    service_id: serviceId,
+    input: sampleRequest,
+    budget: {
+      max_amount: price.amount || service.price || "0.05",
+      currency: price.currency || service.currency || "USDC"
+    }
+  };
+  return page({
+    title: `${service.title || serviceId} · AgentRouter`,
+    body: `
+      <main class="shell wide-shell detail-page">
+        <section class="detail-hero">
+          <div>
+            <span class="eyebrow">Service capability</span>
+            <h1>${html(service.title || manifest.title || serviceId)}</h1>
+            <p class="lead">${html(manifest.description_for_agent || service.description_for_agent || "Agent-callable data service with verified provider response.")}</p>
+            <div class="detail-actions">
+              <a class="button primary" href="/agent?q=${encodeURIComponent(serviceId)}">Open in service hub</a>
+              <a class="button ghost" href="${html(rawJsonHref)}">Raw JSON</a>
+              <a class="button ghost" href="/studio?service_id=${encodeURIComponent(serviceId)}">Provider edit</a>
+            </div>
+          </div>
+          <aside class="detail-summary-card">
+            <div><span>Service ID</span><strong>${html(serviceId)}</strong></div>
+            <div><span>Provider</span><strong>${html(service.provider_id || manifest.provider?.provider_id || "provider")}</strong></div>
+            <div><span>Price</span><strong>${html(price.amount || service.price || "0.00")} ${html(price.currency || service.currency || "USDC")}/call</strong></div>
+            <div><span>Status</span><strong>${html(service.verification_status || "unknown")}</strong></div>
+          </aside>
+        </section>
+
+        <section class="detail-grid">
+          <article class="detail-panel">
+            <div class="panel-head">
+              <span class="eyebrow">What agents can use</span>
+              <h2>Capability contract</h2>
+            </div>
+            <div class="detail-kv">
+              <div>Endpoint</div><div>${html(endpoint.method || "POST")} ${html(endpoint.url || service.endpoint_url || "-")}</div>
+              <div>Input</div><div>${html(Object.keys(sampleRequest).join(", ") || "no input")}</div>
+              <div>Output</div><div>${html(outputSummary(manifest.output_schema, resultPreview))}</div>
+              <div>Best for</div><div>${html(capabilities.slice(0, 10).join(", ") || "data service")}</div>
+            </div>
+            <h3>Example request shape</h3>
+            <pre class="code-block">${html(JSON.stringify(sampleRequest, null, 2))}</pre>
+          </article>
+
+          <article class="detail-panel validation-panel">
+            <div class="panel-head">
+              <span class="eyebrow">Validation sample</span>
+              <h2>Last provider check</h2>
+            </div>
+            <div class="notice-box">
+              <strong>This is not a live buyer query result.</strong>
+              <span>${html(detail.data_context?.explanation || "This preview is the latest validation sample returned by the provider for the sample request.")}</span>
+            </div>
+            <div class="detail-kv">
+              <div>Validation</div><div>${validation.ok ? "passed" : "failed or not run"}</div>
+              <div>HTTP status</div><div>${html(validation.status || "-")}</div>
+              <div>Created</div><div>${html(validation.created_at || "-")}</div>
+              <div>Preview role</div><div>latest_validation_sample</div>
+            </div>
+            <h3>Validation response preview</h3>
+            <pre class="code-block tall">${html(JSON.stringify(resultPreview || {}, null, 2))}</pre>
+          </article>
+        </section>
+
+        <section class="detail-panel invoke-panel">
+          <div class="panel-head">
+            <span class="eyebrow">For buyer agents</span>
+            <h2>Invoke with task-specific input</h2>
+          </div>
+          <p class="detail-note">AgentRouter should replace the sample values with the buyer task's actual parameters, then route, quote, invoke, verify, and request feedback.</p>
+          <pre class="code-block">${html(JSON.stringify(invokeExample, null, 2))}</pre>
+        </section>
+      </main>
+    `
+  });
+}
+
 function appPage({ title, subtitle, active, body }) {
   return page({
     title: `${title} · AgentRouter Markets`,
@@ -702,6 +793,28 @@ function styles() {
     .ops-row mark.warn { border-color:#ead4a6; background:#fff9ec; color:#734d00; }
     .ops-row a { color:var(--color-ink); font-weight:780; text-transform:uppercase; font-size:12px; text-decoration:underline; text-underline-offset:3px; }
     .ops-labels { min-height:34px; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; color:var(--color-faint); }
+    .detail-page { padding-top:54px; }
+    .detail-hero { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:34px; align-items:end; padding-bottom:30px; border-bottom:1px solid var(--color-line); }
+    .detail-hero h1 { margin:10px 0 12px; font-size:46px; }
+    .detail-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:22px; }
+    .detail-summary-card, .detail-panel { border:1px solid var(--color-line); border-radius:8px; background:#fff; }
+    .detail-summary-card { padding:18px; display:grid; gap:14px; }
+    .detail-summary-card div { display:grid; gap:5px; padding-bottom:12px; border-bottom:1px solid var(--color-line); }
+    .detail-summary-card div:last-child { border-bottom:0; padding-bottom:0; }
+    .detail-summary-card span, .detail-kv div:nth-child(odd) { color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    .detail-summary-card strong { overflow-wrap:anywhere; }
+    .detail-grid { display:grid; grid-template-columns:minmax(0,.95fr) minmax(460px,1.05fr); gap:22px; margin-top:24px; align-items:start; }
+    .detail-panel { padding:24px; min-width:0; }
+    .panel-head { display:grid; gap:6px; margin-bottom:18px; }
+    .panel-head h2 { margin:0; font-size:28px; line-height:1.1; }
+    .detail-kv { display:grid; grid-template-columns:128px minmax(0,1fr); gap:10px 16px; margin-bottom:20px; }
+    .detail-kv div:nth-child(even) { min-width:0; overflow-wrap:anywhere; font-weight:690; }
+    .detail-panel h3 { margin:20px 0 10px; font-size:16px; }
+    .code-block { margin:0; overflow:auto; max-width:100%; border-radius:8px; background:var(--color-code); color:#f8fafc; padding:16px; font-family:var(--font-mono); font-size:12px; line-height:1.55; }
+    .code-block.tall { max-height:520px; }
+    .notice-box { display:grid; gap:6px; padding:14px; border:1px solid #b9e4c0; background:#f4fff6; color:#173f1d; border-radius:8px; margin-bottom:18px; }
+    .notice-box span, .detail-note { color:var(--color-muted); line-height:1.55; }
+    .invoke-panel { margin-top:22px; }
     .hub-layout, .human-layout { display:grid; grid-template-columns:minmax(0,.92fr) minmax(420px,1.08fr); gap:16px; align-items:start; }
     .section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
     .search-card { display:grid; gap:12px; }
@@ -755,7 +868,7 @@ function styles() {
       .nav { grid-template-columns:1fr auto; gap:12px; padding:10px 24px; }
       .top-search { grid-column:1 / -1; order:3; }
       .nav-tools { order:2; }
-      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview, .market-hero, .provider-hero, .market-shell, .provider-workbench { grid-template-columns:1fr; }
+      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview, .market-hero, .provider-hero, .market-shell, .provider-workbench, .detail-hero, .detail-grid { grid-template-columns:1fr; }
       .landing-grid, .metrics, .search-row, .step-row, .hero-paths, .stats-grid, .network-tables, .market-grid, .provider-grid, .provider-metrics, .market-toolbar, .provider-toolbar, .provider-imports, .import-options { grid-template-columns:1fr; }
       .nav-links { display:none; }
       .app-title { display:grid; }
@@ -860,6 +973,16 @@ function sharedClientHelpers() {
         .replace(/"/g, "&quot;");
     }
   `;
+}
+
+function outputSummary(schema, preview) {
+  if (preview && typeof preview === "object") {
+    const keys = Object.keys(preview);
+    if (keys.length) return keys.join(", ");
+  }
+  const properties = schema?.properties;
+  if (properties && typeof properties === "object") return Object.keys(properties).join(", ");
+  return "JSON response envelope";
 }
 
 function html(value) {

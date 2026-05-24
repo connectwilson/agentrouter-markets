@@ -41,7 +41,8 @@ export async function askAgentRouter(store, {
   const selected = selectService(candidates, intent);
   const record = store.services.get(selected.service_id);
   const preview = record?.manifest?.sample_response || null;
-  const invocation = await invokePaidService(store, selected.service_id, intent.input, {
+  const serviceInput = buildServiceAwareInput(intent, record?.manifest);
+  const invocation = await invokePaidService(store, selected.service_id, serviceInput, {
     max_amount: maxPrice,
     currency
   });
@@ -51,27 +52,27 @@ export async function askAgentRouter(store, {
       status: "invoke_failed",
       task,
       selected_service: publicSelectedService(selected),
-      input: intent.input,
+      input: serviceInput,
       error: invocation.body.error
     };
   }
   const verification = verifyServiceResult({
     result: invocation.body.result,
     manifest: record.manifest,
-    intent: intent.input,
+    intent: serviceInput,
     constraints: { max_price_usdc: maxPrice }
   });
   return {
     ok: true,
     task,
     selected_service: publicSelectedService(selected),
-    input: intent.input,
+    input: serviceInput,
     preview_sample_type: preview?.sample_type || null,
     result: invocation.body.result,
     feedback: invocation.body.feedback,
     verification,
     consumer_feedback_request: createConsumerFeedbackRequest({
-      request: { task, input: intent.input },
+      request: { task, input: serviceInput },
       selectedService: selected,
       result: invocation.body.result,
       verification
@@ -114,9 +115,10 @@ export async function askAgentRouterRemote({
   }
   const selected = selectService(candidates, intent);
   const preview = await post(baseUrl, "/connector/preview_service", { service_id: selected.service_id });
+  const serviceInput = buildServiceAwareInput(intent, selected);
   const invocation = await post(baseUrl, "/connector/invoke_paid_service", {
     service_id: selected.service_id,
-    input: intent.input,
+    input: serviceInput,
     budget: {
       max_amount: maxPrice,
       currency
@@ -126,7 +128,7 @@ export async function askAgentRouterRemote({
     ok: true,
     task,
     selected_service: publicSelectedService(selected),
-    input: intent.input,
+    input: serviceInput,
     preview_sample_type: preview.sample_type || null,
     result: invocation.result,
     feedback: invocation.feedback,
@@ -137,6 +139,8 @@ export async function askAgentRouterRemote({
 export function inferIntent(task) {
   const tagMatch = task.match(/matrixport|binance|jump|wintermute|amber|okx|bybit/i);
   const tokenMatch = task.match(/\$?(ETH|BTC|USDC|HYPE|SOL)\b/i);
+  const address = detectAddress(task);
+  const chain = detectChain(task);
   const dynamicTerms = extractDynamicSearchTerms(task);
   const wantsSingle = /一个|一条|任意|first|\bone\b|single/i.test(task);
   const wantsAddress = /地址|钱包|address|wallet/i.test(task);
@@ -152,16 +156,23 @@ export function inferIntent(task) {
   };
   if (tagMatch) input.tag = tagMatch[0];
   if (tokenMatch) input.token = tokenMatch[1].toUpperCase();
+  if (address) {
+    input.address = address;
+    input.chain = chain || "ethereum";
+    input.pagination = { page: 1, per_page: limit };
+    delete input.limit;
+    delete input.offset;
+  }
   if (wantsSmartMoneyHoldings) {
     delete input.limit;
     delete input.offset;
-    input.chains = [detectChain(task) || "ethereum"];
+    input.chains = [chain || "ethereum"];
     input.pagination = { page: 1, per_page: limit };
   }
   if (wantsSmartMoneyNetflow) {
     delete input.limit;
     delete input.offset;
-    input.chains = [detectChain(task) || "ethereum"];
+    input.chains = [chain || "ethereum"];
     input.pagination = { page: 1, per_page: limit };
   }
   if (wantsNetflow) {
@@ -169,7 +180,7 @@ export function inferIntent(task) {
     delete input.offset;
     delete input.token;
     input.asset = tokenMatch ? tokenMatch[1].toUpperCase() : undefined;
-    input.chain = detectChain(task) || chainForAsset(input.asset) || "ethereum";
+    input.chain = chain || chainForAsset(input.asset) || "ethereum";
     input.chains = [input.chain];
     input.window = detectWindow(task) || "24h";
   }
@@ -190,6 +201,8 @@ export function inferIntent(task) {
     has_known_intent: hasKnownIntent,
     dynamic_terms: dynamicTerms,
     tag: input.tag,
+    address,
+    chain: input.chain || chain,
     token: input.token || input.asset,
     input,
     search_queries: [
@@ -201,11 +214,58 @@ export function inferIntent(task) {
       wantsSmartMoneyNetflow ? "smart money netflow" : "",
       wantsNetflow ? `${input.asset || input.chain || ""} netflow` : "",
       wantsNetflow ? "netflow" : "",
+      wantsAddress && address ? `${address} related wallets address profile` : "",
+      wantsAddress ? "related wallets address profile" : "",
       wantsAddress ? "Lookonchain address wallet" : "",
       wantsAddress ? "address wallet" : "",
       wantsAddress ? "wallet_profile" : ""
     ].filter(Boolean)
   };
+}
+
+export function buildServiceAwareInput(intent, manifestOrService = {}) {
+  const sample = manifestOrService.sample_request || {};
+  const schemaProperties = manifestOrService.input_schema?.properties || {};
+  const targetKeys = new Set([
+    ...Object.keys(sample || {}),
+    ...Object.keys(schemaProperties || {})
+  ]);
+  const inferred = intent.input || {};
+  if (!targetKeys.size) return { ...inferred };
+
+  const input = { ...sample };
+  for (const [key, value] of Object.entries(inferred)) {
+    if (value === undefined || value === null) continue;
+    if (targetKeys.has(key)) input[key] = value;
+  }
+
+  if (targetKeys.has("chain") && input.chain == null) {
+    input.chain = inferred.chain || inferred.chains?.[0] || intent.chain;
+  }
+  if (targetKeys.has("chains") && input.chains == null) {
+    const chain = inferred.chain || inferred.chains?.[0] || intent.chain;
+    if (chain) input.chains = [chain];
+  }
+  if (targetKeys.has("address") && input.address == null && intent.address) {
+    input.address = intent.address;
+  }
+  if (targetKeys.has("pagination")) {
+    input.pagination = {
+      ...(sample.pagination || {}),
+      ...(inferred.pagination || {})
+    };
+    const limit = inferred.limit || input.pagination.per_page;
+    input.pagination.page = Number(input.pagination.page || 1);
+    input.pagination.per_page = Number(limit || 5);
+  }
+  if (targetKeys.has("limit") && input.limit == null && inferred.pagination?.per_page) {
+    input.limit = inferred.pagination.per_page;
+  }
+  if (targetKeys.has("offset") && input.offset == null) {
+    input.offset = inferred.offset || 0;
+  }
+
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== null));
 }
 
 function extractDynamicSearchTerms(task) {
@@ -314,10 +374,14 @@ function intentToCapabilityRequest(intent, { max_price: maxPrice } = {}) {
 
 function detectLimit(task, wantsSingle) {
   if (wantsSingle) return 1;
-  const text = String(task || "");
+  const text = String(task || "").replace(/0x[a-fA-F0-9]{40}/g, " ");
   const match = text.match(/(?:前|top\s*)?(\d{1,3})\s*(?:条|个|rows?|records?|data)?/i);
   if (!match) return 5;
   return Math.max(1, Math.min(100, Number(match[1])));
+}
+
+function detectAddress(task) {
+  return String(task || "").match(/0x[a-fA-F0-9]{40}/)?.[0]?.toLowerCase() || null;
 }
 
 function detectChain(task) {

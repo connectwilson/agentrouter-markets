@@ -1008,6 +1008,47 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
   });
 });
 
+test("AgentRouter builds service-aware input for address profile endpoints", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        title: "Address Related Wallets",
+        provider_name: "Wallet Intel Lab",
+        description_for_agent: "Use this service to fetch related wallets for an EVM address by chain.",
+        capabilities: "data_service,wallet_profile,address_intelligence,related_wallets,wallet_cluster",
+        price: "0.01",
+        sample_request: "{\"address\":\"0x0000000000000000000000000000000000000000\",\"chain\":\"ethereum\",\"pagination\":{\"page\":1,\"per_page\":10}}",
+        sample_data: "{\"data\":[],\"pagination\":{\"page\":1,\"per_page\":10,\"is_last_page\":true}}",
+        live_data: "{\"data\":[{\"address\":\"0x1111111111111111111111111111111111111111\",\"relation\":\"Deployed Contract\"}],\"pagination\":{\"page\":1,\"per_page\":3,\"is_last_page\":true}}",
+        summary: "Related wallet data for address due diligence."
+      })
+    });
+    assert.equal(studioResponse.status, 201);
+
+    const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "查询地址 0xbbfb6566ad064c233af6314aeb1eee4c26a5f921 在 Arbitrum 的 related wallets 前 3 条",
+        max_price: "0.05"
+      })
+    });
+    assert.equal(askResponse.status, 200);
+    const routed = await askResponse.json();
+    assert.equal(routed.ok, true);
+    assert.equal(routed.selected_service.service_id, "address_related_wallets");
+    assert.deepEqual(routed.input, {
+      address: "0xbbfb6566ad064c233af6314aeb1eee4c26a5f921",
+      chain: "arbitrum",
+      pagination: { page: 1, per_page: 3 }
+    });
+    assert.equal(routed.result.data.data[0].relation, "Deployed Contract");
+  });
+});
+
 test("hosted publish requires persistent storage when the deployment requires it", async () => {
   const previousRequired = process.env.ADN_REQUIRE_PERSISTENT_REGISTRY;
   const previousDatabase = process.env.DATABASE_URL;
