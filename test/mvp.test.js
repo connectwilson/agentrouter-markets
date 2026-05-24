@@ -315,6 +315,49 @@ test("AgentRouter capability catalog and structured request route deterministica
   });
 });
 
+test("AgentRouter services endpoint returns paginated lightweight service summaries", async () => {
+  await withServer(async ({ baseUrl }) => {
+    for (let index = 0; index < 3; index += 1) {
+      const response = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          title: `Paged Service ${index}`,
+          provider_name: "Paged Provider",
+          description_for_agent: "Use this service to test paginated agent hub loading.",
+          capabilities: "data_service,paged_demo",
+          price: "0.01",
+          sample_request: "{}",
+          sample_data: JSON.stringify({ records: [{ service: `paged_${index}`, score: index }] }),
+          live_data: JSON.stringify({ records: [{ service: `paged_${index}`, score: index + 100 }] }),
+          summary: "Paged service demo."
+        })
+      });
+      assert.equal(response.status, 201, await response.text());
+    }
+
+    const pageResponse = await fetch(`${baseUrl}/agent-router/services?q=paged&limit=2&offset=0&verified_only=true`);
+    assert.equal(pageResponse.status, 200);
+    const page = await pageResponse.json();
+    assert.equal(page.service_list_version, "agent_router_service_list_v2");
+    assert.equal(page.total, 3);
+    assert.equal(page.limit, 2);
+    assert.equal(page.offset, 0);
+    assert.equal(page.has_more, true);
+    assert.equal(page.services.length, 2);
+    assert.equal(page.services[0].latest_validation, undefined);
+    assert.equal(page.services[0].sample_response, undefined);
+    assert.equal(page.services[0].pre_call_context, undefined);
+
+    const detailResponse = await fetch(`${baseUrl}/agent-router/services?q=paged&include_details=true`);
+    assert.equal(detailResponse.status, 200);
+    const detailPage = await detailResponse.json();
+    assert.equal(detailPage.service_list_version, "agent_router_service_list_v1");
+    assert.ok(detailPage.services[0].sample_response);
+  });
+});
+
 test("AgentRouter quote simulates route and payment guards without invoking provider", async () => {
   await withServer(async ({ baseUrl }) => {
     const response = await fetch(`${baseUrl}/agent-router/quote`, {

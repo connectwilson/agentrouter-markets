@@ -1,7 +1,7 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
-import { createMemoryStore, publicServiceRecord, summarizeRegistryStats } from "./store.js";
+import { createMemoryStore, listServiceSummaries, publicServiceRecord, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
 import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck } from "./registry.js";
@@ -54,14 +54,23 @@ async function routeRequest(req, res, store, baseUrl) {
     const maxPrice = url.searchParams.get("max_price");
     const verifiedOnly = url.searchParams.get("verified_only") === "true";
     const capabilities = url.searchParams.getAll("capability");
-    const records = query || maxPrice || verifiedOnly || capabilities.length
-      ? searchServices(store, { query, capabilities, maxPrice, verifiedOnly })
-      : [...store.services.values()].map((record) => publicServiceRecord(record));
-    sendJson(res, 200, {
-      service_list_version: "agent_router_service_list_v1",
-      count: records.length,
-      services: records
-    });
+    const category = url.searchParams.get("category") || "All";
+    const sort = url.searchParams.get("sort") || "relevance";
+    const limit = url.searchParams.get("limit") || 24;
+    const offset = url.searchParams.get("offset") || 0;
+    const includeDetails = url.searchParams.get("include_details") === "true";
+    if (includeDetails) {
+      const records = query || maxPrice || verifiedOnly || capabilities.length
+        ? searchServices(store, { query, capabilities, maxPrice, verifiedOnly })
+        : [...store.services.values()].map((record) => publicServiceRecord(record));
+      sendJson(res, 200, {
+        service_list_version: "agent_router_service_list_v1",
+        count: records.length,
+        services: records
+      });
+      return;
+    }
+    sendJson(res, 200, listServiceSummaries(store, { query, capabilities, maxPrice, verifiedOnly, category, sort, limit, offset }));
     return;
   }
 

@@ -397,6 +397,11 @@ export function agentHtml() {
                 </div>
               </div>
               <div class="market-grid" id="agent-api-cards"></div>
+              <div class="pager" id="service-pager">
+                <button type="button" id="service-prev">Previous</button>
+                <span id="service-page-status">Page 1</span>
+                <button type="button" id="service-next">Next</button>
+              </div>
             </section>
           </div>
         </div>
@@ -406,8 +411,11 @@ export function agentHtml() {
         const installCommand = ${JSON.stringify(installCommand)};
         const localInstallCommand = ${JSON.stringify(localInstallCommand)};
         const categories = ["All", "Data", "Crypto", "Market Data", "On-chain", "Derivatives", "Wallet"];
-        let latestStats = { services: [] };
+        const pageSize = 24;
+        let servicePage = { services: [], total: 0, limit: pageSize, offset: 0, has_more: false };
         let activeCategory = "All";
+        let currentPage = 0;
+        let searchTimer = null;
         document.getElementById("copy-install-top").addEventListener("click", async () => {
           copyInstallCommand("copy-install-top");
         });
@@ -421,14 +429,32 @@ export function agentHtml() {
             button.textContent = "Select text";
           }
         }
-        document.getElementById("service-search").addEventListener("input", renderAgentHub);
-        document.getElementById("sort-services").addEventListener("change", renderAgentHub);
-        function renderPage(stats) {
-          latestStats = stats;
+        document.getElementById("service-search").addEventListener("input", () => {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => {
+            currentPage = 0;
+            loadAgentServices();
+          }, 180);
+        });
+        document.getElementById("sort-services").addEventListener("change", () => {
+          currentPage = 0;
+          loadAgentServices();
+        });
+        document.getElementById("service-prev").addEventListener("click", () => {
+          if (currentPage <= 0) return;
+          currentPage -= 1;
+          loadAgentServices();
+        });
+        document.getElementById("service-next").addEventListener("click", () => {
+          if (!servicePage.has_more) return;
+          currentPage += 1;
+          loadAgentServices();
+        });
+        function renderPage() {
           const query = new URLSearchParams(location.search).get("q") || "";
           document.getElementById("service-search").value = query;
           renderCategories();
-          renderAgentHub();
+          loadAgentServices();
         }
         function renderCategories() {
           document.getElementById("category-row").innerHTML = categories.map((category) =>
@@ -437,44 +463,42 @@ export function agentHtml() {
           document.querySelectorAll(".category").forEach((button) => {
             button.addEventListener("click", () => {
               activeCategory = button.dataset.category;
+              currentPage = 0;
               renderCategories();
-              renderAgentHub();
+              loadAgentServices();
             });
           });
         }
+        async function loadAgentServices() {
+          const params = new URLSearchParams({
+            q: document.getElementById("service-search").value.trim(),
+            sort: document.getElementById("sort-services").value,
+            category: activeCategory,
+            limit: String(pageSize),
+            offset: String(currentPage * pageSize),
+            verified_only: "true"
+          });
+          document.getElementById("agent-result-count").textContent = "Loading services...";
+          try {
+            const response = await fetch("/agent-router/services?" + params.toString());
+            servicePage = await response.json();
+          } catch {
+            servicePage = { services: [], total: 0, limit: pageSize, offset: 0, has_more: false };
+          }
+          renderAgentHub();
+        }
         function renderAgentHub() {
-          const services = filteredServices();
+          const services = servicePage.services || [];
           document.getElementById("agent-api-cards").innerHTML = services.map((service) => apiCard(service, { link: true })).join("") ||
             '<div class="empty-market">No matching services found.</div>';
-          setText("agent-result-count", services.length + " services match this view");
+          const start = servicePage.total ? Number(servicePage.offset || 0) + 1 : 0;
+          const end = Number(servicePage.offset || 0) + services.length;
+          setText("agent-result-count", servicePage.total ? start + "-" + end + " of " + servicePage.total + " callable services" : "No services match this view");
+          document.getElementById("service-prev").disabled = currentPage <= 0;
+          document.getElementById("service-next").disabled = !servicePage.has_more;
+          document.getElementById("service-page-status").textContent = "Page " + (currentPage + 1);
         }
-        function filteredServices() {
-          const query = document.getElementById("service-search").value.trim().toLowerCase();
-          const sort = document.getElementById("sort-services").value;
-          let services = [...(latestStats.services || [])].filter((service) => {
-            const haystack = [service.title, service.service_id, service.provider_id, service.description_for_agent, ...(service.capabilities || [])].join(" ").toLowerCase();
-            const categoryMatch = activeCategory === "All" || categoryMatches(service, activeCategory);
-            return categoryMatch && (!query || haystack.includes(query));
-          });
-          services.sort((a, b) => {
-            if (sort === "calls") return Number(b.total_calls || 0) - Number(a.total_calls || 0);
-            if (sort === "trust") return Number(b.trust_score || 0) - Number(a.trust_score || 0);
-            if (sort === "price") return Number(a.price || 0) - Number(b.price || 0);
-            return Number(b.trust_score || 0) + Number(b.total_calls || 0) - Number(a.trust_score || 0) - Number(a.total_calls || 0);
-          });
-          return services;
-        }
-        function categoryMatches(service, category) {
-          const text = [service.title, service.description_for_agent, ...(service.capabilities || [])].join(" ").toLowerCase();
-          if (category === "Data") return text.includes("data");
-          if (category === "Crypto") return /crypto|btc|eth|chain|perp/.test(text);
-          if (category === "Market Data") return /market|price|etf|funding/.test(text);
-          if (category === "On-chain") return /onchain|chain|wallet|fund_flow/.test(text);
-          if (category === "Derivatives") return /derivative|perp|liquidation|funding/.test(text);
-          if (category === "Wallet") return /wallet|address/.test(text);
-          return true;
-        }
-        loadStats().then(renderPage);
+        renderPage();
       </script>
     `
   });
@@ -763,6 +787,10 @@ function styles() {
     .market-section-head h2 { margin:0 0 5px; font-size:28px; line-height:1.1; }
     .market-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:18px; }
     .empty-market { border:1px dashed var(--color-strong-line); border-radius:8px; padding:24px; color:var(--color-muted); background:#fff; }
+    .pager { display:flex; justify-content:center; align-items:center; gap:14px; margin:28px 0 4px; }
+    .pager button { border:2px solid var(--color-ink); background:#fff; color:var(--color-ink); min-height:44px; padding:0 18px; font-weight:800; border-radius:0; }
+    .pager button:disabled { border-color:#d7ded8; color:#9aa59d; background:#f6f8f5; cursor:not-allowed; }
+    .pager span { color:var(--color-muted); font-weight:700; min-width:80px; text-align:center; }
     .provider-hero { border:1px solid var(--color-line); border-radius:8px; background:var(--color-panel); padding:32px; }
     .provider-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
     .provider-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; margin-bottom:24px; }

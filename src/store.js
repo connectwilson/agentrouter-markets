@@ -341,6 +341,111 @@ export function summarizeRegistryStats(store) {
   };
 }
 
+export function listServiceSummaries(store, {
+  query = "",
+  capabilities = [],
+  maxPrice,
+  verifiedOnly = false,
+  category = "All",
+  sort = "relevance",
+  limit = 24,
+  offset = 0
+} = {}) {
+  const terms = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const max = maxPrice == null || maxPrice === "" ? null : Number(maxPrice);
+  const normalizedCategory = String(category || "All");
+  const boundedLimit = Math.max(1, Math.min(100, Number(limit) || 24));
+  const boundedOffset = Math.max(0, Number(offset) || 0);
+  const services = [];
+
+  for (const record of store.services.values()) {
+    if (verifiedOnly && record.verification_status !== "verified") continue;
+    const manifest = record.manifest;
+    if (max != null && Number(manifest.pricing?.amount || 0) > max) continue;
+    if (capabilities.length && !capabilities.every((capability) => (manifest.capabilities || []).includes(capability))) continue;
+    if (!serviceCategoryMatches(manifest, normalizedCategory)) continue;
+
+    const haystack = serviceSummaryHaystack(manifest);
+    const matchCount = terms.filter((term) => haystack.includes(term)).length;
+    if (terms.length && matchCount === 0) continue;
+
+    services.push({
+      ...publicServiceSummary(record),
+      match_score: terms.length ? matchCount / terms.length : 1
+    });
+  }
+
+  services.sort((a, b) => compareServiceSummaries(a, b, sort));
+  return {
+    service_list_version: "agent_router_service_list_v2",
+    total: services.length,
+    limit: boundedLimit,
+    offset: boundedOffset,
+    has_more: boundedOffset + boundedLimit < services.length,
+    services: services.slice(boundedOffset, boundedOffset + boundedLimit)
+  };
+}
+
+export function publicServiceSummary(record) {
+  const trust = summarizeTrust(record);
+  const health = summarizeHealth(record);
+  return {
+    service_id: record.manifest.service_id,
+    title: record.manifest.title,
+    description_for_agent: record.manifest.description_for_agent,
+    provider_id: record.manifest.provider.provider_id,
+    capabilities: record.manifest.capabilities || [],
+    price: record.manifest.pricing?.amount || "0",
+    currency: record.manifest.pricing?.currency || "USDC",
+    verification_status: record.verification_status,
+    total_calls: trust.operational_feedback_count,
+    consumer_feedback_count: trust.consumer_feedback_count,
+    trust_score: trust.trust_score,
+    success_rate: trust.success_rate,
+    average_latency_ms: trust.average_latency_ms,
+    estimated_revenue: Number((Number(record.manifest.pricing?.amount || 0) * trust.operational_feedback_count).toFixed(8)),
+    health_status: health.status,
+    source_provenance_level: summarizeProvenance(record).source_provenance_level,
+    created_at: record.created_at || null,
+    updated_at: record.updated_at || null
+  };
+}
+
+function compareServiceSummaries(a, b, sort) {
+  if (sort === "calls") return Number(b.total_calls || 0) - Number(a.total_calls || 0);
+  if (sort === "trust") return Number(b.trust_score || 0) - Number(a.trust_score || 0);
+  if (sort === "price") return Number(a.price || 0) - Number(b.price || 0);
+  return (
+    Number(b.match_score || 0) - Number(a.match_score || 0) ||
+    Number(b.trust_score || 0) - Number(a.trust_score || 0) ||
+    Number(b.total_calls || 0) - Number(a.total_calls || 0)
+  );
+}
+
+function serviceSummaryHaystack(manifest) {
+  return [
+    manifest.service_id,
+    manifest.title,
+    manifest.description_for_agent,
+    ...(manifest.capabilities || []),
+    manifest.agent_contract?.summary,
+    manifest.agent_contract?.request_shape_summary,
+    manifest.agent_contract?.response_shape_summary
+  ].join(" ").toLowerCase();
+}
+
+function serviceCategoryMatches(manifest, category) {
+  if (!category || category === "All") return true;
+  const text = [manifest.title, manifest.description_for_agent, ...(manifest.capabilities || [])].join(" ").toLowerCase();
+  if (category === "Data") return text.includes("data");
+  if (category === "Crypto") return /crypto|btc|eth|chain|perp|nansen/.test(text);
+  if (category === "Market Data") return /market|price|etf|funding|ohlcv/.test(text);
+  if (category === "On-chain") return /onchain|chain|wallet|fund[_\s-]?flow|smart[_\s-]?money/.test(text);
+  if (category === "Derivatives") return /derivative|perp|liquidation|funding|options/.test(text);
+  if (category === "Wallet") return /wallet|address|profiler/.test(text);
+  return true;
+}
+
 function summarizeProviders(services) {
   const providers = new Map();
   for (const service of services) {
