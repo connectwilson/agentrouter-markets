@@ -1028,6 +1028,24 @@ test("AgentRouter builds service-aware input for address profile endpoints", asy
     });
     assert.equal(studioResponse.status, 201);
 
+    const distractorResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        title: "Address Points Leaderboard",
+        provider_name: "Wallet Intel Lab",
+        description_for_agent: "Use this service to fetch points leaderboard rows for addresses.",
+        capabilities: "data_service,wallet_profile,leaderboard_data,points",
+        price: "0.01",
+        sample_request: "{\"address\":\"0x0000000000000000000000000000000000000000\",\"pagination\":{\"page\":1,\"per_page\":10}}",
+        sample_data: "{\"results\":[],\"page\":1}",
+        live_data: "{\"results\":[{\"address\":\"0x2222222222222222222222222222222222222222\",\"rank\":1}],\"page\":1}",
+        summary: "Address points leaderboard."
+      })
+    });
+    assert.equal(distractorResponse.status, 201);
+
     const askResponse = await fetch(`${baseUrl}/agent-router/ask`, {
       method: "POST",
       headers: { "content-type": "application/json" },

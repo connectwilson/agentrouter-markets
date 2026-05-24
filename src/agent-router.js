@@ -144,6 +144,7 @@ export function inferIntent(task) {
   const dynamicTerms = extractDynamicSearchTerms(task);
   const wantsSingle = /一个|一条|任意|first|\bone\b|single/i.test(task);
   const wantsAddress = /地址|钱包|address|wallet/i.test(task);
+  const wantsRelatedWallets = /related[\s_-]?wallets?|关联钱包|相关钱包|wallet[\s_-]?cluster|cluster/i.test(task);
   const wantsLiquidation = /爆仓|清算|liquidation|max[\s-]?pain/i.test(task);
   const wantsSmartMoneyHoldings = /smart[\s_-]?money/i.test(task) && /holdings?|持仓/i.test(task);
   const wantsSmartMoneyNetflow = /smart[\s_-]?money/i.test(task) && /net[\s_-]?flow|netflow|净流入|净流出|资金流/i.test(task);
@@ -194,6 +195,7 @@ export function inferIntent(task) {
   return {
     task,
     wants_address: wantsAddress,
+    wants_related_wallets: wantsRelatedWallets,
     wants_liquidation: wantsLiquidation,
     wants_smart_money_holdings: wantsSmartMoneyHoldings,
     wants_smart_money_netflow: wantsSmartMoneyNetflow,
@@ -216,6 +218,7 @@ export function inferIntent(task) {
       wantsNetflow ? "netflow" : "",
       wantsAddress && address ? `${address} related wallets address profile` : "",
       wantsAddress ? "related wallets address profile" : "",
+      wantsRelatedWallets ? "wallet cluster related wallets" : "",
       wantsAddress ? "Lookonchain address wallet" : "",
       wantsAddress ? "address wallet" : "",
       wantsAddress ? "wallet_profile" : ""
@@ -451,8 +454,10 @@ export function selectService(candidates, intent) {
     const haystack = serviceSearchHaystack(service);
     let score = service.match_score || 0;
     if (intent.wants_address && /address|wallet/.test(haystack)) score += 3;
+    if (intent.wants_related_wallets && /related[\s_-]?wallets?|wallet[\s_-]?cluster|cluster/.test(haystack)) score += 6;
     if (intent.wants_liquidation && /liquidation|max pain|max-pain|derivatives|perp/.test(haystack)) score += 4;
     if ((intent.wants_netflow || intent.wants_smart_money_netflow) && /net[\s_-]?flow|netflow|净流入|净流出/.test(haystack)) score += 4;
+    if (intent.wants_related_wallets && /leaderboard|ranking|rank|points/.test(haystack)) score -= 4;
     if (intent.wants_address && (/^list/.test(service.service_id) || /listlookonchainaddresses/.test(service.service_id))) score += 2;
     if (/getlookonchainaddress/.test(service.service_id) && !intent.input.address) score -= 2;
     if (/lookonchain/.test(haystack)) score += 1;
