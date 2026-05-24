@@ -1660,6 +1660,124 @@ test("Provider Studio generates routing-rich endpoint summaries and tags", async
   }
 });
 
+test("Provider Studio preserves text around angle brackets in HTML docs", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/api/overview") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><a href="/api/research-fast">Research Fast</a>`);
+      return;
+    }
+    if (req.url === "/api/research-fast") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><main>
+        <h1>Interact with the Nansen Research Agent in "fast" mode</h1>
+        <p>https://api.example.com/api/v1/agent/fast</p>
+        <p>Ask the Nansen AI agent a research question and receive a streamed answer backed by on-chain data. The **fast** variant uses quick mode.</p>
+        <p>Use text like value < string and ask a question.</p>
+        <pre>POST /api/v1/agent/fast HTTP/1.1
+Host: api.example.com
+apiKey: YOUR_API_KEY
+Content-Type: application/json
+{"text":"What are ETH smart money flows?","conversation_id":"abc"}</pre>
+        <pre>{"data":{"answer":"example"}}</pre>
+      </main>`);
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/api/overview`,
+      default_price: "0.01",
+      provider_name: "Example Data"
+    }, baseUrl);
+    assert.equal(discovered.ok, true);
+    const draft = discovered.drafts[0];
+    assert.match(draft.summary, /Nansen Research Agent/);
+    assert.match(draft.summary, /Ask the Nansen AI agent a research question/);
+    assert.equal(draft.summary.includes("Nan en"), false);
+    assert.equal(draft.summary.includes("fa t"), false);
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+test("Provider Studio uses endpoint-local signals for capabilities", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/api/overview") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        openapi: "3.0.0",
+        servers: [{ url: "https://api.example.com" }],
+        paths: {
+          "/api/v1/agent/fast": {
+            post: {
+              summary: "Interact with the Nansen Research Agent in fast mode",
+              description: "Ask a research question and receive an answer backed by on-chain data and token context.",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        text: { type: "string" },
+                        conversation_id: { type: "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              responses: { 200: { content: { "application/json": { example: { data: { answer: "ok" } } } } } }
+            }
+          },
+          "/api/v1/tgm/transfers": {
+            post: {
+              summary: "Get Token God Mode transfers data",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        chain: { type: "string" },
+                        token_address: { type: "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              responses: { 200: { content: { "application/json": { example: { data: [{ tx_hash: "0x1" }] } } } } }
+            }
+          }
+        }
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/api/overview`,
+      default_price: "0.01",
+      provider_name: "Example Data"
+    }, baseUrl);
+    const agent = discovered.drafts.find((draft) => draft.path === "/api/v1/agent/fast");
+    const transfers = discovered.drafts.find((draft) => draft.path === "/api/v1/tgm/transfers");
+    assert.ok(agent);
+    assert.ok(transfers);
+    assert.ok(transfers.capabilities.includes("token_transfers"));
+    assert.equal(agent.capabilities.includes("token_transfers"), false);
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {
   await withServer(async ({ baseUrl }) => {
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {

@@ -522,11 +522,8 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
   });
   const capabilities = suggestCapabilities(capabilityTextFor({
     title,
-    description,
-    summary,
     routePath: decodedRoutePath,
-    sampleRequest,
-    previewData
+    sampleRequest
   }));
 
   return {
@@ -566,7 +563,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
     provider_name: providerTitle,
     title,
     description_for_agent: description,
-    capabilities: suggestCapabilities(`${title} ${description} ${routePath}`).split(","),
+    capabilities: suggestCapabilities(capabilityTextFor({ title, routePath, sampleRequest })).split(","),
     price: defaultPrice,
     method: method.toUpperCase(),
     path: routePath,
@@ -597,7 +594,7 @@ function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, provi
     baseDescription: endpoint.description,
     sourceTitle: skillTitle
   });
-  const capabilities = suggestCapabilities(`${title} ${description} ${routePath}`).split(",");
+  const capabilities = suggestCapabilities(capabilityTextFor({ title, routePath, sampleRequest })).split(",");
   return {
     selected: true,
     service_id: normalizeId(endpoint.operationId, title, "service"),
@@ -655,7 +652,7 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
     provider_name: providerTitle,
     title,
     description_for_agent: description,
-    capabilities: suggestCapabilities(capabilityTextFor({ title, description, summary, routePath, sampleRequest, previewData })).split(","),
+    capabilities: suggestCapabilities(capabilityTextFor({ title, routePath, sampleRequest })).split(","),
     price: defaultPrice,
     method,
     path: routePath,
@@ -686,14 +683,11 @@ function agentDescription({ title, providerTitle, method, routePath, sampleReque
   return `Returns ${title} data from ${providerTitle} via ${String(method).toUpperCase()} ${routePath}.${paramText}${sourceText}`;
 }
 
-function capabilityTextFor({ title, description, summary, routePath, sampleRequest, previewData }) {
+function capabilityTextFor({ title, routePath, sampleRequest }) {
   return [
     title,
-    description,
-    summary,
     routePath,
-    Object.keys(sampleRequest || {}).join(" "),
-    responseKeys(previewData, 12).join(" ")
+    Object.keys(sampleRequest || {}).join(" ")
   ].filter(Boolean).join(" ");
 }
 
@@ -1179,7 +1173,7 @@ function htmlToText(html) {
     .replace(/<h4[^>]*>/gi, "\n#### ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h\d|pre|code|tr)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<\/?[a-z][a-z0-9:-]*(?:\s+[^<>]*)?>/gi, " ")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&")
