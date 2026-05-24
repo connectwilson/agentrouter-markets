@@ -196,7 +196,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     .divider { height: 1px; background: var(--color-line); margin: 20px 0; }
     .draft-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0 6px; }
     .draft-list { display: grid; gap: 12px; margin: 14px 0; }
-    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 104px 122px 126px; gap: 12px; align-items: start; border: 1px solid var(--color-line); border-radius: 8px; padding: 16px; background: #fff; transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
+    .draft-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 104px 122px 126px; gap: 12px; align-items: start; border: 1px solid var(--color-line); border-radius: 8px; padding: 18px; background: #fff; transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
     .draft-row:hover { border-color: var(--color-strong-line); transform: translateY(-1px); box-shadow: 0 10px 22px rgba(23, 32, 26, .06); }
     .draft-row.selected { border-color: #81b7a7; background: #f4fbf8; }
     .draft-row.published { border-color: #cbd8d1; background: #f5f7f5; opacity: 0.78; }
@@ -204,6 +204,12 @@ export function studioHtml({ draft, loadedService } = {}) {
     .draft-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 4px; }
     .draft-title { font-weight: 790; overflow-wrap: anywhere; font-size: 16px; }
     .draft-meta { color: var(--color-muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+    .draft-review { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 12px; padding: 12px; border: 1px solid #e3e7e4; border-radius: 8px; background: rgba(255,255,255,.82); }
+    .draft-review-item { min-width: 0; display: grid; gap: 3px; }
+    .draft-review-item b { color: #6b7370; font-size: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: .04em; }
+    .draft-review-item span { color: var(--color-ink); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .draft-review-item code { font-size: 11px; color: #28342d; background: #f2f5f2; border: 1px solid #e2e7e3; border-radius: 5px; padding: 2px 4px; overflow-wrap: anywhere; }
+    .draft-review-item.full { grid-column: 1 / -1; }
     .draft-contract { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
     .draft-chip { display:inline-flex; align-items:center; border:1px solid #d7ded9; background:#fff; border-radius:999px; padding:3px 8px; color:#516158; font-size:11px; font-weight:650; }
     .draft-chip.ready { border-color:#afe9bb; background:#f2fff4; color:#174d24; }
@@ -243,6 +249,7 @@ export function studioHtml({ draft, loadedService } = {}) {
       .output { position: static; }
       .grid, .quick-grid, .hero-points, .step-strip { grid-template-columns: 1fr; }
       .draft-row { grid-template-columns: 28px minmax(0, 1fr); }
+      .draft-review { grid-template-columns: 1fr; }
       .draft-price, .mini-button { grid-column: 2; }
       .nav-links { display: none; }
       h1 { font-size: 36px; }
@@ -845,6 +852,7 @@ export function studioHtml({ draft, loadedService } = {}) {
         '<div class="draft-title">' + escapeHtml(draft.title || draft.service_id) + "</div>",
         '<div class="draft-meta">' + escapeHtml(draft.method || "GET") + " " + escapeHtml(draft.path || draft.upstream_url || "") + "</div>",
         '<div class="draft-meta">' + escapeHtml((draft.capabilities || []).join(", ")) + "</div>",
+        '<div class="draft-review">' + draftReviewItems(draft) + '</div>',
         '<div class="draft-contract">' + draftContractChips(draft) + '</div>',
         '<span class="draft-badge">' + draftBadge(draft) + "</span>",
         draft.publish_error ? '<div class="draft-error">' + escapeHtml(publishFailureReason(draft.publish_error)) + '</div>' : "",
@@ -861,6 +869,67 @@ export function studioHtml({ draft, loadedService } = {}) {
         '<button type="button" class="mini-button use-draft" ' + (draft.published ? "disabled" : "") + ">" + (draft.published ? "Verified" : "Edit Details") + "</button>",
         "</div>"
       ].join("")).join("");
+    }
+
+    function draftReviewItems(draft) {
+      const summary = compactText(draft.summary || draft.description_for_agent || "No summary generated yet.", 180);
+      return [
+        draftReviewItem("Service ID", '<code>' + escapeHtml(draft.service_id || "-") + '</code>'),
+        draftReviewItem("Upstream", '<code>' + escapeHtml(draft.upstream_url || draft.path || "-") + '</code>'),
+        draftReviewItem("Auth", escapeHtml(draftAuthSummary(draft))),
+        draftReviewItem("Input", escapeHtml(draftInputSummary(draft))),
+        draftReviewItem("Response", escapeHtml(draftResponseSummary(draft))),
+        draftReviewItem("Source", escapeHtml(draftSourceLabel(draft))),
+        draftReviewItem("Agent summary", escapeHtml(summary), true)
+      ].join("");
+    }
+
+    function draftReviewItem(label, value, full = false) {
+      return '<div class="draft-review-item ' + (full ? "full" : "") + '"><b>' + escapeHtml(label) + '</b><span>' + value + '</span></div>';
+    }
+
+    function draftAuthSummary(draft) {
+      const header = draft.auth_header || "";
+      if (header === "auto") return "auto-detect";
+      if (header) return "header: " + header;
+      return draft.secret_value ? "auto-detect" : "none";
+    }
+
+    function draftInputSummary(draft) {
+      const keys = Object.keys(draft.sample_request || {});
+      if (!keys.length) return "no input";
+      return keys.slice(0, 6).join(", ") + (keys.length > 6 ? " +" + (keys.length - 6) : "");
+    }
+
+    function draftResponseSummary(draft) {
+      const shape = draft.data_contract?.response?.preview_shape || shapeForPreview(draft.preview_data);
+      if (Array.isArray(shape)) return "array" + (shape[0] && typeof shape[0] === "object" ? ": " + Object.keys(shape[0]).slice(0, 5).join(", ") : "");
+      if (shape && typeof shape === "object") {
+        const keys = Object.keys(shape);
+        return keys.length ? keys.slice(0, 6).join(", ") + (keys.length > 6 ? " +" + (keys.length - 6) : "") : "object";
+      }
+      return String(shape || "unknown");
+    }
+
+    function shapeForPreview(value) {
+      if (Array.isArray(value)) return value.length ? [shapeForPreview(value[0])] : [];
+      if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).slice(0, 8).map(([key, child]) => [key, shapeForPreview(child)]));
+      }
+      return value === null ? "null" : typeof value;
+    }
+
+    function draftSourceLabel(draft) {
+      if (draft.source_type === "api_docs_import") return "API docs";
+      if (draft.source_type === "skill_import") return "Skill";
+      if (draft.source_type === "direct_endpoint") return "Direct endpoint";
+      if (draft.discovery_note) return draft.discovery_note.includes("direct") ? "Direct endpoint" : "Generated";
+      return "OpenAPI";
+    }
+
+    function compactText(value, maxLength) {
+      const text = String(value || "").replace(/\s+/g, " ").trim();
+      return text.length > maxLength ? text.slice(0, maxLength - 1) + "…" : text;
     }
 
     function draftRowClass(draft) {
