@@ -871,6 +871,7 @@ function styles() {
     .byline { display:flex; justify-content:space-between; gap:12px; margin-top:18px; color:var(--color-muted); font-size:14px; }
     .stat-row { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
     .stat-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--color-line); border-radius:8px; background:#fff; color:#667085; padding:8px 11px; font-weight:730; }
+    .stat-pill b { color:var(--color-ink); font-weight:800; }
     .pill-row { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
     .pill { display:inline-flex; border:1px solid #d5dde5; border-radius:999px; background:#fff; color:#475467; padding:3px 7px; font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .detail-link { display:inline-flex; margin-top:16px; color:var(--color-ink); font-size:12px; font-weight:780; text-transform:uppercase; }
@@ -946,10 +947,10 @@ function serviceClientScript() {
               <p>\${escapeHtml(truncate(description, 106))}</p>
               <div class="byline"><span>By \${escapeHtml(service.provider_id || "provider")}</span><span>Updated now</span></div>
               <div class="stat-row">
-                <span class="stat-pill">↗ \${formatRating(service.trust_score)}</span>
-                <span class="stat-pill">◷ \${service.total_calls ? service.total_calls + " calls" : "MVP"}</span>
-                <span class="stat-pill">◌ \${service.verification_status === "verified" ? "99%" : "test"}</span>
-                <span class="stat-pill">\${formatUsdc(Number(service.price || 0))} \${escapeHtml(service.currency || "USDC")}</span>
+                <span class="stat-pill"><b>Price</b> \${formatUsdc(Number(service.price || 0))} \${escapeHtml(service.currency || "USDC")}</span>
+                <span class="stat-pill"><b>Calls</b> \${formatCount(service.total_calls)}</span>
+                <span class="stat-pill"><b>Success</b> \${formatSuccessRate(service.success_rate)}</span>
+                <span class="stat-pill"><b>Trust</b> \${formatRating(service.trust_score)}</span>
               </div>
               <div class="pill-row">\${renderPills(service.capabilities || [])}</div>
               \${options.human ? '<div class="actions"><a class="button ghost" href="/studio?service_id=' + encodeURIComponent(service.service_id) + '">Edit</a><a class="button" href="/agent-router/service?service_id=' + encodeURIComponent(service.service_id) + '">Details</a></div>' : '<span class="detail-link">View service details</span>'}
@@ -967,6 +968,16 @@ function serviceClientScript() {
     function formatRating(value) {
       if (value == null) return "--";
       return Math.min(10, Math.max(0, Number(value) * 10)).toFixed(1);
+    }
+    function formatSuccessRate(value) {
+      if (value == null || Number.isNaN(Number(value))) return "--";
+      return Math.round(Math.max(0, Math.min(1, Number(value))) * 100) + "%";
+    }
+    function formatCount(value) {
+      const count = Number(value || 0);
+      if (count >= 1000000) return (count / 1000000).toFixed(1).replace(/\\.0$/, "") + "M";
+      if (count >= 1000) return (count / 1000).toFixed(1).replace(/\\.0$/, "") + "K";
+      return String(count);
     }
     function initials(value) {
       return String(value || "API").split(/\\s|_|-/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "API";
