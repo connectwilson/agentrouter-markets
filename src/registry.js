@@ -1,4 +1,4 @@
-import { createDevPaymentProof } from "./payment.js";
+import { createArcPaymentProof } from "./payment.js";
 import { validateEnvelope, validateJsonSchema } from "./schema.js";
 import { publicServiceRecord, summarizeTrust } from "./store.js";
 import { normalizeEndpoint } from "./http-utils.js";
@@ -7,7 +7,8 @@ import { createSettlementReceipt } from "./payment-adapter.js";
 import { normalizeConsumerFeedback, verifyServiceResult } from "./verifier.js";
 import { listPersistentServiceEvents, writePersistentServiceEvent } from "./persistence.js";
 import { readProviderConfig, writeProviderConfig } from "./provider-config.js";
-import { isEvmAddress } from "./arc-payment.js";
+import { assertArcUsdcBalance, sendArcUsdcTransfer, isEvmAddress } from "./arc-payment.js";
+import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -162,13 +163,11 @@ export async function validateService(store, serviceId) {
   }
 
   const paymentChallenge = await firstResponse.json();
-  const proof = createDevPaymentProof({
+  const proof = await createArcProofForProviderChallenge({
     serviceId,
-    amount: paymentChallenge.payment.amount,
-    currency: paymentChallenge.payment.asset,
-    network: paymentChallenge.payment.network,
-    challenge: paymentChallenge.payment,
-    payer: "validator"
+    manifest,
+    payment: paymentChallenge.payment,
+    consumerId: "validator"
   });
 
   const paidResponse = await fetch(manifest.endpoint.url, {
@@ -268,12 +267,11 @@ export async function invokePaidService(store, serviceId, input, budget) {
     return { statusCode: 502, body: { error: { code: "EXPECTED_402_PAYMENT_REQUIRED" } } };
   }
   const challenge = await firstResponse.json();
-  const proof = createDevPaymentProof({
+  const proof = await createArcProofForProviderChallenge({
     serviceId,
-    amount: challenge.payment.amount,
-    currency: challenge.payment.asset,
-    network: challenge.payment.network,
-    challenge: challenge.payment
+    manifest,
+    payment: challenge.payment,
+    consumerId: "consumer_demo_agent"
   });
   const paidResponse = await fetch(manifest.endpoint.url, {
     method: manifest.endpoint.method || "POST",
@@ -353,6 +351,59 @@ export async function invokePaidService(store, serviceId, input, budget) {
       feedback
     }
   };
+}
+
+async function createArcProofForProviderChallenge({ serviceId, manifest, payment, consumerId }) {
+  const wallet = await readWallet();
+  const policyManifest = {
+    ...manifest,
+    pricing: {
+      ...manifest.pricing,
+      network: payment.network,
+      token_address: payment.token_address,
+      pay_to: payment.pay_to,
+      settlement_model: payment.settlement_model
+    }
+  };
+  await assertPolicyAllows({
+    serviceId,
+    amount: payment.amount,
+    currency: payment.asset,
+    network: payment.network,
+    payTo: payment.pay_to,
+    providerId: manifest.provider.provider_id,
+    manifest: policyManifest,
+    challenge: payment
+  });
+  const balance = await assertArcUsdcBalance({ wallet, payment });
+  const tx = await sendArcUsdcTransfer({ wallet, payment });
+  const proof = createArcPaymentProof({
+    wallet,
+    serviceId,
+    amount: payment.amount,
+    currency: payment.asset,
+    network: payment.network,
+    payTo: payment.pay_to,
+    challenge: payment,
+    tx
+  });
+  await recordPayment({
+    event_version: "agent_server_side_arc_payment_event_v1",
+    service_id: serviceId,
+    provider_id: manifest.provider.provider_id,
+    consumer_id: consumerId,
+    payer: wallet.address,
+    payment_tx: tx.tx_hash,
+    amount: payment.amount,
+    currency: payment.asset,
+    network: payment.network,
+    pay_to: payment.pay_to,
+    challenge_nonce: payment.nonce,
+    balance_before_payment: balance,
+    arc_transfer: tx,
+    status: "success"
+  });
+  return proof;
 }
 
 export async function runServiceHealthCheck(store, serviceId) {

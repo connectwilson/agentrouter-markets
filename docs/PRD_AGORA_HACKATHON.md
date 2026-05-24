@@ -78,7 +78,7 @@ Main Agent
   -> AgentRouter
   -> service discovery
   -> provider selection
-  -> USDC payment on Arc / Arc-compatible dev payment
+  -> verified USDC payment on Arc
   -> market data provider
   -> agent_data_envelope_v1 result
   -> verification + evidence envelope + feedback event
@@ -534,8 +534,8 @@ Quote response:
   "quote": {
     "quote_version": "agent_router_payment_quote_v1",
     "payment_backend": {
-      "backend": "dev",
-      "real_settlement": false
+      "backend": "circle_arc",
+      "real_settlement": true
     },
     "pricing": {
       "amount": "0.02",

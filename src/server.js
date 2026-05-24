@@ -280,7 +280,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/connector/invoke_paid_service") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed(baseUrl)) {
+    if (!localServerPaidInvocationsAllowed(baseUrl)) {
       const blocked = paymentRequiredForService(store, body.service_id, body.input || {}, body.budget || {});
       sendJson(res, blocked.statusCode, blocked.body);
       return;
@@ -292,7 +292,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/router/route") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed(baseUrl)) {
+    if (!localServerPaidInvocationsAllowed(baseUrl)) {
       const resolved = resolveRoute(store, body);
       sendJson(res, 200, routePaymentRequired(resolved, body));
       return;
@@ -321,7 +321,7 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/agent-router/request") {
     const body = await readJson(req);
-    if (!serverSideDevPaymentsAllowed(baseUrl)) {
+    if (!localServerPaidInvocationsAllowed(baseUrl)) {
       const result = quoteCapabilityRequest(store, body);
       sendJson(res, result.ok === false && result.status === "invalid_request" ? 422 : 200, requestPaymentRequired(result));
       return;
@@ -344,7 +344,7 @@ async function routeRequest(req, res, store, baseUrl) {
       task: body.task || body.query || "",
       max_price: body.max_price || body.maxPrice || "0.05",
       currency: body.currency || "USDC",
-      invoke: serverSideDevPaymentsAllowed(baseUrl)
+      invoke: localServerPaidInvocationsAllowed(baseUrl)
     });
     sendJson(res, 200, result);
     return;
@@ -500,8 +500,7 @@ async function routeRequest(req, res, store, baseUrl) {
   sendNotFound(res, "ROUTE_NOT_FOUND");
 }
 
-function serverSideDevPaymentsAllowed(baseUrl) {
-  if (process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS !== "1") return false;
+function localServerPaidInvocationsAllowed(baseUrl) {
   try {
     const hostname = new URL(baseUrl).hostname;
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -573,7 +572,7 @@ function paymentRequiredForService(store, serviceId, input = {}, budget = {}) {
         would_pay: allowed
       },
       next_step: allowed
-        ? "Call the provider endpoint with a valid x402/Arc payment proof. Server-side dev payment is disabled for this public connector."
+        ? "Call the provider endpoint with a valid x402/Arc payment proof. Public connectors never return paid data without a verified payment."
         : "Increase the max_price budget or choose a lower-cost service."
     }
   };

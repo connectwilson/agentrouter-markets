@@ -1,7 +1,7 @@
 export function getX402ProductionPlan() {
   return {
     status: "buyer_client_integrated_arc_direct_settlement_available",
-    current_mode: process.env.ADN_PAYMENT_MODE || "dev",
+    current_mode: process.env.ADN_PAYMENT_BACKEND || process.env.ADN_PAYMENT_MODE || "circle_arc",
     target_packages: [
       "@x402/core",
       "@x402/evm",
@@ -19,7 +19,7 @@ export function getX402ProductionPlan() {
       "This is the current Agora demo path until an official x402 facilitator supports the target Arc environment."
     ],
     seller_side: [
-      "Next step: replace provider-side verifyDevPaymentProof with official x402 resource-server middleware or facilitator /verify and /settle calls.",
+      "Next step: replace the local Arc proof verifier with official x402 resource-server middleware or facilitator /verify and /settle calls when Arc-compatible facilitator support is available.",
       "Set provider receiving wallet from manifest or ADN_PROVIDER_RECEIVE_ADDRESS.",
       "Return official x402 payment requirements in HTTP 402 responses.",
       "Only serve the resource after facilitator verification/settlement succeeds."

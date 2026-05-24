@@ -74,7 +74,10 @@ export async function readWallet() {
   if (walletFile.private_key_pem) {
     return walletFile;
   }
-  const privateKey = decryptPrivateKey(walletFile.encrypted_private_key, getWalletPassphrase());
+  const passphrase = walletFile.key_management === "local_session_secret"
+    ? getSessionWalletPassphrase()
+    : getWalletPassphrase();
+  const privateKey = decryptPrivateKey(walletFile.encrypted_private_key, passphrase);
   return {
     wallet_version: walletFile.wallet_version,
     address_type: walletFile.address_type || "evm",
@@ -249,6 +252,14 @@ function getWalletPassphrase() {
   }
   if (passphrase.length < 8) {
     throw new Error("ADN_WALLET_PASSPHRASE must be at least 8 characters.");
+  }
+  return passphrase;
+}
+
+function getSessionWalletPassphrase() {
+  const passphrase = readSessionPassphraseSync();
+  if (!passphrase) {
+    throw new Error("Local AgentRouter session wallet secret is required to unlock the local session wallet.");
   }
   return passphrase;
 }

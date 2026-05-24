@@ -1,10 +1,9 @@
 import crypto from "node:crypto";
 import { ARC_TESTNET, ARC_USDC_ADDRESS, isArcNetwork } from "./arc-payment.js";
 import { deriveAddress } from "./wallet.js";
+import { currentPaymentBackend } from "./payment-adapter.js";
 
-export const PAYMENT_MODE = process.env.ADN_PAYMENT_MODE || "dev";
 export const DEFAULT_FACILITATOR_URL = process.env.ADN_X402_FACILITATOR_URL || "https://x402.org/facilitator";
-export const DEV_PAYMENT_SECRET = "adn-dev-x402-secret";
 
 export function createPaymentRequirements({ serviceId, amount, currency = "USDC", network = "base", payTo }) {
   const issuedAt = new Date();
@@ -13,8 +12,8 @@ export function createPaymentRequirements({ serviceId, amount, currency = "USDC"
   const resolvedPayTo = payTo || process.env.ADN_PROVIDER_RECEIVE_ADDRESS || "0xProviderDemoWallet000000000000000000000000";
   const arc = isArcNetwork(network);
   return {
-    x402_version: PAYMENT_MODE === "real" ? "x402-v1" : "dev-x402-v1",
-    payment_mode: PAYMENT_MODE,
+    x402_version: arc ? "arc-x402-v1" : "x402-v1",
+    payment_mode: currentPaymentBackend(),
     scheme: "exact",
     network: arc ? "arc-testnet" : network,
     caip2: arc ? ARC_TESTNET.caip2 : undefined,
@@ -33,48 +32,6 @@ export function createPaymentRequirements({ serviceId, amount, currency = "USDC"
     settlement_model: arc ? "direct_provider_wallet" : "provider_challenge",
     expires_in_seconds: expiresInSeconds
   };
-}
-
-export function createDevPaymentProof({ serviceId, amount, currency = "USDC", network = "base", payer = "consumer-demo-agent", challenge }) {
-  const issuedAt = new Date().toISOString();
-  const payload = {
-    x402_version: "dev-x402-v1",
-    service_id: serviceId,
-    amount,
-    currency,
-    network,
-    pay_to: challenge?.pay_to,
-    challenge_nonce: challenge?.nonce,
-    challenge_expires_at: challenge?.expires_at,
-    resource_hash: challenge?.resource_hash,
-    payer,
-    issued_at: issuedAt,
-    tx_hash: `0x${crypto.randomBytes(32).toString("hex")}`
-  };
-  const signature = signPayload(payload);
-  return Buffer.from(JSON.stringify({ ...payload, signature })).toString("base64url");
-}
-
-export function createWalletPaymentProof({ wallet, serviceId, amount, currency = "USDC", network = "base", payTo, challenge }) {
-  const issuedAt = new Date().toISOString();
-  const payload = {
-    x402_version: "dev-x402-v1",
-    payment_kind: "wallet_signed",
-    service_id: serviceId,
-    amount,
-    currency,
-    network,
-    pay_to: payTo,
-    challenge_nonce: challenge?.nonce,
-    challenge_expires_at: challenge?.expires_at,
-    resource_hash: challenge?.resource_hash,
-    payer: wallet.address,
-    public_key_pem: wallet.public_key_pem,
-    issued_at: issuedAt,
-    tx_hash: `0x${crypto.randomBytes(32).toString("hex")}`
-  };
-  const signature = crypto.createSign("SHA256").update(canonicalPayload(payload)).end().sign(wallet.private_key_pem, "hex");
-  return Buffer.from(JSON.stringify({ ...payload, signature })).toString("base64url");
 }
 
 export function createArcPaymentProof({ wallet, serviceId, amount, currency = "USDC", network = "arc-testnet", payTo, challenge, tx }) {
@@ -104,7 +61,7 @@ export function createArcPaymentProof({ wallet, serviceId, amount, currency = "U
   return Buffer.from(JSON.stringify({ ...payload, signature })).toString("base64url");
 }
 
-export function verifyDevPaymentProof(proof, expected) {
+export function verifyPaymentProof(proof, expected) {
   if (!proof || typeof proof !== "string") {
     return { ok: false, error: "MISSING_PAYMENT_PROOF" };
   }
@@ -120,35 +77,7 @@ export function verifyDevPaymentProof(proof, expected) {
   if (payload.payment_kind === "arc_usdc_transfer") {
     return verifyArcPaymentPayload({ payload, signature, expected, decoded });
   }
-  if (payload.payment_kind === "wallet_signed") {
-    return verifyWalletPaymentPayload({ payload, signature, expected, decoded });
-  }
-
-  if (!signature || signature !== signPayload(payload)) {
-    return { ok: false, error: "INVALID_PAYMENT_SIGNATURE" };
-  }
-
-  if (payload.service_id !== expected.serviceId) {
-    return { ok: false, error: "PAYMENT_SERVICE_MISMATCH" };
-  }
-
-  if (String(payload.amount) !== String(expected.amount) || payload.currency !== expected.currency || payload.network !== expected.network) {
-    return { ok: false, error: "PAYMENT_AMOUNT_MISMATCH" };
-  }
-
-  if (expected.payTo && payload.pay_to !== expected.payTo) {
-    return { ok: false, error: "PAYMENT_TARGET_MISMATCH" };
-  }
-
-  if (expected.nonce && payload.challenge_nonce !== expected.nonce) {
-    return { ok: false, error: "PAYMENT_CHALLENGE_NONCE_MISMATCH" };
-  }
-
-  if (expected.resourceHash && payload.resource_hash !== expected.resourceHash) {
-    return { ok: false, error: "PAYMENT_RESOURCE_HASH_MISMATCH" };
-  }
-
-  return { ok: true, payment: decoded };
+  return { ok: false, error: "UNSUPPORTED_PAYMENT_PROOF_KIND" };
 }
 
 function verifyArcPaymentPayload({ payload, signature, expected, decoded }) {
@@ -164,10 +93,6 @@ function verifyArcPaymentPayload({ payload, signature, expected, decoded }) {
     return { ok: false, error: "INVALID_ARC_TX_HASH" };
   }
   return { ok: true, payment: decoded };
-}
-
-function signPayload(payload) {
-  return crypto.createHmac("sha256", DEV_PAYMENT_SECRET).update(JSON.stringify(payload)).digest("hex");
 }
 
 function verifyWalletPaymentPayload({ payload, signature, expected, decoded }) {

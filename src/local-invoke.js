@@ -1,6 +1,6 @@
 import { assertArcUsdcBalance, sendArcUsdcTransfer } from "./arc-payment.js";
 import { hashJson } from "./evidence.js";
-import { createArcPaymentProof, createWalletPaymentProof } from "./payment.js";
+import { createArcPaymentProof } from "./payment.js";
 import { createSettlementReceipt, currentPaymentBackend } from "./payment-adapter.js";
 import { invokeWithRealX402, isRealX402Enabled } from "./real-x402-client.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
@@ -12,6 +12,9 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   }
   if (isRealX402Enabled()) {
     return invokeOfficialX402Service({ manifest, serviceId, input });
+  }
+  if (currentPaymentBackend() !== "circle_arc") {
+    throw new Error("Local paid invocation requires ADN_PAYMENT_BACKEND=circle_arc or official x402 configuration.");
   }
 
   const firstResponse = await fetch(manifest.endpoint.url, {
@@ -54,7 +57,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     arcBalance = await assertArcUsdcBalance({ wallet, payment });
     arcTransfer = await sendArcUsdcTransfer({ wallet, payment });
   }
-  const proof = currentPaymentBackend() === "circle_arc" ? createArcPaymentProof({
+  const proof = createArcPaymentProof({
     wallet,
     serviceId,
     amount: payment.amount,
@@ -63,14 +66,6 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     payTo: payment.pay_to,
     challenge: payment,
     tx: arcTransfer
-  }) : createWalletPaymentProof({
-    wallet,
-    serviceId,
-    amount: payment.amount,
-    currency: payment.asset,
-    network: payment.network,
-    payTo: payment.pay_to,
-    challenge: payment
   });
 
   const paidResponse = await fetch(manifest.endpoint.url, {

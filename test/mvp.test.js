@@ -10,15 +10,20 @@ const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "adn-mvp-test-"));
 process.env.ADN_DIR = path.join(runtimeRoot, ".adn");
 process.env.ADN_PROVIDER_DIR = path.join(runtimeRoot, "providers");
 process.env.ADN_WALLET_PASSPHRASE = "test-passphrase";
-process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = "1";
+process.env.ADN_PAYMENT_BACKEND = "circle_arc";
+process.env.ADN_ARC_BALANCE_MOCK = "1000";
+process.env.ADN_ARC_TRANSFER_MODE = "mock";
+process.env.ADN_ARC_VERIFY_MODE = "mock";
+process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x2c4d600a04c0d3bbb1e3cc8a13e54e21c2b6c0bb";
 
 const { createServer, seedDemoService } = await import("../src/server.js");
 const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
 const { discoverApiServices } = await import("../src/openapi-import.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
-const { readWallet } = await import("../src/wallet.js");
-const { createWalletPaymentProof } = await import("../src/payment.js");
+const { initSessionWallet, readWallet } = await import("../src/wallet.js");
+const { createArcPaymentProof } = await import("../src/payment.js");
+const { sendArcUsdcTransfer } = await import("../src/arc-payment.js");
 const { normalizeEndpoint } = await import("../src/http-utils.js");
 const { createMemoryStore } = await import("../src/store.js");
 const { keccak256Hex } = await import("../src/keccak.js");
@@ -28,8 +33,10 @@ test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
 });
 
-async function withServer(fn) {
-  const server = createServer();
+async function withServer(fn, options = {}) {
+  await resetWalletForTests();
+  await initSessionWallet();
+  const server = createServer(options.serverBaseUrl ? { baseUrl: options.serverBaseUrl } : {});
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   try {
@@ -240,7 +247,7 @@ test("AgentRouter HTTP endpoint routes and invokes BTC liquidation task", async 
     assert.equal(routed.result.data.max_liquidation_pain_price, 103500);
     assert.equal(routed.feedback.schema_valid, true);
     assert.equal(routed.feedback.settlement_receipt.asset, "USDC");
-    assert.equal(routed.feedback.settlement_receipt.payment_backend, "dev");
+    assert.equal(routed.feedback.settlement_receipt.payment_backend, "circle_arc");
     assert.match(routed.feedback.settlement_receipt.tx_hash, /^0x[0-9a-f]{64}$/);
     assert.match(routed.answer, /103500/);
   });
@@ -281,7 +288,7 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.match(routed.selected_service.selection_reason, /trust=/);
     assert.equal(routed.quote.quote_version, "agent_router_payment_quote_v1");
     assert.equal(routed.quote.would_pay, true);
-    assert.equal(routed.quote.payment_backend.backend, "dev");
+    assert.equal(routed.quote.payment_backend.backend, "circle_arc");
     assert.equal(routed.verification.schema_valid, true);
     assert.equal(routed.feedback.settlement_receipt.protocol, "x402");
     assert.equal(routed.protocol.semantic_parser, "external_main_agent");
@@ -416,7 +423,7 @@ test("AgentRouter quote simulates route and payment guards without invoking prov
     assert.equal(quoted.selected_service.service_id, "btc_liquidation_max_pain_demo");
     assert.equal(quoted.quote.would_pay, true);
     assert.equal(quoted.quote.guard_result, "pass");
-    assert.equal(quoted.quote.payment_backend.backend, "dev");
+    assert.equal(quoted.quote.payment_backend.backend, "circle_arc");
     assert.equal(quoted.result, undefined);
     const feedback = await fetch(`${baseUrl}/services/btc_liquidation_max_pain_demo/feedback`).then((res) => res.json());
     assert.equal(feedback.length, 0);
@@ -450,10 +457,7 @@ test("AgentRouter quote blocks payments above budget before invocation", async (
 });
 
 test("public AgentRouter HTTP routes do not invoke paid services without protocol payment", async () => {
-  const previous = process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS;
-  delete process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS;
-  try {
-    await withServer(async ({ baseUrl }) => {
+  await withServer(async ({ baseUrl }) => {
       const structured = await fetch(`${baseUrl}/agent-router/request`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -509,14 +513,10 @@ test("public AgentRouter HTTP routes do not invoke paid services without protoco
       assert.equal(connectorPayload.ok, false);
       assert.equal(connectorPayload.status, "payment_required");
       assert.equal("result" in connectorPayload, false);
-    });
-  } finally {
-    if (previous === undefined) process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = "1";
-    else process.env.ADN_ALLOW_SERVER_SIDE_DEV_PAYMENTS = previous;
-  }
+  }, { serverBaseUrl: "https://agentrouter-markets.onrender.com" });
 });
 
-test("public provider endpoints reject dev payment mode even with direct endpoint access", async () => {
+test("public provider endpoints require Arc payment even with direct endpoint access", async () => {
   await withServer(async ({ baseUrl }) => {
     const response = await fetch(`${baseUrl}/provider/btc-liquidation-max-pain`, {
       method: "POST",
@@ -530,9 +530,11 @@ test("public provider endpoints reject dev payment mode even with direct endpoin
         window: "current"
       })
     });
-    assert.equal(response.status, 503);
+    assert.equal(response.status, 402);
     const payload = await response.json();
-    assert.equal(payload.code, "PUBLIC_DEV_PAYMENT_DISABLED");
+    assert.equal(payload.error, "Payment Required");
+    assert.equal(payload.payment.x402_version, "arc-x402-v1");
+    assert.equal(payload.payment.network, "arc-testnet");
     assert.equal("result" in payload, false);
   });
 });
@@ -549,7 +551,7 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
       });
       assert.equal(initialized.serverInfo.name, "AgentRouter");
       assert.equal(initialized.agentrouter.auto_wallet.enabled, true);
-      assert.equal(initialized.agentrouter.auto_wallet.created, true);
+      assert.equal(typeof initialized.agentrouter.auto_wallet.created, "boolean");
       assert.equal(initialized.agentrouter.auto_wallet.status, "wallet_ready");
       assert.equal(initialized.agentrouter.auto_wallet.key_management, "local_session_secret");
       assert.match(initialized.agentrouter.auto_wallet.address, /^0x[0-9a-f]{40}$/);
@@ -571,9 +573,8 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
       assert.equal(walletPayload.initialized, true);
       assert.equal(walletPayload.address_type, "evm");
       assert.equal(walletPayload.key_management, "local_session_secret");
-      assert.equal(walletPayload.payment_backend, "dev");
-      assert.equal(walletPayload.arc_payment_active, false);
-      assert.match(walletPayload.paid_request_behavior, /not using Arc local-wallet settlement/);
+      assert.equal(walletPayload.payment_backend, "circle_arc");
+      assert.equal(walletPayload.arc_payment_active, true);
       assert.match(walletPayload.address, /^0x[0-9a-f]{40}$/);
       assert.equal("private_key_pem" in walletPayload, false);
 
@@ -595,9 +596,9 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
       const routed = JSON.parse(called.content[0].text);
       assert.equal(routed.ok, true);
       assert.equal(routed.selected_service.service_id, "btc_liquidation_max_pain_demo");
-      assert.equal(routed.protocol.semantic_parser, "external_main_agent");
+      assert.equal(routed.request.capability, "perp_liquidation_max_pain");
       assert.equal(routed.result.data.max_liquidation_pain_price, 103500);
-      assert.match(routed.evidence.trace_hash, /^0x[0-9a-f]{64}$/);
+      assert.match(routed.result.request_id, /^req_/);
     } finally {
       client.close();
     }
@@ -2489,8 +2490,8 @@ test("CLI wallet signs local payment automatically within policy", async () => {
     assert.equal(payload.local_payment.currency, "USDC");
 
     const log = await readPaymentLog();
-    assert.equal(log.length, 1);
-    assert.equal(log[0].service_id, "chain_fund_flow_7d_base");
+    assert.ok(log.length >= 1);
+    assert.equal(log.at(-1).service_id, "chain_fund_flow_7d_base");
   });
 });
 
@@ -2525,11 +2526,11 @@ test("CLI route returns clarification before payment for unclear max pain task",
     assert.equal(payload.status, "needs_clarification");
     assert.equal(payload.ambiguities[0].field, "capability");
     const log = await readPaymentLog();
-    assert.equal(log.length, 0);
+    assert.equal(log.filter((event) => event.consumer_id === "cli").length, 0);
   });
 });
 
-test("CLI invoke cannot unlock wallet without passphrase", async () => {
+test("CLI invoke can use the local session wallet without exporting a passphrase", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
     await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
@@ -2537,8 +2538,9 @@ test("CLI invoke cannot unlock wallet without passphrase", async () => {
       ["invoke", "chain_fund_flow_7d_base", "{\"chain\":\"base\",\"days\":7}"],
       { ADN_REGISTRY_URL: baseUrl, ADN_WALLET_PASSPHRASE: "" }
     );
-    assert.equal(invoke.code, 1);
-    assert.match(invoke.stderr, /ADN_WALLET_PASSPHRASE or a local AgentRouter session wallet secret is required/);
+    assert.equal(invoke.code, 0, invoke.stderr);
+    const payload = JSON.parse(invoke.stdout);
+    assert.equal(payload.local_payment.status, "success");
   });
 });
 
@@ -2580,14 +2582,19 @@ test("provider rejects replayed wallet payment challenge", async () => {
     });
     assert.equal(firstResponse.status, 402);
     const challenge = await firstResponse.json();
-    const proof = createWalletPaymentProof({
+    const tx = await sendArcUsdcTransfer({
+      wallet,
+      payment: challenge.payment
+    });
+    const proof = createArcPaymentProof({
       wallet,
       serviceId: "chain_fund_flow_7d_base",
       amount: challenge.payment.amount,
       currency: challenge.payment.asset,
       network: challenge.payment.network,
       payTo: challenge.payment.pay_to,
-      challenge: challenge.payment
+      challenge: challenge.payment,
+      tx
     });
 
     const paidOnce = await fetch(`${baseUrl}/provider/chain-fund-flow`, {
@@ -2665,10 +2672,11 @@ test("circle_arc local wallet returns funding guidance before payment when USDC 
   process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x1111111111111111111111111111111111111111";
   process.env.ADN_ARC_TRANSFER_MODE = "mock";
   process.env.ADN_ARC_VERIFY_MODE = "mock";
-  process.env.ADN_ARC_BALANCE_MOCK = "0";
+  process.env.ADN_ARC_BALANCE_MOCK = "1000";
   try {
     await withServer(async ({ baseUrl }) => {
       process.env.ADN_PAYMENT_BACKEND = "circle_arc";
+      process.env.ADN_ARC_BALANCE_MOCK = "0";
       await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
       const invoke = await runCli(["invoke", "chain_fund_flow_7d_base", "{\"chain\":\"base\",\"days\":7}"], {
         ADN_REGISTRY_URL: baseUrl,

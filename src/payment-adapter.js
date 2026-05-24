@@ -1,9 +1,9 @@
-export const PAYMENT_BACKENDS = ["dev", "x402", "omniagentpay", "circle_arc"];
+export const PAYMENT_BACKENDS = ["x402", "omniagentpay", "circle_arc"];
 
 export function currentPaymentBackend() {
-  const backend = process.env.ADN_PAYMENT_BACKEND || process.env.ADN_PAYMENT_MODE || "dev";
+  const backend = process.env.ADN_PAYMENT_BACKEND || process.env.ADN_PAYMENT_MODE || "circle_arc";
   if (backend === "real") return "x402";
-  return PAYMENT_BACKENDS.includes(backend) ? backend : "dev";
+  return PAYMENT_BACKENDS.includes(backend) ? backend : "circle_arc";
 }
 
 export function describePaymentBackend() {
@@ -11,12 +11,10 @@ export function describePaymentBackend() {
   return {
     backend,
     mode: backend,
-    execution_layer: backend === "dev" ? "local_dev_x402_proof" : backend,
-    real_settlement: backend !== "dev",
+    execution_layer: backend,
+    real_settlement: true,
     supported_backends: PAYMENT_BACKENDS,
-    notes: backend === "dev"
-      ? "Development mode uses local x402-style payment proofs and simulated settlement receipts."
-      : backend === "circle_arc"
+    notes: backend === "circle_arc"
         ? "Circle Arc mode uses an x402-style HTTP 402 challenge, then verifies a real Arc Testnet USDC transfer to the provider wallet before returning data."
         : "Production backends should execute real payment authorization, settlement, and ledger recording."
   };
@@ -63,7 +61,7 @@ export function createSettlementReceipt({ manifest, challenge, txHash }) {
     pay_to: challenge.pay_to,
     tx_hash: txHash,
     settlement_model: challenge.settlement_model || manifest.pricing.settlement_model || null,
-    status: backend === "dev" ? "simulated_settled" : "settled",
+    status: "settled",
     created_at: new Date().toISOString()
   };
 }
