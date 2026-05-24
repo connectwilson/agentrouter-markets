@@ -753,6 +753,16 @@ function dataContractFor({ method, routePath, sampleRequest, previewData }) {
       preview: previewData,
       shape: shapeFor(previewData),
       note: "Preview data is exposed before payment so the buyer Agent can judge task fit. Paid responses should keep the same general shape but may contain fresher or fuller data."
+    },
+    pre_call_context: {
+      pricing_hint: "Uses the service price shown on this draft and x402-style per-call payment after publishing.",
+      buyer_requirements: {
+        payment_required: true,
+        needs_buyer_api_key: false
+      },
+      freshness_hint: "Published hosted API services are validated live and normally invoked on request.",
+      source_hint: "Provider-declared source; publish performs a live validation call before the service becomes routable.",
+      validation_hint: "Must return JSON and pass the Agent Data Envelope checks before registration."
     }
   };
 }

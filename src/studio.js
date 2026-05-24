@@ -880,6 +880,8 @@ export function studioHtml({ draft, loadedService } = {}) {
         draftReviewItem("Input", escapeHtml(draftInputSummary(draft))),
         draftReviewItem("Response", escapeHtml(draftResponseSummary(draft))),
         draftReviewItem("Source", escapeHtml(draftSourceLabel(draft))),
+        draftReviewItem("Buyer", escapeHtml(draftBuyerSummary(draft))),
+        draftReviewItem("Freshness", escapeHtml(draftFreshnessSummary(draft))),
         draftReviewItem("Agent summary", escapeHtml(summary), true),
         draftReviewItem("Request data", '<code>' + escapeHtml(compactJson(draft.data_contract?.request_data?.example || draft.sample_request || {}, 220)) + '</code>', true),
         draftReviewItem("Response data", '<code>' + escapeHtml(compactJson(draft.data_contract?.response_data?.preview ?? draft.preview_data ?? {}, 220)) + '</code>', true)
@@ -911,6 +913,16 @@ export function studioHtml({ draft, loadedService } = {}) {
         return keys.length ? keys.slice(0, 6).join(", ") + (keys.length > 6 ? " +" + (keys.length - 6) : "") : "object";
       }
       return String(shape || "unknown");
+    }
+
+    function draftBuyerSummary(draft) {
+      const price = draft.price || importDefaultPrice.value || "0.01";
+      const needsKey = draft.data_contract?.pre_call_context?.buyer_requirements?.needs_buyer_api_key;
+      return price + " USDC/call; buyer API key " + (needsKey ? "required" : "not required");
+    }
+
+    function draftFreshnessSummary(draft) {
+      return draft.data_contract?.pre_call_context?.freshness_hint || "validated live before publish";
     }
 
     function shapeForPreview(value) {

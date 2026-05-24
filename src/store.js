@@ -12,6 +12,11 @@ export function createMemoryStore() {
 }
 
 export function publicServiceRecord(record) {
+  const trust = summarizeTrust(record);
+  const health = summarizeHealth(record);
+  const provenance = summarizeProvenance(record);
+  const requestData = requestDataContract(record);
+  const responseData = responseDataContract(record);
   return {
     service_id: record.manifest.service_id,
     title: record.manifest.title,
@@ -19,19 +24,81 @@ export function publicServiceRecord(record) {
     capabilities: record.manifest.capabilities,
     pricing: record.manifest.pricing,
     verification_status: record.verification_status,
-    trust: summarizeTrust(record),
+    trust,
     sample_request: record.manifest.sample_request || {},
-    request_data: requestDataContract(record),
-    response_data: responseDataContract(record),
+    request_data: requestData,
+    response_data: responseData,
+    pre_call_context: preCallContext(record, { trust, health, provenance, requestData, responseData }),
     sample_response: record.manifest.sample_response,
     validation_result_preview: record.validation_runs?.at(-1)?.result_preview || null,
-    source_provenance: summarizeProvenance(record),
+    source_provenance: provenance,
     quality_profile: summarizeQuality(record),
-    health: summarizeHealth(record),
+    health,
     badges: summarizeBadges(record),
     created_at: record.created_at || null,
     updated_at: record.updated_at || null
   };
+}
+
+function preCallContext(record, { trust, health, provenance, requestData, responseData }) {
+  const manifest = record.manifest;
+  const pricing = manifest.pricing || {};
+  const freshness = manifest.freshness || {};
+  const runtimeSecrets = manifest.runtime_secrets || {};
+  const limitations = [
+    ...(manifest.sample_response?.metadata?.limitations || []),
+    ...(manifest.agent_contract?.limitations || [])
+  ].filter(Boolean);
+  return {
+    context_version: "agent_pre_call_context_v1",
+    decision_summary: [
+      `Use ${manifest.service_id} when the task fits: ${(manifest.capabilities || []).filter((capability) => capability !== "data_service").slice(0, 6).join(", ") || manifest.title}.`,
+      `Costs ${pricing.amount || "0"} ${pricing.currency || "USDC"} via ${pricing.protocol || "x402"} on ${pricing.network || "base"}.`,
+      health.status === "healthy" ? "Service is currently healthy." : `Service health is ${health.status}.`
+    ].join(" "),
+    buyer_requirements: {
+      payment_required: true,
+      payment_protocol: pricing.protocol || "x402",
+      currency: pricing.currency || "USDC",
+      network: pricing.network || "base",
+      needs_buyer_api_key: false,
+      max_budget_field: "max_amount"
+    },
+    provider_requirements: {
+      provider_credential_required: Boolean(runtimeSecrets.required),
+      credential_public: false,
+      credential_custody: provenance.credential_custody
+    },
+    pricing,
+    freshness: {
+      update_frequency: freshness.update_frequency || "unknown",
+      max_data_lag_seconds: freshness.max_data_lag_seconds ?? null,
+      declared_live_on_request: freshness.update_frequency === "on_request"
+    },
+    provenance,
+    verification: {
+      status: record.verification_status,
+      last_validation_ok: health.last_validation_ok,
+      last_validation_at: health.last_validation_at,
+      latest_http_status: health.latest_http_status
+    },
+    trust,
+    health,
+    request_data: requestData,
+    response_data: responseData,
+    limitations,
+    risk_flags: preCallRiskFlags({ record, health, trust, provenance, limitations })
+  };
+}
+
+function preCallRiskFlags({ record, health, trust, provenance, limitations }) {
+  const flags = [];
+  if (record.verification_status !== "verified") flags.push("not_verified");
+  if (health.status !== "healthy") flags.push(`health_${health.status}`);
+  if (provenance.source_provenance_level === "unknown") flags.push("unknown_source_provenance");
+  if (trust.recent_failure_rate != null && trust.recent_failure_rate > 0.2) flags.push("recent_failures");
+  if ((limitations || []).length) flags.push("has_declared_limitations");
+  return flags;
 }
 
 function requestDataContract(record) {

@@ -90,6 +90,10 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     assert.equal(services[0].service_id, "chain_fund_flow_7d_base");
     assert.deepEqual(services[0].request_data.example, { chain: "base", days: 7 });
     assert.ok(services[0].response_data.fields.includes("metrics.net_flow_usd"));
+    assert.equal(services[0].pre_call_context.buyer_requirements.needs_buyer_api_key, false);
+    assert.equal(services[0].pre_call_context.buyer_requirements.payment_protocol, "x402");
+    assert.equal(services[0].pre_call_context.freshness.max_data_lag_seconds, 7200);
+    assert.ok(services[0].pre_call_context.limitations.includes("Sample response is historical and not current."));
 
     const manifest = await connector.getManifest("chain_fund_flow_7d_base");
     assert.equal(manifest.title, "Base 7D Fund Flow");
@@ -1646,6 +1650,8 @@ test("Provider Studio generates routing-rich endpoint summaries and tags", async
     assert.equal(draft.data_contract.request_data.example.token_address, "0x0000000000000000000000000000000000000000");
     assert.ok(draft.data_contract.response_data.fields.includes("data.wallet_address"));
     assert.equal(draft.data_contract.response_data.preview.data[0].tx_hash, "0x123");
+    assert.equal(draft.data_contract.pre_call_context.buyer_requirements.needs_buyer_api_key, false);
+    assert.match(draft.data_contract.pre_call_context.validation_hint, /JSON/);
     assert.ok(draft.capabilities.includes("token_god_mode"));
     assert.ok(draft.capabilities.includes("token_transfers"));
     assert.ok(draft.capabilities.includes("wallet_activity"));
