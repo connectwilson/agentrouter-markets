@@ -1570,6 +1570,84 @@ apiKey: YOUR_API_KEY</pre>
   }
 });
 
+test("Provider Studio generates routing-rich endpoint summaries and tags", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/api/overview") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        openapi: "3.0.0",
+        servers: [{ url: "https://api.example.com" }],
+        paths: {
+          "/api/v1/tgm/transfers": {
+            post: {
+              summary: "Get Token God Mode transfers data",
+              description: "Returns token transfer activity for a token address, chain, date range, filters, and pagination.",
+              security: [{ apiKey: [] }],
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        chain: { type: "string" },
+                        token_address: { type: "string" },
+                        date: { type: "string" },
+                        pagination: { type: "object" },
+                        filters: { type: "object" },
+                        order_by: { type: "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      example: {
+                        data: [{ wallet_address: "0xabc", amount: "1.2", tx_hash: "0x123" }],
+                        pagination: { page: 1, per_page: 10 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        components: {
+          securitySchemes: {
+            apiKey: { type: "apiKey", in: "header", name: "apiKey" }
+          }
+        }
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/api/overview`,
+      default_price: "0.01",
+      provider_name: "Example Data"
+    }, baseUrl);
+    assert.equal(discovered.ok, true);
+    const draft = discovered.drafts[0];
+    assert.match(draft.summary, /Endpoint: POST \/api\/v1\/tgm\/transfers/);
+    assert.match(draft.summary, /Inputs: chain, token_address, date, pagination, filters, order_by/);
+    assert.match(draft.summary, /Returns JSON fields such as data/);
+    assert.match(draft.summary, /Routing keywords:/);
+    assert.ok(draft.capabilities.includes("token_god_mode"));
+    assert.ok(draft.capabilities.includes("token_transfers"));
+    assert.ok(draft.capabilities.includes("wallet_activity"));
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {
   await withServer(async ({ baseUrl }) => {
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {

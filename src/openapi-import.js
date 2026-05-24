@@ -496,20 +496,38 @@ function convertEndpointIndex(doc, apiUrl) {
 }
 
 function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, doc, providerId, providerTitle, defaultPrice, secretValue }) {
-  const title = operation.summary || titleFromPath(routePath, method);
+  const decodedRoutePath = decodePathTemplate(routePath);
+  const title = operation.summary || titleFromPath(decodedRoutePath, method);
   const serviceId = normalizeId(operation.operationId, title, "service");
-  const upstreamUrl = `${apiUrl.replace(/\/$/, "")}${routePath}`;
-  const sampleRequest = sampleRequestFor(operation, pathItem, doc);
+  const upstreamUrl = `${apiUrl.replace(/\/$/, "")}${decodedRoutePath}`;
+  const sampleRequest = { ...paramsFromPathTemplate(decodedRoutePath), ...sampleRequestFor(operation, pathItem, doc) };
   const previewData = previewDataFor(operation, doc);
+  const summary = routingSummary({
+    title,
+    providerTitle,
+    method,
+    routePath: decodedRoutePath,
+    sampleRequest,
+    previewData,
+    description: operation.description,
+    sourceTitle: "OpenAPI"
+  });
   const description = agentDescription({
     title,
     providerTitle,
     method,
-    routePath,
+    routePath: decodedRoutePath,
     sampleRequest,
     baseDescription: operation.description
   });
-  const capabilities = suggestCapabilities(`${title} ${description} ${routePath}`);
+  const capabilities = suggestCapabilities(capabilityTextFor({
+    title,
+    description,
+    summary,
+    routePath: decodedRoutePath,
+    sampleRequest,
+    previewData
+  }));
 
   return {
     selected: true,
@@ -521,15 +539,15 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
     capabilities: capabilities.split(","),
     price: defaultPrice,
     method: method.toUpperCase(),
-    path: routePath,
+    path: decodedRoutePath,
     upstream_url: upstreamUrl,
     auth_header: secretValue ? "auto" : inferAuthHeader(apiUrl),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
     sample_request: sampleRequest,
     preview_data: previewData,
-    summary: resultSummary({ title, providerTitle, routePath, previewData }),
-    data_contract: dataContractFor({ method: method.toUpperCase(), routePath, sampleRequest, previewData })
+    summary,
+    data_contract: dataContractFor({ method: method.toUpperCase(), routePath: decodedRoutePath, sampleRequest, previewData })
   };
 }
 
@@ -611,6 +629,16 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
   const sampleRequest = { ...paramsFromPathTemplate(routePath), ...(endpoint.sampleRequest || {}) };
   const previewData = endpoint.previewData || { data: [{ example: true }] };
   const title = endpoint.title || titleFromPath(routePath, method);
+  const summary = routingSummary({
+    title,
+    providerTitle,
+    method,
+    routePath,
+    sampleRequest,
+    previewData,
+    description: [endpoint.summary, endpoint.description].filter(Boolean).join(" "),
+    sourceTitle: "API docs"
+  });
   const description = agentDescription({
     title,
     providerTitle,
@@ -627,7 +655,7 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
     provider_name: providerTitle,
     title,
     description_for_agent: description,
-    capabilities: suggestCapabilities(`${title} ${description} ${routePath}`).split(","),
+    capabilities: suggestCapabilities(capabilityTextFor({ title, description, summary, routePath, sampleRequest, previewData })).split(","),
     price: defaultPrice,
     method,
     path: routePath,
@@ -637,7 +665,7 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
     secret_value: secretValue,
     sample_request: sampleRequest,
     preview_data: previewData,
-    summary: endpoint.summary || resultSummary({ title, providerTitle, routePath, previewData }),
+    summary,
     data_contract: dataContractFor({ method, routePath, sampleRequest, previewData }),
     source_type: "api_docs_import",
     source_url: endpoint.sourceUrl || docsUrl,
@@ -656,6 +684,45 @@ function agentDescription({ title, providerTitle, method, routePath, sampleReque
     return `${cleanBase}${paramText}${sourceText}`;
   }
   return `Returns ${title} data from ${providerTitle} via ${String(method).toUpperCase()} ${routePath}.${paramText}${sourceText}`;
+}
+
+function capabilityTextFor({ title, description, summary, routePath, sampleRequest, previewData }) {
+  return [
+    title,
+    description,
+    summary,
+    routePath,
+    Object.keys(sampleRequest || {}).join(" "),
+    responseKeys(previewData, 12).join(" ")
+  ].filter(Boolean).join(" ");
+}
+
+function routingSummary({ title, providerTitle, method, routePath, sampleRequest = {}, previewData, description = "", sourceTitle = "" }) {
+  const cleanBase = cleanDescription(description);
+  const inputKeys = Object.keys(sampleRequest || {});
+  const outputKeys = responseKeys(previewData, 8);
+  const routeTerms = routePath
+    .split("/")
+    .filter(Boolean)
+    .filter((part) => !/^api$/i.test(part) && !/^v\d+$/i.test(part))
+    .map((part) => part.replace(/^\{|\}$/g, "").replace(/[-_]/g, " "))
+    .filter(Boolean);
+  const intentTerms = [...new Set([
+    ...title.replace(/["']/g, "").split(/\s+/),
+    ...routeTerms,
+    ...inputKeys
+  ].map((term) => String(term || "").trim()).filter((term) => term.length > 2))].slice(0, 12);
+  const useFor = cleanBase || `Use this service when an agent needs ${title} from ${providerTitle}.`;
+  const inputText = inputKeys.length
+    ? `Inputs: ${inputKeys.join(", ")}.`
+    : "Inputs: none required for the default request.";
+  const outputText = outputKeys.length
+    ? `Returns JSON fields such as ${outputKeys.join(", ")}.`
+    : "Returns a JSON data response.";
+  const sourceText = sourceTitle ? `Source: ${sourceTitle}.` : "";
+  const routeText = `Endpoint: ${String(method).toUpperCase()} ${routePath}.`;
+  const intentText = intentTerms.length ? `Routing keywords: ${intentTerms.join(", ")}.` : "";
+  return [useFor, routeText, inputText, outputText, intentText, sourceText].filter(Boolean).join(" ");
 }
 
 function cleanDescription(value) {
@@ -686,6 +753,26 @@ function shapeFor(value) {
   }
   if (value === null) return "null";
   return typeof value;
+}
+
+function responseKeys(value, limit = 8, prefix = "") {
+  if (limit <= 0) return [];
+  if (Array.isArray(value)) return value.length ? responseKeys(value[0], limit, prefix) : [];
+  if (!value || typeof value !== "object") return [];
+  const keys = [];
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    keys.push(path);
+    if (keys.length >= limit) break;
+    if (child && typeof child === "object") {
+      for (const nested of responseKeys(child, limit - keys.length, path)) {
+        keys.push(nested);
+        if (keys.length >= limit) break;
+      }
+    }
+    if (keys.length >= limit) break;
+  }
+  return keys;
 }
 
 function looksLikeSkillSource(apiUrl) {
@@ -1563,6 +1650,7 @@ function exampleObjectForSchema(schema, doc, name = "") {
     }
     return output;
   }
+  if (schema.type === "object") return {};
   return exampleForSchema(schema, { name, doc });
 }
 

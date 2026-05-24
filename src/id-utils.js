@@ -42,5 +42,25 @@ export function suggestCapabilities(text) {
     tags.add("etf_data");
   }
   if (/wallet|address|地址/.test(value)) tags.add("wallet_profile");
+  if (/transfer|transfers|转账|流转/.test(value)) {
+    tags.add("transfer_data");
+    tags.add("token_transfers");
+    tags.add("wallet_activity");
+  }
+  if (/transaction|transactions|txs?|交易/.test(value)) tags.add("transaction_data");
+  if (/token|代币|tgm|token god mode/.test(value)) {
+    tags.add("token_data");
+    tags.add("token_analytics");
+  }
+  if (/token god mode|tgm/.test(value)) tags.add("token_god_mode");
+  if (/leaderboard|ranking|rank|积分榜|排行榜/.test(value)) tags.add("leaderboard_data");
+  if (/points|score|积分/.test(value)) tags.add("points_data");
+  if (/portfolio|资产组合|持仓组合/.test(value)) tags.add("portfolio_data");
+  if (/profiler|profile|画像/.test(value)) tags.add("address_intelligence");
+  if (/prediction market|预测市场/.test(value)) tags.add("prediction_market_data");
+  if (/hyperliquid|hl\b/.test(value)) {
+    tags.add("hyperliquid_data");
+    tags.add("crypto_derivatives");
+  }
   return [...tags].join(",");
 }

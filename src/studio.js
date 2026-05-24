@@ -872,7 +872,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     }
 
     function draftReviewItems(draft) {
-      const summary = compactText(draft.summary || draft.description_for_agent || "No summary generated yet.", 180);
+      const summary = compactText(draft.summary || draft.description_for_agent || "No summary generated yet.", 320);
       return [
         draftReviewItem("Service ID", '<code>' + escapeHtml(draft.service_id || "-") + '</code>'),
         draftReviewItem("Upstream", '<code>' + escapeHtml(draft.upstream_url || draft.path || "-") + '</code>'),
