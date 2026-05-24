@@ -1173,7 +1173,7 @@ function htmlToText(html) {
     .replace(/<h4[^>]*>/gi, "\n#### ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h\d|pre|code|tr)>/gi, "\n")
-    .replace(/<\/?[a-z][a-z0-9:-]*(?:\s+[^<>]*)?>/gi, " ")
+    .replace(/<\/?[a-z][a-z0-9:-]*(?:\s+[^<>]*)?>/gi, "")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&")

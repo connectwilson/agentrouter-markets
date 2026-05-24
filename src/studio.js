@@ -521,10 +521,20 @@ export function studioHtml({ draft, loadedService } = {}) {
     function syncGeneratedIds() {
       if (!serviceIdTouched) serviceIdInput.value = slugify(titleInput.value, "service");
       if (!providerIdTouched) providerIdInput.value = slugify(providerNameInput.value, "provider");
-      if (!capabilitiesInput.dataset.touched) capabilitiesInput.value = suggestCapabilities(titleInput.value + " " + descriptionInput.value);
+      if (!capabilitiesInput.dataset.touched) capabilitiesInput.value = suggestCapabilities(autoCapabilityText());
       syncPreviewData();
       syncEnvelopePreview();
       updateSidePanel();
+    }
+
+    function autoCapabilityText() {
+      let requestKeys = "";
+      try {
+        requestKeys = Object.keys(JSON.parse(sampleRequestInput.value || "{}")).join(" ");
+      } catch {
+        requestKeys = sampleRequestInput.value || "";
+      }
+      return [titleInput.value, upstreamUrlInput.value, requestKeys].filter(Boolean).join(" ");
     }
 
     function showNotice(target, message, type = "") {
@@ -664,16 +674,53 @@ export function studioHtml({ draft, loadedService } = {}) {
       const lower = String(value || "").toLowerCase();
       const tags = new Set(["data_service"]);
       if (/sentiment|情绪|社媒|social/.test(lower)) tags.add("sentiment_data");
-      if (/fund flow|资金流|inflow|outflow|链上|onchain/.test(lower)) {
+      if (/fund flow|net[\s_-]?flow|netflow|资金流|净流入|净流出|inflow|outflow|链上|onchain/.test(lower)) {
         tags.add("onchain_data");
         tags.add("fund_flow");
       }
+      if (/net[\s_-]?flow|netflow|净流入|净流出/.test(lower)) tags.add("netflow");
+      if (/smart[\s_-]?money|smart money|聪明钱/.test(lower)) {
+        tags.add("smart_money");
+        if (/net[\s_-]?flow|netflow|净流入|净流出|inflow|outflow/.test(lower)) tags.add("smart_money_netflow");
+        if (/holding|holdings|持仓|balance/.test(lower)) tags.add("smart_money_holdings");
+      }
+      if (/funding|资金费率/.test(lower)) {
+        tags.add("crypto_derivatives");
+        tags.add("funding_rate");
+        tags.add("market_data");
+      }
       if (/liquidation|爆仓|清算|perp|永续|合约/.test(lower)) {
         tags.add("crypto_derivatives");
+        tags.add("perp_liquidation");
+        tags.add("liquidation_heatmap");
         tags.add("perp_liquidation_max_pain");
       }
       if (/price|价格|ticker|行情/.test(lower)) tags.add("market_data");
+      if (/\betf\b|exchange traded fund|bitcoin etf|btc etf/.test(lower)) {
+        tags.add("market_data");
+        tags.add("etf_data");
+      }
       if (/wallet|address|地址/.test(lower)) tags.add("wallet_profile");
+      if (/transfer|transfers|转账|流转/.test(lower)) {
+        tags.add("transfer_data");
+        tags.add("token_transfers");
+        tags.add("wallet_activity");
+      }
+      if (/transaction|transactions|txs?|交易/.test(lower)) tags.add("transaction_data");
+      if (/token|代币|tgm|token god mode/.test(lower)) {
+        tags.add("token_data");
+        tags.add("token_analytics");
+      }
+      if (/token god mode|tgm/.test(lower)) tags.add("token_god_mode");
+      if (/leaderboard|ranking|rank|积分榜|排行榜/.test(lower)) tags.add("leaderboard_data");
+      if (/points|score|积分/.test(lower)) tags.add("points_data");
+      if (/portfolio|资产组合|持仓组合/.test(lower)) tags.add("portfolio_data");
+      if (/profiler|profile|画像/.test(lower)) tags.add("address_intelligence");
+      if (/prediction market|预测市场/.test(lower)) tags.add("prediction_market_data");
+      if (/hyperliquid|hl\b/.test(lower)) {
+        tags.add("hyperliquid_data");
+        tags.add("crypto_derivatives");
+      }
       return Array.from(tags).join(",");
     }
     titleInput.addEventListener("input", () => { markInvalid(titleInput, false); syncGeneratedIds(); });

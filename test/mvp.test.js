@@ -1670,9 +1670,9 @@ test("Provider Studio preserves text around angle brackets in HTML docs", async 
     if (req.url === "/api/research-fast") {
       res.writeHead(200, { "content-type": "text/html" });
       res.end(`<!doctype html><main>
-        <h1>Interact with the Nansen Research Agent in "fast" mode</h1>
+        <h1>Interact with the Nan<span>s</span>en Research Agent in "fa<span>s</span>t" mode</h1>
         <p>https://api.example.com/api/v1/agent/fast</p>
-        <p>Ask the Nansen AI agent a research question and receive a streamed answer backed by on-chain data. The **fast** variant uses quick mode.</p>
+        <p>A<span>s</span>k the Nan<span>s</span>en AI agent a research question and receive a stream<span>ed</span> an<span>s</span>wer backed by on-chain data. The **fast** variant u<span>s</span>es quick mode.</p>
         <p>Use text like value < string and ask a question.</p>
         <pre>POST /api/v1/agent/fast HTTP/1.1
 Host: api.example.com
@@ -1700,6 +1700,10 @@ Content-Type: application/json
     assert.match(draft.summary, /Ask the Nansen AI agent a research question/);
     assert.equal(draft.summary.includes("Nan en"), false);
     assert.equal(draft.summary.includes("fa t"), false);
+    assert.equal(draft.summary.includes("A k"), false);
+    assert.equal(draft.summary.includes("stream ed"), false);
+    assert.equal(draft.summary.includes("an wer"), false);
+    assert.equal(draft.summary.includes("u es"), false);
   } finally {
     await new Promise((resolve) => upstream.close(resolve));
   }
@@ -1751,6 +1755,25 @@ test("Provider Studio uses endpoint-local signals for capabilities", async () =>
               },
               responses: { 200: { content: { "application/json": { example: { data: [{ tx_hash: "0x1" }] } } } } }
             }
+          },
+          "/api/v1/smart-money/netflow": {
+            post: {
+              summary: "Get Smart Money Netflow Data",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      properties: {
+                        chain: { type: "string" },
+                        date: { type: "string" }
+                      }
+                    }
+                  }
+                }
+              },
+              responses: { 200: { content: { "application/json": { example: { data: [{ inflow: 1, outflow: 2 }] } } } } }
+            }
           }
         }
       }));
@@ -1769,10 +1792,14 @@ test("Provider Studio uses endpoint-local signals for capabilities", async () =>
     }, baseUrl);
     const agent = discovered.drafts.find((draft) => draft.path === "/api/v1/agent/fast");
     const transfers = discovered.drafts.find((draft) => draft.path === "/api/v1/tgm/transfers");
+    const netflow = discovered.drafts.find((draft) => draft.path === "/api/v1/smart-money/netflow");
     assert.ok(agent);
     assert.ok(transfers);
+    assert.ok(netflow);
     assert.ok(transfers.capabilities.includes("token_transfers"));
     assert.equal(agent.capabilities.includes("token_transfers"), false);
+    assert.ok(netflow.capabilities.includes("smart_money_netflow"));
+    assert.equal(netflow.capabilities.includes("etf_data"), false);
   } finally {
     await new Promise((resolve) => upstream.close(resolve));
   }
