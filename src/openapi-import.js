@@ -1178,7 +1178,7 @@ function shouldPreferRouteTitle(title, routePath, derived) {
   if (!value) return true;
   if (value.length < 4) return true;
   if (/^(get|post|put|patch)\s+/i.test(title)) return true;
-  if (/^(\(?up to \d+\)?|\(?no pagination\)?|request example\b|copy|responses?|body|parameters?)/i.test(value)) return true;
+  if (/^(\(?up to \d+\)?|\(?no pagination\)?|request example\b|triggers?\b|copy|responses?|body|parameters?)/i.test(value)) return true;
   if (/^[a-z][a-z-]{3,20}$/.test(title) && !derived.toLowerCase().includes(value)) return true;
   if (/(\/article|\/newsflash)(\/[^/]+)$/.test(path) && /^all (articles|newsflashes)$/i.test(title)) return true;
   if (/\/newsflash\/(onchain|prediction|financing|first|original|ai|important)\b/.test(path)) return true;

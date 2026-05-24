@@ -1527,6 +1527,7 @@ Auth: Header \`api-key: $BLOCKBEATS_API_KEY\`
 | Original | \`GET /v1/newsflash/onchain\` | none |
 | (no pagination) | \`GET /v1/newsflash/original\` | none |
 | Request example (AI newsflash) | \`GET /v1/newsflash/ai\` | \`page=1\` |
+| Triggers : search [keyword], find [keyword], [keyword] news, what&#x27;s happening with [keyword] | \`GET /v1/search\` | \`name=BTC\` |
 `);
       return;
     }
@@ -1548,6 +1549,7 @@ Auth: Header \`api-key: $BLOCKBEATS_API_KEY\`
     assert.equal(byPath["/v1/newsflash/onchain"].title, "On-chain newsflashes");
     assert.equal(byPath["/v1/newsflash/original"].title, "Original newsflashes");
     assert.equal(byPath["/v1/newsflash/ai"].title, "AI newsflashes");
+    assert.equal(byPath["/v1/search"].title, "Search articles and news");
     assert.ok(byPath["/v1/article/important"].capabilities.includes("article_data"));
     assert.ok(byPath["/v1/newsflash/onchain"].capabilities.includes("news_data"));
     assert.ok(byPath["/v1/newsflash/onchain"].capabilities.includes("onchain_data"));
