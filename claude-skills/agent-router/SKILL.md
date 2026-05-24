@@ -12,10 +12,10 @@ AgentRouter discovers, routes to, and invokes registered API/data services from 
 When the user asks to use AgentRouter:
 
 1. If MCP tools are already available, use them directly:
-   - `agentrouter_request`: preferred; use after the main agent has parsed the user request into a structured capability request
-   - `agentrouter_ask`: fallback/demo; use only when the client cannot produce a structured request
+   - `agentrouter_request`: default path; use after you parse the user request into a structured capability request
+   - `agentrouter_capabilities`: call this first when you are unsure which structured capability or params to use
    - `agentrouter_quote`: structured request -> route + quote + budget guard only
-   - `agentrouter_capabilities`: list supported capability schemas
+   - `agentrouter_ask`: last-resort fallback/demo; use only when you cannot produce a structured request from the user request and capability catalog
    - `agentrouter_wallet_status`: check local encrypted EVM wallet readiness for future x402 payments
    - `agentrouter_wallet_create`: manual fallback wallet bootstrap; normally not needed because the local MCP bridge auto-creates a session wallet during initialization
    - `agentrouter_wallet_setup`: advanced wallet bootstrap; opens a one-time local setup page for a user-chosen encryption passphrase
@@ -30,7 +30,22 @@ curl -sS -X POST "https://agentrouter-markets.onrender.com/agent-router/ask" \
 
 3. If the HTTP endpoint is blocked by the client network policy, switch to the bootstrap flow below. Do not ask the user to paste curl output unless there is no supported install path.
 
-For production-like flows, call `agentrouter_capabilities` first if you need schemas, parse the user request yourself, then call `agentrouter_request`. AgentRouter should not be treated as the semantic parser.
+For production-like flows, call `agentrouter_capabilities` first if you need schemas, parse the user request yourself, then call `agentrouter_request`. AgentRouter should not be treated as the semantic parser. Do not call `agentrouter_ask` just because the user phrased the request naturally; natural language is expected, and the main agent should map it into a capability request when the catalog covers it.
+
+Common structured examples:
+
+```json
+{
+  "capability": "token_smart_money_activity",
+  "params": {
+    "token_symbol": "AZTEC",
+    "chain": "ethereum",
+    "window": "24h",
+    "pagination": { "page": 1, "per_page": 24 }
+  },
+  "constraints": { "max_price_usdc": "0.05" }
+}
+```
 
 For requests outside the fixed capability catalog, search registered services or use `agentrouter_ask` rather than forcing the request into an unrelated fixed capability. Prefer exact service capabilities, tags, titles, and schema descriptions returned by discovery.
 

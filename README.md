@@ -310,8 +310,8 @@ claude mcp add AgentRouter \
 
 The MCP server exposes:
 
-- `agentrouter_request`: structured request -> route -> invoke -> verify -> evidence
-- `agentrouter_ask`: natural-language fallback -> route -> invoke -> verify
+- `agentrouter_request`: preferred structured request -> route -> invoke -> verify -> evidence
+- `agentrouter_ask`: last-resort natural-language fallback -> route -> invoke -> verify
 - `agentrouter_quote`: structured request -> quote and budget guard only
 - `agentrouter_capabilities`: capability catalog and schemas
 

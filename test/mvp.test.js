@@ -1053,6 +1053,25 @@ test("AgentRouter routes generic netflow requests to dynamic registered services
 
 test("AgentRouter resolves token symbols before invoking token-address services", async () => {
   await withServer(async ({ baseUrl }) => {
+    const newsSearchResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "article_news_search",
+        title: "Search articles and news",
+        provider_name: "News Lab",
+        description_for_agent: "Use this service to search articles and news by keyword.",
+        capabilities: "data_service,news_data,article_data",
+        price: "0.01",
+        sample_request: "{\"name\":\"AZTEC\"}",
+        sample_data: "{\"articles\":[{\"title\":\"AZTEC news\"}]}",
+        live_data: "{\"articles\":[{\"title\":\"AZTEC news\"}]}",
+        summary: "Search article and news content."
+      })
+    });
+    assert.equal(newsSearchResponse.status, 201);
+
     const searchResponse = await fetch(`${baseUrl}/studio/providers`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1128,6 +1147,30 @@ test("AgentRouter resolves token symbols before invoking token-address services"
     assert.equal(routed.input.chain, "ethereum");
     assert.equal(routed.input.timeframe, "1d");
     assert.equal(routed.result.data.smart_money_netflow_usd, 220000);
+
+    const structuredResponse = await fetch(`${baseUrl}/agent-router/request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        capability: "token_smart_money_activity",
+        params: {
+          token_symbol: "AZTEC",
+          chain: "ethereum",
+          window: "24h",
+          pagination: { page: 1, per_page: 24 }
+        },
+        constraints: { max_price_usdc: "0.05" }
+      })
+    });
+    assert.equal(structuredResponse.status, 200);
+    const structured = await structuredResponse.json();
+    assert.equal(structured.ok, true);
+    assert.equal(structured.protocol.semantic_parser, "external_main_agent");
+    assert.equal(structured.selected_service.service_id, "token_flow_intelligence");
+    assert.equal(structured.token_resolution.status, "resolved");
+    assert.equal(structured.token_resolution.resolver_service_id, "token_search_resolver");
+    assert.equal(structured.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(structured.result.data.smart_money_netflow_usd, 220000);
   });
 });
 

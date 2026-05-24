@@ -10,21 +10,8 @@ const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL ||
 
 const tools = [
   {
-    name: "agentrouter_ask",
-    description: "Fallback/demo tool: route a natural-language data/API request to the best registered AgentRouter service, invoke it if allowed by budget, and return the verified result.",
-    inputSchema: {
-      type: "object",
-      required: ["task"],
-      properties: {
-        task: { type: "string", description: "The user's original data/API request." },
-        max_price: { type: "string", description: "Maximum USDC price allowed for this call.", default: "0.05" },
-        currency: { type: "string", description: "Payment currency.", default: "USDC" }
-      }
-    }
-  },
-  {
     name: "agentrouter_request",
-    description: "Preferred tool: send a structured capability request that the main agent has already parsed, then route, quote, invoke, verify, and return evidence.",
+    description: "Use this first for AgentRouter data/API calls. The main agent parses the user request into a structured capability request; AgentRouter then validates, routes, invokes, verifies, and returns evidence. Do not use agentrouter_ask when you can fill this schema.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -53,10 +40,23 @@ const tools = [
   },
   {
     name: "agentrouter_capabilities",
-    description: "List the AgentRouter capability catalog and expected structured request schemas.",
+    description: "List AgentRouter capability schemas. Call this before agentrouter_request when you are unsure which structured capability or params to use.",
     inputSchema: {
       type: "object",
       properties: {}
+    }
+  },
+  {
+    name: "agentrouter_ask",
+    description: "Last-resort fallback/demo only: send the user's natural-language task to AgentRouter for lightweight parsing. Prefer agentrouter_capabilities plus agentrouter_request whenever the main agent can produce a structured request.",
+    inputSchema: {
+      type: "object",
+      required: ["task"],
+      properties: {
+        task: { type: "string", description: "The user's original data/API request. Use only when a structured capability request cannot be produced." },
+        max_price: { type: "string", description: "Maximum USDC price allowed for this call.", default: "0.05" },
+        currency: { type: "string", description: "Payment currency.", default: "USDC" }
+      }
     }
   },
   {

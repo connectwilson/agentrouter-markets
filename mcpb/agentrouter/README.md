@@ -4,10 +4,10 @@ AgentRouter connects Claude Desktop to the Agent Native Data Network through MCP
 
 ## Tools
 
-- `agentrouter_request`: preferred structured capability request path.
+- `agentrouter_request`: preferred structured capability request path. Use this first whenever the main agent can parse the user request.
 - `agentrouter_quote`: route and quote without invoking a provider.
 - `agentrouter_capabilities`: list capability schemas.
-- `agentrouter_ask`: natural-language fallback for demos.
+- `agentrouter_ask`: last-resort natural-language fallback for demos.
 
 ## Configuration
 

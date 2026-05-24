@@ -147,6 +147,34 @@ const CAPABILITY_ALIASES = [
       chains: [intent.chain || chainFromAsset(intent.asset) || "ethereum"],
       pagination: { page: 1, per_page: 10 }
     })
+  },
+  {
+    capability: "token_smart_money_activity",
+    capabilities: ["data_service", "token_god_mode", "token_data", "smart_money"],
+    keywords: ["token smart money", "token god mode", "聪明钱", "买", "卖", "bought", "sold", "flow intelligence", "who bought"],
+    agent_description: "Use this when the user asks for token-level smart-money activity, buyer/seller movement, recent buys/sells, or token flow intelligence.",
+    not_for: ["chain-level smart-money netflow", "generic news search", "market-wide token rankings"],
+    input_schema: {
+      type: "object",
+      required: ["token_symbol"],
+      properties: {
+        token_symbol: { type: "string", description: "Token ticker or symbol, for example AZTEC." },
+        token_address: { type: "string", description: "Optional contract address. AgentRouter may resolve it from token_symbol when omitted." },
+        chain: { type: "string", enum: ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc"] },
+        window: { type: "string", description: "Requested time window, for example 24h, 1d, 7d." },
+        pagination: { type: "object" }
+      }
+    },
+    examples: [
+      {
+        user_query: "查询 AZTEC 的聪明钱近24小时动向",
+        request: {
+          capability: "token_smart_money_activity",
+          params: { token_symbol: "AZTEC", chain: "ethereum", window: "24h", pagination: { page: 1, per_page: 24 } }
+        }
+      }
+    ],
+    defaultInput: (intent) => tokenSmartMoneyInput(intent)
   }
 ];
 
@@ -274,12 +302,29 @@ export async function routeCapabilityRequest(store, {
     };
   }
 
-  const intent = {
+  let intent = {
     capability,
     ...params,
     consumer_context: consumerContext
   };
   const normalizedConstraints = normalizeRequestConstraints(constraints, budget);
+  const tokenResolution = await resolveStructuredTokenIfNeeded(store, intent, normalizedConstraints, budget);
+  if (tokenResolution?.ok === false) {
+    const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
+    const observation = recordRouteObservation(store, {
+      status: tokenResolution.status,
+      request,
+      error: tokenResolution
+    });
+    return {
+      ok: false,
+      status: tokenResolution.status,
+      request,
+      observation,
+      token_resolution: tokenResolution
+    };
+  }
+  if (tokenResolution?.intent) intent = tokenResolution.intent;
   const candidates = rankCandidates(store, intent, normalizedConstraints);
   if (!candidates.length) {
     const request = { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext };
@@ -392,6 +437,7 @@ export async function routeCapabilityRequest(store, {
     },
     request,
     selected_service: selected,
+    token_resolution: tokenResolution || null,
     candidates_considered: candidates.length,
     candidates: summarizeCandidates(candidates),
     quote,
@@ -643,6 +689,7 @@ function buildSearchQuery(intent) {
   if (intent.capability === "onchain_fund_flow") return `${intent.chain || ""} fund flow`;
   if (intent.capability === "smart_money_netflow") return `${intent.chain || chainFromAsset(intent.asset) || ""} smart money netflow`;
   if (intent.capability === "smart_money_holdings") return `${intent.chain || chainFromAsset(intent.asset) || ""} smart money holdings`;
+  if (intent.capability === "token_smart_money_activity") return `${intent.token_symbol || intent.asset || ""} token god mode who bought sold flow intelligence smart money`;
   return [
     String(intent.capability || "").replace(/[_-]/g, " "),
     ...Object.values(intent).flatMap((value) => searchableValues(value))
@@ -752,6 +799,9 @@ function serviceCoversCapability(surfaceText, capability) {
   if (capability === "smart_money_holdings") {
     return /smart[\s_-]?money|聪明钱/.test(surfaceText) && /holdings?|持仓|balance/.test(surfaceText);
   }
+  if (capability === "token_smart_money_activity") {
+    return /token[\s_-]?god[\s_-]?mode|flow[\s_-]?intelligence|who[\s_-]?bought|bought[\s_-]?sold|buyer[\s_-]?seller|token[\s_-]?flow/.test(surfaceText);
+  }
   const terms = dynamicCapabilityTerms(capability);
   return terms.length > 0 && terms.every((term) => surfaceText.includes(term));
 }
@@ -836,9 +886,175 @@ function buildInput(manifest, intent) {
       ...dynamicInputParams(intent, manifest.sample_request || {})
     };
   }
-  return {
+  const input = {
     ...(manifest.sample_request || {}),
     ...(entry ? entry.defaultInput(intent) : {})
+  };
+  if (intent.capability === "token_smart_money_activity") {
+    return filterInputToManifestShape(input, manifest);
+  }
+  return input;
+}
+
+function filterInputToManifestShape(input, manifest) {
+  const sampleKeys = new Set(Object.keys(manifest.sample_request || {}));
+  const schemaKeys = new Set(Object.keys(manifest.input_schema?.properties || {}));
+  const allowed = new Set([...sampleKeys, ...schemaKeys]);
+  if (!allowed.size) return input;
+  return Object.fromEntries(
+    Object.entries(input).filter(([key]) => allowed.has(key))
+  );
+}
+
+function tokenSmartMoneyInput(intent) {
+  const window = intent.window || "24h";
+  const input = {
+    chain: intent.chain || "ethereum",
+    pagination: intent.pagination || { page: 1, per_page: 24 }
+  };
+  if (intent.token_address) input.token_address = intent.token_address;
+  if (intent.token_symbol) input.token_symbol = intent.token_symbol;
+  if (/^\d+\s*h$/i.test(window) || window === "24h" || window === "1d") input.date = recentDateRange(1);
+  else if (/^\d+\s*d$/i.test(window)) input.date = recentDateRange(Number(window.match(/\d+/)?.[0] || 1));
+  else input.timeframe = window;
+  return input;
+}
+
+async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, budget = {}) {
+  if (intent.capability !== "token_smart_money_activity") return null;
+  if (intent.token_address) return null;
+  const tokenSymbol = intent.token_symbol || intent.asset;
+  if (!tokenSymbol) return {
+    ok: false,
+    status: "token_symbol_required",
+    message: "token_smart_money_activity requires token_symbol or token_address."
+  };
+
+  const resolver = searchServices(store, {
+    query: "token search",
+    verifiedOnly: true,
+    maxPrice: constraints.max_price_usdc || budget.max_amount
+  }).map((service) => ({
+    service,
+    score: tokenResolverScore(service)
+  })).filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.service;
+
+  if (!resolver) return {
+    ok: false,
+    status: "token_resolver_not_found",
+    token_symbol: tokenSymbol,
+    message: "No verified token resolver service is registered."
+  };
+
+  const resolverInput = {
+    search_query: tokenSymbol,
+    result_type: "token",
+    chain: intent.chain || "ethereum",
+    limit: 5
+  };
+  const invocation = await invokePaidService(store, resolver.service_id, resolverInput, {
+    max_amount: constraints.max_price_usdc || budget.max_amount || "0.05",
+    currency: budget.currency || "USDC"
+  });
+  if (invocation.statusCode >= 400) {
+    return {
+      ok: false,
+      status: "token_resolution_failed",
+      token_symbol: tokenSymbol,
+      resolver_service_id: resolver.service_id,
+      resolver_input: resolverInput,
+      error: invocation.body.error
+    };
+  }
+
+  const match = findTokenMatch(invocation.body.result?.data, {
+    tokenSymbol,
+    chain: intent.chain || "ethereum"
+  });
+  if (!match?.address) return {
+    ok: false,
+    status: "token_not_found",
+    token_symbol: tokenSymbol,
+    resolver_service_id: resolver.service_id,
+    resolver_input: resolverInput,
+    message: "Token resolver did not return a matching contract address."
+  };
+
+  return {
+    ok: true,
+    status: "resolved",
+    token_symbol: tokenSymbol,
+    token_address: match.address,
+    chain: match.chain || intent.chain || "ethereum",
+    matched_name: match.name || null,
+    matched_symbol: match.symbol || null,
+    resolver_service_id: resolver.service_id,
+    resolver_input: resolverInput,
+    intent: {
+      ...intent,
+      token_symbol: tokenSymbol,
+      token_address: match.address,
+      chain: match.chain || intent.chain || "ethereum"
+    }
+  };
+}
+
+function findTokenMatch(data, { tokenSymbol, chain }) {
+  const rows = flattenObjects(data);
+  const normalized = String(tokenSymbol || "").toLowerCase();
+  const chainNormalized = String(chain || "").toLowerCase();
+  const candidates = rows.map((row) => ({
+    address: row.token_address || row.contract_address || row.contractAddress || row.address,
+    symbol: row.symbol || row.token_symbol || row.ticker,
+    name: row.name || row.token_name,
+    chain: row.chain || row.network || row.blockchain
+  })).filter((row) => /^0x[a-fA-F0-9]{40}$/.test(String(row.address || "")));
+  return candidates.find((row) =>
+    String(row.symbol || "").toLowerCase() === normalized &&
+    (!row.chain || !chainNormalized || String(row.chain).toLowerCase() === chainNormalized)
+  ) || candidates.find((row) => String(row.symbol || "").toLowerCase() === normalized)
+    || candidates.find((row) => String(row.name || "").toLowerCase() === normalized)
+    || candidates[0] || null;
+}
+
+function flattenObjects(value, out = []) {
+  if (!value || typeof value !== "object") return out;
+  if (Array.isArray(value)) {
+    for (const item of value) flattenObjects(item, out);
+    return out;
+  }
+  out.push(value);
+  for (const child of Object.values(value)) flattenObjects(child, out);
+  return out;
+}
+
+function serviceSearchText(service) {
+  return [
+    service.service_id,
+    service.title,
+    service.description_for_agent,
+    ...(service.capabilities || [])
+  ].join(" ").toLowerCase();
+}
+
+function tokenResolverScore(service) {
+  const text = serviceSearchText(service);
+  let score = 0;
+  if (/token[_\s-]?search|entity[_\s-]?search|token[_\s-]?resolver|resolve.*token/.test(text)) score += 8;
+  if (/token[_\s-]?metadata|contract[_\s-]?address|token[_\s-]?address/.test(text)) score += 4;
+  if ((service.capabilities || []).some((capability) => /token_search|entity_search|token_metadata/.test(capability))) score += 8;
+  if ((service.capabilities || []).some((capability) => /news|article|rss|macro|etf/.test(capability))) score -= 8;
+  if (/news|article|rss|search articles/.test(text)) score -= 8;
+  return score;
+}
+
+function recentDateRange(days) {
+  const to = new Date();
+  const from = new Date(to.getTime() - Number(days || 1) * 24 * 60 * 60 * 1000);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10)
   };
 }
 
