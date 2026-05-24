@@ -437,7 +437,7 @@ function shouldPreferDerivedDisplayTitle(title, serviceId, derived) {
   const id = String(serviceId || "").toLowerCase();
   if (!value) return true;
   if (value.length < 4) return true;
-  if (/^(up to \d+\)?|no pagination|request example|copy|responses?|body|parameters?)$/i.test(title)) return true;
+  if (/^(\(?up to \d+\)?|\(?no pagination\)?|request example\b|copy|responses?|body|parameters?)/i.test(title)) return true;
   if (/^(mportant|ain)$/i.test(title)) return true;
   if (/^(original|important|first-report)$/i.test(title) && /_(newsflash|article)_/.test(id)) return true;
   if (/_(article|newsflash)_[a-z0-9]+$/.test(id) && /^all (articles|newsflashes)$/i.test(title)) return true;
