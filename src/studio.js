@@ -794,7 +794,7 @@ export function studioHtml({ draft, loadedService } = {}) {
           status.classList.add("error");
           return;
         }
-        discoveredDrafts = payload.drafts || [];
+        discoveredDrafts = (payload.drafts || []).map(normalizeDiscoveredDraft);
         for (const draft of discoveredDrafts.filter((item) => item.published)) {
           publishedServiceIds.add(draft.service_id);
         }
@@ -916,6 +916,36 @@ export function studioHtml({ draft, loadedService } = {}) {
         '<button type="button" class="mini-button use-draft" ' + (draft.published ? "disabled" : "") + ">" + (draft.published ? "Verified" : "Edit Details") + "</button>",
         "</div>"
       ].join("")).join("");
+    }
+
+    function normalizeDiscoveredDraft(draft) {
+      const capabilityText = [
+        draft.title,
+        draft.path,
+        draft.upstream_url,
+        Object.keys(draft.sample_request || {}).join(" ")
+      ].filter(Boolean).join(" ");
+      const capabilities = suggestCapabilities(capabilityText).split(",").filter(Boolean);
+      return {
+        ...draft,
+        capabilities,
+        summary: structuredDraftSummary(draft)
+      };
+    }
+
+    function structuredDraftSummary(draft) {
+      const inputKeys = Object.keys(draft.sample_request || {});
+      const response = draftResponseSummary(draft);
+      const title = draft.title || draft.service_id || "this endpoint";
+      const method = draft.method || "GET";
+      const path = draft.path || endpointPath(draft.upstream_url || "");
+      const inputText = inputKeys.length ? "Inputs: " + inputKeys.join(", ") + "." : "Inputs: none required.";
+      return [
+        "Use this service when a buyer Agent needs " + title + ".",
+        "Endpoint: " + method + " " + path + ".",
+        inputText,
+        "Returns: " + response + "."
+      ].filter(Boolean).join(" ");
     }
 
     function draftReviewItems(draft) {
