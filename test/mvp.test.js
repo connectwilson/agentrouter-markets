@@ -1233,6 +1233,58 @@ test("Provider Studio imports a direct API endpoint when no OpenAPI document exi
   });
 });
 
+test("Provider Studio publish replaces an unverified duplicate service and retries validation", async () => {
+  await withServer(async ({ server, baseUrl }) => {
+    const serviceId = "get_api_v1_data_header_key_retry";
+    server.store.services.set(serviceId, {
+      manifest: {
+        service_id: serviceId,
+        provider: { provider_id: "api_pro_example" },
+        registration: { source_fingerprint: "stale_unverified_source" }
+      },
+      verification_status: "pending",
+      validation_runs: [{ ok: false, error: "previous validation failed" }],
+      feedback_events: [],
+      quality_events: [],
+      health_checks: []
+    });
+
+    const publishResponse = await fetch(`${baseUrl}/studio/import/publish`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        publish_scope: "local_only",
+        drafts: [{
+          selected: true,
+          service_id: serviceId,
+          provider_id: "api_pro_example",
+          provider_name: "API Pro Example",
+          title: "Header key retry",
+          description_for_agent: "Use this service to fetch header-key protected data.",
+          capabilities: ["data_service", "header_key_retry"],
+          price: "0.01",
+          method: "GET",
+          path: "/api/v1/data/header-key",
+          upstream_url: `${baseUrl}/mock/upstream/header-key`,
+          auth_header: "auto",
+          secret_name: "PROVIDER_SECRET",
+          secret_value: "demo-provider-secret",
+          sample_request: {},
+          preview_data: { status: "success", rows: [{ metric: "sample_metric_1", value: 42 }] },
+          summary: "Header key retry returns one row."
+        }]
+      })
+    });
+    assert.equal(publishResponse.status, 201);
+    const published = await publishResponse.json();
+    assert.equal(published.ok, true);
+    assert.equal(published.failed.length, 0);
+    assert.equal(published.published[0].service_id, serviceId);
+    assert.equal(published.published[0].validation.ok, true);
+    assert.equal(server.store.services.get(serviceId).verification_status, "verified");
+  });
+});
+
 test("Provider Studio imports endpoint drafts from a Skill document", async () => {
   const upstream = http.createServer((req, res) => {
     if (req.url === "/blockbeats-skill") {

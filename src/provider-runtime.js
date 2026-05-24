@@ -388,6 +388,7 @@ function buildAuthAttempts({ mode, header, secretValue }) {
     { label: "authorization", headers: { authorization: `Bearer ${secretValue}` } },
     { label: "x-api-key", headers: { "x-api-key": secretValue } },
     { label: "api-key", headers: { "api-key": secretValue } },
+    { label: "apiKey", headers: { apiKey: secretValue } },
     { label: "apikey", headers: { apikey: secretValue } },
     { label: "x-access-token", headers: { "x-access-token": secretValue } }
   ];

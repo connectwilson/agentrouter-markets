@@ -268,26 +268,20 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       if (duplicate) {
         const validation = duplicate.validation_runs?.at(-1) || { ok: duplicate.verification_status === "verified" };
         if (validation.ok !== true) {
-          failed.push({
-            service_id: config.manifest.service_id,
-            existing_service_id: duplicate.manifest.service_id,
-            error: "EXISTING_SERVICE_NOT_VERIFIED",
-            message: "A matching service already exists but is not verified. Fix the endpoint/auth/request body and publish again.",
+          await removeUnverifiedServiceForRetry(store, duplicate.manifest.service_id);
+        } else {
+          published.push({
+            ok: true,
+            service_id: duplicate.manifest.service_id,
+            requested_service_id: config.manifest.service_id,
+            already_registered: true,
+            duplicate_reason: duplicate.manifest.service_id === config.manifest.service_id ? "service_id" : "same_provider_source",
+            warning: null,
+            registration: publicServiceRecord(duplicate),
             validation
           });
           continue;
         }
-        published.push({
-          ok: true,
-          service_id: duplicate.manifest.service_id,
-          requested_service_id: config.manifest.service_id,
-          already_registered: true,
-          duplicate_reason: duplicate.manifest.service_id === config.manifest.service_id ? "service_id" : "same_provider_source",
-          warning: null,
-          registration: publicServiceRecord(duplicate),
-          validation
-        });
-        continue;
       }
       const configPath = await writeProviderConfig(config);
       const record = registerService(store, config.manifest, baseUrl);
@@ -316,10 +310,11 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
       if (existing && /already registered/i.test(error.message)) {
         const validation = existing.validation_runs?.at(-1) || { ok: existing.verification_status === "verified" };
         if (validation.ok !== true) {
+          await removeUnverifiedServiceForRetry(store, draft.service_id);
           failed.push({
             service_id: draft.service_id,
-            error: "EXISTING_SERVICE_NOT_VERIFIED",
-            message: "A matching service already exists but is not verified. Fix the endpoint/auth/request body and publish again.",
+            error: "RETRY_REPLACED_UNVERIFIED_SERVICE",
+            message: "The previous unverified service was removed. Click Verify & Publish again to retry with the current endpoint/auth/request body.",
             validation
           });
           continue;
@@ -349,15 +344,24 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
   };
 }
 
+async function removeUnverifiedServiceForRetry(store, serviceId) {
+  unregisterService(store, serviceId);
+  await deleteProviderConfig(serviceId);
+}
+
 function summarizeValidationFailure(validation = {}) {
   const providerCode = validation.provider_error?.code;
   const providerMessage = validation.provider_error?.message;
   if (providerCode === "UPSTREAM_ERROR") {
     const upstream = validation.provider_error?.upstream_payload;
+    const upstreamStatus = validation.provider_error?.upstream_status;
     const upstreamCode = upstream?.code;
     const upstreamReason = upstream?.reason;
     if (upstreamCode === "UPSTREAM_NON_JSON_RESPONSE") {
       return "The endpoint responded, but it did not return JSON. Use a JSON API endpoint or update the URL.";
+    }
+    if (upstreamStatus === 401 || upstreamStatus === 403) {
+      return "The upstream API rejected authentication. Check that the API key is valid for this endpoint and that the auth header is correct.";
     }
     if (upstreamReason === "auth_or_permission_error") {
       return "The endpoint rejected authentication. Check the API key and auth header, or leave the header blank so AgentRouter can try common header names.";
