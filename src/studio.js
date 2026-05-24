@@ -927,7 +927,8 @@ export function studioHtml({ draft, loadedService } = {}) {
         draftReviewItem("Input", escapeHtml(draftInputSummary(draft))),
         draftReviewItem("Response", escapeHtml(draftResponseSummary(draft))),
         draftReviewItem("Source", escapeHtml(draftSourceLabel(draft))),
-        draftReviewItem("Buyer", escapeHtml(draftBuyerSummary(draft))),
+        draftReviewItem("Price", escapeHtml(draftPriceSummary(draft))),
+        draftReviewItem("Buyer auth", escapeHtml(draftBuyerAuthSummary(draft))),
         draftReviewItem("Freshness", escapeHtml(draftFreshnessSummary(draft))),
         draftReviewItem("Agent summary", escapeHtml(summary), true),
         draftReviewItem("Request data", '<code>' + escapeHtml(compactJson(draft.data_contract?.request_data?.example || draft.sample_request || {}, 220)) + '</code>', true),
@@ -962,10 +963,14 @@ export function studioHtml({ draft, loadedService } = {}) {
       return String(shape || "unknown");
     }
 
-    function draftBuyerSummary(draft) {
+    function draftPriceSummary(draft) {
       const price = draft.price || importDefaultPrice.value || "0.01";
+      return price + " USDC/call";
+    }
+
+    function draftBuyerAuthSummary(draft) {
       const needsKey = draft.data_contract?.pre_call_context?.buyer_requirements?.needs_buyer_api_key;
-      return price + " USDC/call; buyer API key " + (needsKey ? "required" : "not required");
+      return "buyer API key " + (needsKey ? "required" : "not required");
     }
 
     function draftFreshnessSummary(draft) {
