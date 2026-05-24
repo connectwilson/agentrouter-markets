@@ -13,7 +13,7 @@ export const USED_CHALLENGES_PATH = path.join(ADN_DIR, "used-challenges.json");
 
 export const DEFAULT_POLICY = {
   enabled: true,
-  network_allowlist: ["base"],
+  network_allowlist: ["base", "base-sepolia", "arc-testnet", "eip155:5042002"],
   asset_allowlist: ["USDC"],
   per_call_limit_usdc: "0.05",
   daily_limit_usdc: "2",
@@ -23,7 +23,8 @@ export const DEFAULT_POLICY = {
   deny_unknown_payment_targets: true,
   require_manifest_match: true,
   require_402_challenge: true,
-  require_confirmation_above_usdc: "0.05"
+  require_confirmation_above_usdc: "0.05",
+  chain_allowlist: [5042002]
 };
 
 export async function ensureAdnDir() {
@@ -142,6 +143,9 @@ export async function assertPolicyAllows({ serviceId, amount, currency, network,
   }
   if (!policy.network_allowlist.includes(network)) {
     throw new Error(`Network ${network} is not allowed by wallet policy.`);
+  }
+  if (challenge?.chain_id && Array.isArray(policy.chain_allowlist) && policy.chain_allowlist.length && !policy.chain_allowlist.includes(Number(challenge.chain_id))) {
+    throw new Error(`Chain ${challenge.chain_id} is not allowed by wallet policy.`);
   }
   if (!policy.asset_allowlist.includes(currency)) {
     throw new Error(`Asset ${currency} is not allowed by wallet policy.`);

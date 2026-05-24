@@ -4,7 +4,7 @@ import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from ".
 import { createMemoryStore, listServiceSummaries, publicServiceRecord, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck } from "./registry.js";
+import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet } from "./registry.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
 import { askAgentRouter } from "./agent-router.js";
@@ -192,6 +192,14 @@ async function routeRequest(req, res, store, baseUrl) {
     const manifest = await readJson(req);
     const record = registerService(store, manifest, baseUrl);
     sendJson(res, 201, publicServiceRecord(record));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/services/") && url.pathname.endsWith("/payout")) {
+    const serviceId = decodeURIComponent(url.pathname.split("/")[2] || "");
+    const body = await readJson(req);
+    const result = await updateServicePayoutWallet(store, serviceId, body.payout_address || body.payoutAddress || "");
+    sendJson(res, 200, result);
     return;
   }
 

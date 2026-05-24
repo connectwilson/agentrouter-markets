@@ -13,13 +13,14 @@ Last updated: 2026-05-22
   - HTTP: `POST /agent-router/ask`
 - AgentRouter currently recognizes address lookup, BTC/perp liquidation max-pain, generic netflow, Nansen-style smart-money netflow, and smart-money holdings intents.
 - Local provider configs using `/provider/custom/...` are rebound to the current server port at startup, so old generated JSON does not pin the app to a stale local port.
-- Wallet/payment is still dev-mode x402-style proof, not production USDC settlement.
+- Wallet/payment defaults to dev-mode x402-style proof. `circle_arc` mode now supports local-wallet Arc Testnet USDC transfers to provider payout wallets with provider-side tx verification.
 - Agora hackathon positioning is captured in `docs/PRD_AGORA_HACKATHON.md`: AgentRouter Markets, a paid market-intelligence routing layer for trading agents.
 - The PRD now treats `/agent-router/request` as the formal structured protocol endpoint and `/agent-router/ask` as a demo/fallback wrapper.
 - Implemented `GET /capabilities` for a machine-readable capability catalog.
 - Implemented `POST /agent-router/request` for deterministic structured routing.
 - Implemented `/agent-router/demo` as the demand-side hackathon console.
 - Paid invocation feedback now includes an `agent_router_settlement_receipt_v1` settlement receipt with USDC amount, mode, network, payee, and tx hash.
+- Local `circle_arc` calls now include Arc Testnet chain metadata, direct-provider-wallet settlement model, payment event hash, and feedback hash.
 - Search results now expose `trust_score`; structured routing returns provider selection reasons.
 - Verified the full provider-to-demand flow: Provider Studio OpenAPI import publishes `get_liquidation_max_pain`; AgentRouter `/ask` compiles natural language into a structured `perp_liquidation_max_pain` request, selects the uploaded service, pays, validates, and returns data.
 - OpenAPI capability inference now enriches imported liquidation services with the standard `perp_liquidation`, `liquidation_heatmap`, and `perp_liquidation_max_pain` capabilities.

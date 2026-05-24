@@ -1,6 +1,6 @@
 export function getX402ProductionPlan() {
   return {
-    status: "buyer_client_integrated",
+    status: "buyer_client_integrated_arc_direct_settlement_available",
     current_mode: process.env.ADN_PAYMENT_MODE || "dev",
     target_packages: [
       "@x402/core",
@@ -12,6 +12,11 @@ export function getX402ProductionPlan() {
       "Use Alice's local Agent Wallet or a session wallet as the EVM signer.",
       "Keep wallet policy checks before signing any x402 payload.",
       "The official @x402/fetch wrapper handles 402 PAYMENT-REQUIRED parsing, PAYMENT-SIGNATURE creation, retry, and PAYMENT-RESPONSE parsing."
+    ],
+    arc_side: [
+      "Set ADN_PAYMENT_BACKEND=circle_arc to use an x402-style challenge plus direct Arc Testnet USDC transfer from Alice's local wallet to the provider payout wallet.",
+      "The provider verifies the Arc transaction hash, amount, token contract, payer, and recipient before returning data.",
+      "This is the current Agora demo path until an official x402 facilitator supports the target Arc environment."
     ],
     seller_side: [
       "Next step: replace provider-side verifyDevPaymentProof with official x402 resource-server middleware or facilitator /verify and /settle calls.",

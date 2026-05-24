@@ -79,6 +79,38 @@ test("home page and Provider Studio render separately", async () => {
   });
 });
 
+test("published services can bind an Arc payout wallet without re-registration", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const payoutAddress = "0x1111111111111111111111111111111111111111";
+    const update = await fetch(`${baseUrl}/services/chain_fund_flow_7d_base/payout`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payout_address: payoutAddress })
+    });
+    assert.equal(update.status, 200);
+    const payload = await update.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.payout_address, payoutAddress);
+    assert.equal(payload.manifest.provider.payout_address, payoutAddress);
+    assert.equal(payload.manifest.pricing.pay_to, payoutAddress);
+    assert.equal(payload.manifest.pricing.settlement_model, "direct_provider_wallet");
+
+    const manifestResponse = await fetch(`${baseUrl}/services/chain_fund_flow_7d_base/manifest`);
+    const manifest = await manifestResponse.json();
+    assert.equal(manifest.provider.payout_address, payoutAddress);
+    assert.equal(manifest.pricing.pay_to, payoutAddress);
+
+    const invalid = await fetch(`${baseUrl}/services/chain_fund_flow_7d_base/payout`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payout_address: "not-an-address" })
+    });
+    assert.equal(invalid.status, 422);
+    const errorPayload = await invalid.json();
+    assert.equal(errorPayload.error.code, "INVALID_PAYOUT_ADDRESS");
+  });
+});
+
 test("discovery connector searches, previews, invokes, and records feedback", async () => {
   await withServer(async ({ baseUrl }) => {
     const connector = new DiscoveryConnector({ baseUrl });
@@ -2481,6 +2513,50 @@ test("provider rejects replayed wallet payment challenge", async () => {
     const body = await paidTwice.json();
     assert.equal(body.code, "UNKNOWN_OR_REPLAYED_PAYMENT_CHALLENGE");
   });
+});
+
+test("circle_arc backend verifies x402-style Arc USDC payment before returning provider data", async () => {
+  await resetWalletForTests();
+  const previousBackend = process.env.ADN_PAYMENT_BACKEND;
+  const previousProviderReceive = process.env.ADN_PROVIDER_RECEIVE_ADDRESS;
+  const previousTransferMode = process.env.ADN_ARC_TRANSFER_MODE;
+  const previousVerifyMode = process.env.ADN_ARC_VERIFY_MODE;
+  process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x1111111111111111111111111111111111111111";
+  process.env.ADN_ARC_TRANSFER_MODE = "mock";
+  process.env.ADN_ARC_VERIFY_MODE = "mock";
+  try {
+    await withServer(async ({ baseUrl }) => {
+      process.env.ADN_PAYMENT_BACKEND = "circle_arc";
+      await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
+      const invoke = await runCli(["invoke", "chain_fund_flow_7d_base", "{\"chain\":\"base\",\"days\":7}"], {
+        ADN_REGISTRY_URL: baseUrl,
+        ADN_PAYMENT_BACKEND: "circle_arc",
+        ADN_ARC_TRANSFER_MODE: "mock",
+        ADN_ARC_VERIFY_MODE: "mock"
+      });
+      assert.equal(invoke.code, 0, invoke.stderr);
+      const payload = JSON.parse(invoke.stdout);
+      assert.equal(payload.result.status, "success");
+      assert.equal(payload.local_payment.backend, "circle_arc");
+      assert.equal(payload.local_payment.network, "arc-testnet");
+      assert.equal(payload.local_payment.pay_to, "0x1111111111111111111111111111111111111111");
+      assert.match(payload.local_payment.payment_tx, /^0x[0-9a-f]{64}$/);
+      assert.match(payload.local_payment.event_hash, /^0x[0-9a-f]{64}$/);
+      assert.equal(payload.feedback.settlement_receipt.payment_backend, "circle_arc");
+      assert.equal(payload.feedback.settlement_receipt.chain_id, 5042002);
+      assert.equal(payload.feedback.settlement_receipt.settlement_model, "direct_provider_wallet");
+      assert.match(payload.feedback.feedback_hash, /^0x[0-9a-f]{64}$/);
+    });
+  } finally {
+    if (previousBackend === undefined) delete process.env.ADN_PAYMENT_BACKEND;
+    else process.env.ADN_PAYMENT_BACKEND = previousBackend;
+    if (previousProviderReceive === undefined) delete process.env.ADN_PROVIDER_RECEIVE_ADDRESS;
+    else process.env.ADN_PROVIDER_RECEIVE_ADDRESS = previousProviderReceive;
+    if (previousTransferMode === undefined) delete process.env.ADN_ARC_TRANSFER_MODE;
+    else process.env.ADN_ARC_TRANSFER_MODE = previousTransferMode;
+    if (previousVerifyMode === undefined) delete process.env.ADN_ARC_VERIFY_MODE;
+    else process.env.ADN_ARC_VERIFY_MODE = previousVerifyMode;
+  }
 });
 
 function runCli(args, env = {}) {

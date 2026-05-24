@@ -79,13 +79,22 @@ AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com
 AGENT_ROUTER_MAX_PRICE=0.05
 ```
 
+For Arc hackathon demos with real local-wallet settlement, add:
+
+```text
+ADN_PAYMENT_BACKEND=circle_arc
+ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
+```
+
+In this mode AgentRouter still uses the same x402-style HTTP 402 challenge, but the local wallet sends Arc Testnet USDC directly to the provider payout wallet and the provider verifies the transaction before returning data.
+
 If the user runs a local AgentRouter server, use:
 
 ```text
 AGENT_ROUTER_URL=http://127.0.0.1:8800
 ```
 
-After MCP is installed, the local AgentRouter bridge automatically creates a local encrypted EVM/secp256k1 session wallet during MCP initialization if one does not already exist. Do not ask the user to trigger wallet creation, configure environment variables, or type a wallet passphrase into chat. If the user asks about wallet readiness, call `agentrouter_wallet_status` and show the public address. Use `agentrouter_wallet_create` only as a manual fallback if auto-creation was disabled or failed. Use `agentrouter_wallet_setup` only if the user explicitly asks for an advanced self-chosen passphrase flow.
+After MCP is installed, the local AgentRouter bridge automatically creates a local encrypted EVM/secp256k1 session wallet during MCP initialization if one does not already exist. Do not ask the user to trigger wallet creation, configure environment variables, or type a wallet passphrase into chat. If the user asks about wallet readiness, call `agentrouter_wallet_status` and show the public address. For `circle_arc` settlement, this address needs a small Arc Testnet USDC balance. Use `agentrouter_wallet_create` only as a manual fallback if auto-creation was disabled or failed. Use `agentrouter_wallet_setup` only if the user explicitly asks for an advanced self-chosen passphrase flow.
 
 ## Client Guidance
 

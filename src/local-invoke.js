@@ -1,4 +1,6 @@
-import { createWalletPaymentProof } from "./payment.js";
+import { sendArcUsdcTransfer } from "./arc-payment.js";
+import { hashJson } from "./evidence.js";
+import { createArcPaymentProof, createWalletPaymentProof } from "./payment.js";
 import { createSettlementReceipt, currentPaymentBackend } from "./payment-adapter.js";
 import { invokeWithRealX402, isRealX402Enabled } from "./real-x402-client.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
@@ -23,6 +25,18 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
 
   const challenge = await firstResponse.json();
   const payment = challenge.payment;
+  const policyManifest = currentPaymentBackend() === "circle_arc"
+    ? {
+        ...manifest,
+        pricing: {
+          ...manifest.pricing,
+          network: payment.network,
+          token_address: payment.token_address,
+          pay_to: payment.pay_to,
+          settlement_model: payment.settlement_model
+        }
+      }
+    : manifest;
   await assertPolicyAllows({
     serviceId,
     amount: payment.amount,
@@ -30,11 +44,24 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     network: payment.network,
     payTo: payment.pay_to,
     providerId: manifest.provider.provider_id,
-    manifest,
+    manifest: policyManifest,
     challenge: payment
   });
   const wallet = await readWallet();
-  const proof = createWalletPaymentProof({
+  let arcTransfer = null;
+  if (currentPaymentBackend() === "circle_arc") {
+    arcTransfer = await sendArcUsdcTransfer({ wallet, payment });
+  }
+  const proof = currentPaymentBackend() === "circle_arc" ? createArcPaymentProof({
+    wallet,
+    serviceId,
+    amount: payment.amount,
+    currency: payment.asset,
+    network: payment.network,
+    payTo: payment.pay_to,
+    challenge: payment,
+    tx: arcTransfer
+  }) : createWalletPaymentProof({
     wallet,
     serviceId,
     amount: payment.amount,
@@ -54,6 +81,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   });
   const result = await paidResponse.json();
   const event = {
+    event_version: "agent_local_payment_event_v1",
     service_id: serviceId,
     provider_id: manifest.provider.provider_id,
     payer: wallet.address,
@@ -64,13 +92,36 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     pay_to: payment.pay_to,
     challenge_nonce: payment.nonce,
     challenge_expires_at: payment.expires_at,
-    status: paidResponse.ok && result.status === "success" ? "success" : "error"
+    status: paidResponse.ok && result.status === "success" ? "success" : "error",
+    backend: currentPaymentBackend(),
+    arc_transfer: arcTransfer
   };
+  event.event_hash = hashJson(event);
   await recordPayment(event);
+  const feedback = {
+    event_version: "agent_service_feedback_v1",
+    request_id: result?.request_id || `req_${Date.now()}`,
+    service_id: serviceId,
+    provider_id: manifest.provider.provider_id,
+    consumer_id: "local_agent_wallet",
+    payment_tx: event.payment_tx,
+    settlement_receipt: createSettlementReceipt({
+      manifest: policyManifest,
+      challenge: payment,
+      txHash: event.payment_tx
+    }),
+    status: event.status,
+    schema_valid: result?.status === "success",
+    latency_ms: null,
+    consumer_rating: event.status === "success" ? 1 : 0,
+    payment_backend: currentPaymentBackend()
+  };
+  feedback.feedback_hash = hashJson(feedback);
 
   return {
     result,
-    local_payment: event
+    local_payment: event,
+    feedback
   };
 }
 

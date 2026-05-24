@@ -16,7 +16,9 @@ export function describePaymentBackend() {
     supported_backends: PAYMENT_BACKENDS,
     notes: backend === "dev"
       ? "Development mode uses local x402-style payment proofs and simulated settlement receipts."
-      : "Production backends should execute real payment authorization, settlement, and ledger recording."
+      : backend === "circle_arc"
+        ? "Circle Arc mode uses an x402-style HTTP 402 challenge, then verifies a real Arc Testnet USDC transfer to the provider wallet before returning data."
+        : "Production backends should execute real payment authorization, settlement, and ledger recording."
   };
 }
 
@@ -50,13 +52,17 @@ export function createSettlementReceipt({ manifest, challenge, txHash }) {
     receipt_version: "agent_router_settlement_receipt_v1",
     payment_backend: backend,
     mode: backend,
-    network: backend === "circle_arc" ? "arc" : manifest.pricing.network,
+    network: backend === "circle_arc" ? "arc-testnet" : manifest.pricing.network,
+    caip2: challenge.caip2 || (backend === "circle_arc" ? "eip155:5042002" : undefined),
+    chain_id: challenge.chain_id || (backend === "circle_arc" ? 5042002 : undefined),
     protocol: manifest.pricing.protocol || "x402",
     asset: challenge.asset || manifest.pricing.currency,
+    token_address: challenge.token_address || manifest.pricing.token_address || undefined,
     amount: challenge.amount || manifest.pricing.amount,
     payer: "consumer_demo_agent",
     pay_to: challenge.pay_to,
     tx_hash: txHash,
+    settlement_model: challenge.settlement_model || manifest.pricing.settlement_model || null,
     status: backend === "dev" ? "simulated_settled" : "settled",
     created_at: new Date().toISOString()
   };

@@ -1,4 +1,6 @@
+import { isArcNetwork, isEvmAddress, verifyArcUsdcTransfer } from "./arc-payment.js";
 import { createPaymentRequirements, verifyDevPaymentProof } from "./payment.js";
+import { currentPaymentBackend } from "./payment-adapter.js";
 import { createEnvelope, readProviderConfig } from "./provider-config.js";
 import { createLiveBtcLiquidationEnvelope, createLiveFundFlowEnvelope } from "./fixtures.js";
 import { readJson, sendJson, sendNotFound } from "./http-utils.js";
@@ -20,6 +22,7 @@ export async function handleFundFlowProvider(req, res) {
     amount,
     currency,
     network,
+    payTo: providerPayoutAddress(),
     description: "Base 7D Fund Flow"
   });
   if (!payment.ok) return;
@@ -57,6 +60,7 @@ export async function handleBtcLiquidationProvider(req, res) {
     amount,
     currency,
     network,
+    payTo: providerPayoutAddress(),
     description: "BTC liquidation max pain"
   });
   if (!payment.ok) return;
@@ -102,6 +106,7 @@ export async function handleCustomProvider(req, res, serviceId) {
     amount,
     currency,
     network,
+    payTo: providerPayoutAddress(manifest),
     description: manifest.description_for_agent || manifest.title
   });
   if (!payment.ok) return;
@@ -180,7 +185,7 @@ export async function handleCustomProvider(req, res, serviceId) {
   }) });
 }
 
-async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, description }) {
+async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, payTo, description }) {
   if (isRealX402ProviderEnabled()) {
     const payment = await processProviderX402Payment({
       req,
@@ -198,7 +203,15 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
 
   const paymentProof = req.headers["x-payment"];
   if (!paymentProof) {
-    const payment = issueChallenge({ serviceId, amount, currency, network });
+    if (currentPaymentBackend() === "circle_arc" && !isEvmAddress(payTo)) {
+      sendJson(res, 503, {
+        error: "Provider payout address is not configured",
+        code: "PROVIDER_PAYOUT_ADDRESS_REQUIRED",
+        message: "Circle Arc settlement requires a valid provider EVM wallet address."
+      });
+      return { ok: false };
+    }
+    const payment = issueChallenge({ serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network, payTo });
     sendJson(res, 402, {
       error: "Payment Required",
       payment
@@ -206,12 +219,12 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
     return { ok: false };
   }
 
-  const verification = verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network });
+  const verification = await verifyPaymentWithChallenge(paymentProof, { serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network });
   if (!verification.ok) {
     sendJson(res, 402, {
       error: "Invalid Payment",
       code: verification.error,
-      payment: createPaymentRequirements({ serviceId, amount, currency, network })
+      payment: createPaymentRequirements({ serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network, payTo })
     });
     return { ok: false };
   }
@@ -231,13 +244,13 @@ async function sendPaidResult({ res, payment, body }) {
   sendJson(res, 200, body);
 }
 
-function issueChallenge({ serviceId, amount, currency, network }) {
-  const payment = createPaymentRequirements({ serviceId, amount, currency, network });
+function issueChallenge({ serviceId, amount, currency, network, payTo }) {
+  const payment = createPaymentRequirements({ serviceId, amount, currency, network, payTo });
   issuedChallenges.set(payment.nonce, payment);
   return payment;
 }
 
-function verifyPaymentWithChallenge(paymentProof, expected) {
+async function verifyPaymentWithChallenge(paymentProof, expected) {
   const decoded = decodeProof(paymentProof);
   if (!decoded.ok) return decoded;
   const challenge = issuedChallenges.get(decoded.payment.challenge_nonce);
@@ -249,9 +262,29 @@ function verifyPaymentWithChallenge(paymentProof, expected) {
     resourceHash: challenge.resource_hash
   });
   if (verification.ok) {
+    if (currentPaymentBackend() === "circle_arc" || isArcNetwork(challenge.network)) {
+      const arc = await verifyArcUsdcTransfer({
+        txHash: decoded.payment.tx_hash,
+        expected: {
+          amount: challenge.amount,
+          payTo: challenge.pay_to,
+          payer: decoded.payment.payer
+        }
+      });
+      if (!arc.ok) return arc;
+      verification.payment.arc_verification = arc;
+    }
     issuedChallenges.delete(challenge.nonce);
   }
   return verification;
+}
+
+function providerPayoutAddress(manifest = null) {
+  return manifest?.provider?.payout_address ||
+    manifest?.pricing?.pay_to ||
+    process.env.ADN_PROVIDER_RECEIVE_ADDRESS ||
+    process.env.ADN_X402_PAY_TO ||
+    "";
 }
 
 function decodeProof(proof) {

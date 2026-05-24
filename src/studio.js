@@ -24,7 +24,8 @@ export async function createProviderFromStudio(body, store, baseUrl) {
     price: normalizedBody.price,
     sampleRequest: parseMaybeJson(normalizedBody.sample_request, "sample_request"),
     sampleData: parseMaybeJson(normalizedBody.sample_data, "sample_data"),
-    summary: normalizedBody.summary
+    summary: normalizedBody.summary,
+    payoutAddress: normalizedBody.payout_address || ""
   };
   const config = mode === "hosted-http"
     ? createHostedHttpProviderConfig({
@@ -109,7 +110,7 @@ function validateStudioInput(body, store) {
 
 export function studioHtml({ draft, loadedService } = {}) {
   const formDefaults = defaultsFromDraft(draft);
-  const loadedNotice = loadedService ? `<div class="notice success">Loaded published service <strong>${html(loadedService.service_id)}</strong>. Use the advanced editor to inspect generated metadata and contract. To publish a separate copy, change the Service ID under Advanced routing metadata.</div>` : "";
+  const loadedNotice = loadedService ? `<div class="notice success">Loaded published service <strong>${html(loadedService.service_id)}</strong>. Edit the Arc payout wallet below, then use <strong>Update payout wallet</strong>. Publishing is only for new services.</div>` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -305,6 +306,9 @@ export function studioHtml({ draft, loadedService } = {}) {
         <label>Price (USDC)
           <input name="import_default_price" value="0.01" />
         </label>
+        <label>Arc payout wallet
+          <input name="import_payout_address" value="" placeholder="0x..." />
+        </label>
         </div>
         <details>
           <summary>API key / auth</summary>
@@ -358,6 +362,9 @@ export function studioHtml({ draft, loadedService } = {}) {
           </label>
           <label>Provider Name
             <input name="provider_name" value="${html(formDefaults.providerName)}" />
+          </label>
+          <label>Arc payout wallet <span class="hint">optional for dev mode, required for real Arc settlement</span>
+            <input name="payout_address" value="${html(formDefaults.payoutAddress)}" placeholder="0x..." />
           </label>
           <label>What this service gives the buyer Agent
             <textarea name="description_for_agent">${html(formDefaults.description)}</textarea>
@@ -442,6 +449,7 @@ export function studioHtml({ draft, loadedService } = {}) {
       <p>Review what will be published, whether required fields are ready, and what buyer Agents will see.</p>
       <div id="side-panel" class="side-grid"></div>
       <div class="confirm-panel">
+        ${loadedService ? '<button type="button" class="secondary" id="update-payout-wallet">Update payout wallet</button>' : ""}
         <button type="submit" form="provider-form" id="publish-service" disabled>Verify & Publish Manual Service</button>
         <div id="form-message" class="notice hidden"></div>
       </div>
@@ -454,6 +462,7 @@ export function studioHtml({ draft, loadedService } = {}) {
   <script>
   (() => {
   try {
+    const loadedServiceId = ${JSON.stringify(loadedService?.service_id || "")};
     const form = document.querySelector("#provider-form");
     const serviceEditor = document.querySelector("#service-editor");
     const mode = document.querySelector("#mode");
@@ -467,6 +476,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     const fillHosted = document.querySelector("#fill-hosted");
     const discoverApi = document.querySelector("#discover-api");
     const publishDrafts = document.querySelector("#publish-drafts");
+    const updatePayoutWallet = document.querySelector("#update-payout-wallet");
     const importDrafts = document.querySelector("#import-drafts");
     const draftList = document.querySelector("#draft-list");
     const draftToolbar = document.querySelector("#draft-toolbar");
@@ -479,6 +489,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     const importDefaultPrice = form.elements.namedItem("import_default_price");
     const importSecretValue = form.elements.namedItem("import_secret_value");
     const importAuthHeader = form.elements.namedItem("import_auth_header");
+    const importPayoutAddress = form.elements.namedItem("import_payout_address");
     let discoveredDrafts = [];
     let lastImportMeta = null;
     const publishedServiceIds = new Set();
@@ -504,6 +515,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     const authHeaderInput = form.elements.namedItem("auth_header");
     const secretNameInput = form.elements.namedItem("secret_name");
     const priceInput = form.elements.namedItem("price");
+    const payoutAddressInput = form.elements.namedItem("payout_address");
     let serviceIdTouched = false;
     let providerIdTouched = false;
 
@@ -669,9 +681,51 @@ export function studioHtml({ draft, loadedService } = {}) {
 
     function setSingleServiceReady(ready, message = "") {
       singleServiceReady = Boolean(ready);
-      publishService.disabled = !singleServiceReady;
+      publishService.disabled = loadedServiceId ? true : !singleServiceReady;
       if (message) showNotice(formMessage, message, ready ? "" : "error");
     }
+
+    if (updatePayoutWallet) {
+      publishService.disabled = true;
+      updatePayoutWallet.addEventListener("click", async () => {
+        hideNotice(formMessage);
+        const payoutAddress = String(payoutAddressInput?.value || "").trim();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(payoutAddress)) {
+          status.textContent = "Invalid payout wallet";
+          status.classList.add("error");
+          showNotice(formMessage, "Arc payout wallet must be a valid EVM address.", "error");
+          markInvalid(payoutAddressInput, true);
+          return;
+        }
+        status.textContent = "Updating payout wallet...";
+        status.classList.remove("error");
+        try {
+          const response = await fetch("/services/" + encodeURIComponent(loadedServiceId) + "/payout", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ payout_address: payoutAddress })
+          });
+          const payload = await response.json();
+          result.textContent = JSON.stringify(payload, null, 2);
+          if (!response.ok || !payload.ok) {
+            status.textContent = "Payout update failed";
+            status.classList.add("error");
+            showNotice(formMessage, payload.error?.message || "Payout wallet update failed.", "error");
+            return;
+          }
+          status.textContent = "Payout wallet updated";
+          status.classList.remove("error");
+          showNotice(formMessage, "Arc payout wallet is bound to this service. Future Arc USDC payments will target this address.", "success");
+          updateSidePanel({ publishResult: payload });
+        } catch (error) {
+          status.textContent = "Payout update error";
+          status.classList.add("error");
+          showNotice(formMessage, error.message || "Payout wallet update failed.", "error");
+          result.textContent = error.stack || error.message;
+        }
+      });
+    }
+
     function suggestCapabilities(value) {
       const lower = String(value || "").toLowerCase();
       const tags = new Set(["data_service"]);
@@ -729,6 +783,7 @@ export function studioHtml({ draft, loadedService } = {}) {
     providerNameInput.addEventListener("input", () => { markInvalid(providerNameInput, false); syncGeneratedIds(); });
     descriptionInput.addEventListener("input", () => { markInvalid(descriptionInput, false); syncGeneratedIds(); });
     priceInput.addEventListener("input", () => markInvalid(priceInput, false));
+    payoutAddressInput?.addEventListener("input", () => markInvalid(payoutAddressInput, false));
     importApiUrl.addEventListener("input", () => markInvalid(importApiUrl, false));
     importDefaultPrice.addEventListener("input", () => markInvalid(importDefaultPrice, false));
     serviceIdInput.addEventListener("input", () => { serviceIdTouched = true; markInvalid(serviceIdInput, false); });
@@ -779,7 +834,8 @@ export function studioHtml({ draft, loadedService } = {}) {
             default_price: importDefaultPrice.value,
             default_method: importMethod.value,
             secret_value: importSecretValue.value,
-            auth_header: importAuthHeader.value
+            auth_header: importAuthHeader.value,
+            payout_address: importPayoutAddress.value
           })
         });
         const payload = await response.json();
@@ -1563,6 +1619,7 @@ function defaultsFromDraft(draft) {
       sampleData: prettyJson(preview),
       liveData: prettyJson(preview),
       summary: draft.summary || "",
+      payoutAddress: draft.payout_address || "",
       upstreamUrl: draft.upstream_url || "",
       upstreamMethod: draft.method || "GET",
       authHeader: draft.auth_header || (draft.secret_value ? "auto" : "authorization"),
@@ -1583,6 +1640,7 @@ function defaultsFromDraft(draft) {
     sampleData: prettyJson(defaultLiveData),
     liveData: prettyJson(defaultLiveData),
     summary: "ETH community sentiment is positive over the selected window.",
+    payoutAddress: "",
     upstreamUrl: "/mock/upstream/sentiment",
     upstreamMethod: "POST",
     authHeader: "authorization",
@@ -1614,6 +1672,7 @@ export function draftFromServiceRecord(record, config = null) {
     sample_request: manifest.sample_request || {},
     preview_data: manifest.sample_response?.data || {},
     summary: manifest.agent_contract?.summary || source.summary || "",
+    payout_address: manifest.provider?.payout_address || manifest.pricing?.pay_to || "",
     data_contract: {
       request: {
         method: hosted ? source.upstream_method || "GET" : "STATIC",

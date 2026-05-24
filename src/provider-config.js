@@ -79,13 +79,15 @@ export function createStaticProviderConfig({
   sampleRequest,
   sampleData,
   liveData,
-  summary
+  summary,
+  payoutAddress = ""
 }) {
   const manifest = {
     manifest_version: "agent_data_service_manifest_v1",
     service_id: serviceId,
     provider: {
       provider_id: providerId,
+      payout_address: payoutAddress || undefined,
       agent_identity: {
         standard: "erc-8004-compatible",
         agent_registry: "optional",
@@ -125,7 +127,9 @@ export function createStaticProviderConfig({
       amount: price,
       currency: "USDC",
       network: "base",
-      protocol: "x402"
+      protocol: "x402",
+      pay_to: payoutAddress || undefined,
+      settlement_model: payoutAddress ? "direct_provider_wallet" : undefined
     },
     endpoint: {
       url: `${baseUrl.replace(/\/$/, "")}/provider/custom/${serviceId}`,
@@ -182,13 +186,15 @@ export function createHostedHttpProviderConfig({
   secretName = "PROVIDER_SECRET",
   secretValue = "",
   authHeader = "authorization",
-  summary
+  summary,
+  payoutAddress = ""
 }) {
   const manifest = {
     manifest_version: "agent_data_service_manifest_v1",
     service_id: serviceId,
     provider: {
       provider_id: providerId,
+      payout_address: payoutAddress || undefined,
       agent_identity: {
         standard: "erc-8004-compatible",
         agent_registry: "optional",
@@ -229,7 +235,9 @@ export function createHostedHttpProviderConfig({
       amount: price,
       currency: "USDC",
       network: "base",
-      protocol: "x402"
+      protocol: "x402",
+      pay_to: payoutAddress || undefined,
+      settlement_model: payoutAddress ? "direct_provider_wallet" : undefined
     },
     endpoint: {
       url: `${baseUrl.replace(/\/$/, "")}/provider/custom/${serviceId}`,

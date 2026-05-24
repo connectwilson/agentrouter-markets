@@ -6,6 +6,8 @@ import { suggestCapabilities } from "./id-utils.js";
 import { createSettlementReceipt } from "./payment-adapter.js";
 import { normalizeConsumerFeedback, verifyServiceResult } from "./verifier.js";
 import { listPersistentServiceEvents, writePersistentServiceEvent } from "./persistence.js";
+import { readProviderConfig, writeProviderConfig } from "./provider-config.js";
+import { isEvmAddress } from "./arc-payment.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -75,6 +77,55 @@ export function unregisterService(store, serviceId) {
     if (!providerStillUsed) store.providers.delete(providerId);
   }
   return true;
+}
+
+export async function updateServicePayoutWallet(store, serviceId, payoutAddress) {
+  const record = store.services.get(serviceId);
+  if (!record) {
+    const error = new Error(`Service ${serviceId} was not found.`);
+    error.statusCode = 404;
+    error.code = "SERVICE_NOT_FOUND";
+    throw error;
+  }
+  if (!isEvmAddress(payoutAddress)) {
+    const error = new Error("Arc payout wallet must be a valid EVM address.");
+    error.statusCode = 422;
+    error.code = "INVALID_PAYOUT_ADDRESS";
+    throw error;
+  }
+
+  applyPayoutToManifest(record.manifest, payoutAddress);
+  record.updated_at = new Date().toISOString();
+  if (record.manifest.provider?.provider_id) {
+    store.providers.set(record.manifest.provider.provider_id, record.manifest.provider);
+  }
+
+  let persisted = false;
+  try {
+    const config = await readProviderConfig(serviceId);
+    applyPayoutToManifest(config.manifest, payoutAddress);
+    await writeProviderConfig(config);
+    persisted = true;
+  } catch (error) {
+    if (error?.code && error.code !== "ENOENT") throw error;
+  }
+
+  return {
+    ok: true,
+    service_id: serviceId,
+    payout_address: payoutAddress,
+    persisted,
+    manifest: record.manifest,
+    service: publicServiceRecord(record)
+  };
+}
+
+function applyPayoutToManifest(manifest, payoutAddress) {
+  manifest.provider = manifest.provider || {};
+  manifest.provider.payout_address = payoutAddress;
+  manifest.pricing = manifest.pricing || {};
+  manifest.pricing.pay_to = payoutAddress;
+  manifest.pricing.settlement_model = "direct_provider_wallet";
 }
 
 function normalizeManifestCapabilities(manifest) {

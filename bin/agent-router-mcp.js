@@ -192,7 +192,7 @@ async function handleMessage(message) {
 
 async function callTool(name, args) {
   if (name === "agentrouter_ask") {
-    if (currentPaymentBackend() === "x402") {
+    if (["x402", "circle_arc"].includes(currentPaymentBackend())) {
       return routeTaskWithLocalWallet({
         baseUrl,
         task: args.task,
@@ -208,7 +208,7 @@ async function callTool(name, args) {
   }
 
   if (name === "agentrouter_request") {
-    if (currentPaymentBackend() === "x402") {
+    if (["x402", "circle_arc"].includes(currentPaymentBackend())) {
       return requestWithLocalWallet(args);
     }
     return post("/agent-router/request", {
@@ -244,7 +244,7 @@ async function callTool(name, args) {
       status: "wallet_ready",
       wallet,
       safety_note: "This is a local session wallet for small x402 API budgets. No private key is returned to Claude.",
-      next_step: "Fund this local EVM wallet with a small Base USDC budget before real x402 settlement."
+      next_step: "Fund this local EVM wallet with a small Arc Testnet USDC budget before real x402 settlement."
     };
   }
 
@@ -254,7 +254,7 @@ async function callTool(name, args) {
       return {
         ok: true,
         wallet,
-        next_step: "Fund this local EVM wallet with a small Base USDC budget before real x402 settlement."
+        next_step: "Fund this local EVM wallet with a small Arc Testnet USDC budget before real x402 settlement."
       };
     } catch (error) {
       return {

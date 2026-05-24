@@ -154,7 +154,7 @@ curl -fsSL -X POST http://127.0.0.1:8787/agent-router/request \
   -d '{"capability":"perp_liquidation_max_pain","params":{"asset":"BTC","market_type":"perpetual_futures","window":"current"},"constraints":{"max_price_usdc":"0.05","freshness_seconds":300}}'
 ```
 
-The returned `evidence` object includes `trace_hash`, `result_hash`, `verification_hash`, payment receipt metadata, and a simulated Arc anchor. Trust scores are computed offchain from feedback events; evidence hashes are the audit surface that can later be pinned on Arc.
+The returned `evidence` object includes `trace_hash`, `result_hash`, `verification_hash`, payment receipt metadata, and an Arc anchor placeholder. Trust scores are computed offchain from feedback events; evidence and feedback hashes are the audit surface that can be anchored on Arc.
 
 ## Alice Wallet
 
@@ -188,7 +188,7 @@ When Claude / Codex calls `adn invoke`, the CLI:
 2. Requests the provider endpoint
 3. Receives HTTP 402 payment requirements
 4. Checks Alice's local policy
-5. Signs a dev x402 payment proof with Alice's local Agent Wallet
+5. Signs a dev x402 payment proof, or sends an Arc Testnet USDC transfer in `circle_arc` mode
 6. Retries the provider request
 7. Records the payment in `.adn/payments.log`
 
@@ -203,7 +203,8 @@ Implemented guardrails:
 - `.adn/` is gitignored
 - wallet private key is encrypted at rest with `ADN_WALLET_PASSPHRASE`
 - payments require a complete HTTP 402 challenge
-- payment proof binds `service_id`, `amount`, `network`, `asset`, `pay_to`, `nonce`, expiry, and resource hash
+- payment proof binds `service_id`, `amount`, `network`, `asset`, `pay_to`, `nonce`, expiry, resource hash, and Arc tx hash when using Arc settlement
+- `circle_arc` mode verifies the Arc ERC-20 USDC transfer before returning provider data
 - provider rejects replayed challenge nonces
 - wallet policy enforces per-call and daily limits
 - wallet policy can restrict services, providers, and payment targets
@@ -220,12 +221,12 @@ node bin/adn.js wallet policy set --provider-allowlist provider_bob
 node bin/adn.js wallet policy set --pay-to-allowlist 0xProviderDemoWallet000000000000000000000000
 ```
 
-Still TODO for production:
+Still TODO for production hardening:
 
 - OS keychain integration
 - separate signer daemon
 - session wallet / spending-cap smart account
-- real x402 settlement
+- escrow/claim contract for batching, refunds, platform fees, and dispute windows
 
 ## Payment Modes
 
@@ -234,6 +235,16 @@ The MVP defaults to:
 ```bash
 ADN_PAYMENT_BACKEND=dev
 ```
+
+To demo real Arc settlement from Alice's local wallet to the provider payout wallet:
+
+```bash
+ADN_PAYMENT_BACKEND=circle_arc
+ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
+ADN_PROVIDER_RECEIVE_ADDRESS=0xProviderPayoutWallet
+```
+
+Provider Studio also has an optional `Arc payout wallet` field. In `circle_arc` mode the provider endpoint returns an x402-style HTTP 402 challenge, Alice's local MCP/CLI wallet sends an Arc Testnet USDC transfer to that payout address, and the provider verifies the transaction hash before returning data.
 
 In dev mode, the provider still returns an x402-style HTTP 402 challenge, but the CLI signs a local development payment proof instead of settling real USDC.
 
@@ -398,15 +409,17 @@ node bin/adn.js payment plan
 
 Production x402 integration should replace:
 
-- buyer-side `createWalletPaymentProof` with an official x402 exact EVM client payment authorization
+- buyer-side `createWalletPaymentProof` with an official x402 exact EVM client payment authorization where a facilitator supports the target chain
 - seller-side `verifyDevPaymentProof` with facilitator `/verify` and `/settle`
 - demo payment requirements with official x402 payment requirements
-- fake tx hashes with real settlement hashes
+- fake tx hashes with real settlement hashes; `circle_arc` already supports a direct Arc Testnet USDC transfer proof path for local-wallet calls
 
 Relevant runtime configuration:
 
 ```bash
 ADN_PAYMENT_BACKEND=dev
+ADN_PAYMENT_BACKEND=circle_arc
+ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
 ADN_PROVIDER_RECEIVE_ADDRESS=0x...
 ADN_X402_FACILITATOR_URL=https://x402.org/facilitator
 ```
@@ -543,4 +556,4 @@ The current configurable provider runtime supports `static_json` and `hosted_htt
 
 ## Important MVP Note
 
-The payment implementation is a local development x402-compatible handshake: the Provider returns HTTP 402, the CLI creates a wallet-signed dev payment proof, then retries the request. This validates the product flow without requiring real USDC settlement. The production version should replace `src/payment.js` with a real x402 SDK / facilitator integration and use an actual Base USDC-funded wallet or session wallet.
+The default payment implementation is a local development x402-compatible handshake: the Provider returns HTTP 402, the CLI creates a wallet-signed dev payment proof, then retries the request. For Agora/Arc demos, `ADN_PAYMENT_BACKEND=circle_arc` switches local MCP/CLI calls to direct Arc Testnet USDC transfer settlement: Alice pays the provider payout wallet, the provider verifies the tx, and the response includes settlement, payment event, and feedback hashes.

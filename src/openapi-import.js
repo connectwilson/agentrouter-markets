@@ -27,13 +27,15 @@ export async function discoverApiServices(body, baseUrl) {
   const providerName = body.provider_name || null;
   const secretValue = body.secret_value || "";
   const authHeader = body.auth_header || "";
+  const payoutAddress = body.payout_address || "";
   if (looksLikeSkillSource(apiUrl)) {
     return discoverSkillServices({
       skillUrl: apiUrl,
       defaultPrice,
       providerName,
       secretValue,
-      authHeader
+      authHeader,
+      payoutAddress
     });
   }
   let document;
@@ -46,7 +48,8 @@ export async function discoverApiServices(body, baseUrl) {
         defaultPrice,
         providerName,
         secretValue,
-        authHeader
+        authHeader,
+        payoutAddress
       });
     }
     throw error;
@@ -61,7 +64,8 @@ export async function discoverApiServices(body, baseUrl) {
       defaultPrice,
       secretValue,
       defaultMethod,
-      authHeader
+      authHeader,
+      payoutAddress
     });
     return {
       ok: true,
@@ -101,7 +105,8 @@ export async function discoverApiServices(body, baseUrl) {
         providerId,
         providerTitle,
         defaultPrice,
-        secretValue
+        secretValue,
+        payoutAddress
       }));
     }
   }
@@ -120,7 +125,7 @@ export async function discoverApiServices(body, baseUrl) {
   };
 }
 
-async function discoverApiDocsServices({ docsUrl, defaultPrice, providerName, secretValue, authHeader }) {
+async function discoverApiDocsServices({ docsUrl, defaultPrice, providerName, secretValue, authHeader, payoutAddress = "" }) {
   const overview = await fetchTextDocument(docsUrl);
   const docLinks = parseApiDocsLinks(overview.raw, docsUrl);
   const providerTitle = providerName || providerNameFromDocsUrl(docsUrl);
@@ -156,7 +161,8 @@ async function discoverApiDocsServices({ docsUrl, defaultPrice, providerName, se
     defaultPrice,
     secretValue,
     authHeader,
-    docsUrl
+    docsUrl,
+    payoutAddress
   }));
   return {
     ok: true,
@@ -176,7 +182,7 @@ async function discoverApiDocsServices({ docsUrl, defaultPrice, providerName, se
   };
 }
 
-async function discoverSkillServices({ skillUrl, defaultPrice, providerName, secretValue, authHeader }) {
+async function discoverSkillServices({ skillUrl, defaultPrice, providerName, secretValue, authHeader, payoutAddress = "" }) {
   const skill = await fetchSkillDocument(skillUrl);
   const parsed = parseSkillDocument(skill.text, skillUrl);
   const upstreamBaseUrl = parsed.baseUrl;
@@ -196,6 +202,7 @@ async function discoverSkillServices({ skillUrl, defaultPrice, providerName, sec
     defaultPrice,
     secretValue,
     authHeader: secretHeader,
+    payoutAddress,
     skillUrl,
     skillTitle: parsed.title
   }));
@@ -262,7 +269,8 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
         secretName: draft.secret_name || "PROVIDER_SECRET",
         secretValue: draft.secret_value || "",
         authHeader: draft.auth_header || (draft.secret_value ? "auto" : "authorization"),
-        summary: draft.summary
+        summary: draft.summary,
+        payoutAddress: draft.payout_address || ""
       });
       const duplicate = store.services.get(config.manifest.service_id) || findDuplicateService(store, config.manifest);
       if (duplicate) {
@@ -495,7 +503,7 @@ function convertEndpointIndex(doc, apiUrl) {
   };
 }
 
-function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, doc, providerId, providerTitle, defaultPrice, secretValue }) {
+function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, doc, providerId, providerTitle, defaultPrice, secretValue, payoutAddress = "" }) {
   const decodedRoutePath = decodePathTemplate(routePath);
   const title = operation.summary || titleFromPath(decodedRoutePath, method);
   const serviceId = normalizeId(operation.operationId, title, "service");
@@ -541,6 +549,7 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
     auth_header: secretValue ? "auto" : inferAuthHeader(apiUrl),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
+    payout_address: payoutAddress,
     sample_request: sampleRequest,
     preview_data: previewData,
     summary,
@@ -548,7 +557,7 @@ function createServiceDraft({ apiUrl, routePath, method, operation, pathItem, do
   };
 }
 
-function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultPrice, secretValue, defaultMethod, authHeader }) {
+function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultPrice, secretValue, defaultMethod, authHeader, payoutAddress = "" }) {
   const url = new URL(apiUrl);
   const routePath = url.pathname;
   const method = defaultMethod || inferMethodForEndpoint(apiUrl);
@@ -571,6 +580,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
     auth_header: authHeader || (secretValue ? "auto" : inferAuthHeader(apiUrl)),
     secret_name: inferSecretName(apiUrl),
     secret_value: secretValue,
+    payout_address: payoutAddress,
     sample_request: sampleRequest,
     preview_data: previewData,
     summary: resultSummary({ title, providerTitle, routePath, previewData }),
@@ -579,7 +589,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
   };
 }
 
-function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, providerTitle, defaultPrice, secretValue, authHeader, skillUrl, skillTitle }) {
+function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, providerTitle, defaultPrice, secretValue, authHeader, payoutAddress = "", skillUrl, skillTitle }) {
   const method = endpoint.method || "GET";
   const routePath = endpoint.path.startsWith("/") ? endpoint.path : new URL(endpoint.path, `${upstreamBaseUrl}/`).pathname;
   const title = normalizeEndpointTitle(endpoint.title, routePath, method);
@@ -610,6 +620,7 @@ function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, provi
     auth_header: authHeader,
     secret_name: inferSecretName(upstreamBaseUrl),
     secret_value: secretValue,
+    payout_address: payoutAddress,
     sample_request: sampleRequest,
     preview_data: previewData,
     summary: endpoint.summary || resultSummary({ title, providerTitle, routePath, previewData }),
@@ -620,7 +631,7 @@ function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, provi
   };
 }
 
-function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defaultPrice, secretValue, authHeader, docsUrl }) {
+function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defaultPrice, secretValue, authHeader, docsUrl, payoutAddress = "" }) {
   const method = endpoint.method || "GET";
   const routePath = decodePathTemplate(endpoint.path);
   const sampleRequest = { ...paramsFromPathTemplate(routePath), ...(endpoint.sampleRequest || {}) };
@@ -660,6 +671,7 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
     auth_header: authHeader || endpoint.authHeader || (secretValue ? "auto" : inferAuthHeader(endpoint.origin)),
     secret_name: inferSecretName(endpoint.origin),
     secret_value: secretValue,
+    payout_address: payoutAddress,
     sample_request: sampleRequest,
     preview_data: previewData,
     summary,
