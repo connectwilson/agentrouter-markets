@@ -516,6 +516,27 @@ test("public AgentRouter HTTP routes do not invoke paid services without protoco
   }
 });
 
+test("public provider endpoints reject dev payment mode even with direct endpoint access", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const response = await fetch(`${baseUrl}/provider/btc-liquidation-max-pain`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-host": "agentrouter-markets.onrender.com"
+      },
+      body: JSON.stringify({
+        asset: "BTC",
+        market_type: "perpetual_futures",
+        window: "current"
+      })
+    });
+    assert.equal(response.status, 503);
+    const payload = await response.json();
+    assert.equal(payload.code, "PUBLIC_DEV_PAYMENT_DISABLED");
+    assert.equal("result" in payload, false);
+  });
+});
+
 test("AgentRouter MCP server exposes Claude-callable tools", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {

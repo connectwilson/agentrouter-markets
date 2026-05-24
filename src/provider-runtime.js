@@ -201,6 +201,22 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
     return { ok: true, payment };
   }
 
+  if (currentPaymentBackend() === "dev" && !isLoopbackProviderRequest(req)) {
+    sendJson(res, 503, {
+      error: "Payment backend is not production safe",
+      code: "PUBLIC_DEV_PAYMENT_DISABLED",
+      message: "Public provider endpoints cannot accept dev-x402 proofs. Configure ADN_PAYMENT_BACKEND=circle_arc or another real payment backend before exposing paid data.",
+      payment: {
+        required: true,
+        service_id: serviceId,
+        amount,
+        asset: currency,
+        supported_backends: ["circle_arc", "x402", "omniagentpay"]
+      }
+    });
+    return { ok: false };
+  }
+
   const paymentProof = req.headers["x-payment"];
   if (!paymentProof) {
     if (currentPaymentBackend() === "circle_arc" && !isEvmAddress(payTo)) {
@@ -229,6 +245,13 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
     return { ok: false };
   }
   return { ok: true, payment: { required: false } };
+}
+
+function isLoopbackProviderRequest(req) {
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const hostHeader = forwardedHost || String(req.headers.host || "");
+  const host = hostHeader.split(":")[0].toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }
 
 async function sendPaidResult({ res, payment, body }) {
