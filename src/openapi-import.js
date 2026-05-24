@@ -543,7 +543,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
   const description = agentDescription({ title, providerTitle, method, routePath, sampleRequest });
   return {
     selected: true,
-    service_id: normalizeId(null, title, "service"),
+    service_id: normalizeId(null, `${method} ${routePath}`, "service"),
     provider_id: providerId,
     provider_name: providerTitle,
     title,
@@ -607,37 +607,38 @@ function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, provi
 
 function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defaultPrice, secretValue, authHeader, docsUrl }) {
   const method = endpoint.method || "GET";
-  const sampleRequest = endpoint.sampleRequest || {};
+  const routePath = decodePathTemplate(endpoint.path);
+  const sampleRequest = { ...paramsFromPathTemplate(routePath), ...(endpoint.sampleRequest || {}) };
   const previewData = endpoint.previewData || { data: [{ example: true }] };
-  const title = endpoint.title || titleFromPath(endpoint.path, method);
+  const title = endpoint.title || titleFromPath(routePath, method);
   const description = agentDescription({
     title,
     providerTitle,
     method,
-    routePath: endpoint.path,
+    routePath,
     sampleRequest,
     baseDescription: endpoint.description,
     sourceTitle: "API docs"
   });
   return {
     selected: true,
-    service_id: normalizeId(endpoint.operationId, `${providerTitle} ${method} ${endpoint.path}`, "service"),
+    service_id: normalizeId(endpoint.operationId, `${providerTitle} ${method} ${routePath}`, "service"),
     provider_id: providerId,
     provider_name: providerTitle,
     title,
     description_for_agent: description,
-    capabilities: suggestCapabilities(`${title} ${description} ${endpoint.path}`).split(","),
+    capabilities: suggestCapabilities(`${title} ${description} ${routePath}`).split(","),
     price: defaultPrice,
     method,
-    path: endpoint.path,
-    upstream_url: `${endpoint.origin.replace(/\/$/, "")}${endpoint.path}`,
+    path: routePath,
+    upstream_url: `${endpoint.origin.replace(/\/$/, "")}${routePath}`,
     auth_header: authHeader || endpoint.authHeader || (secretValue ? "auto" : inferAuthHeader(endpoint.origin)),
     secret_name: inferSecretName(endpoint.origin),
     secret_value: secretValue,
     sample_request: sampleRequest,
     preview_data: previewData,
-    summary: endpoint.summary || resultSummary({ title, providerTitle, routePath: endpoint.path, previewData }),
-    data_contract: dataContractFor({ method, routePath: endpoint.path, sampleRequest, previewData }),
+    summary: endpoint.summary || resultSummary({ title, providerTitle, routePath, previewData }),
+    data_contract: dataContractFor({ method, routePath, sampleRequest, previewData }),
     source_type: "api_docs_import",
     source_url: endpoint.sourceUrl || docsUrl,
     discovery_note: "Generated from API documentation pages. Publish still requires a real upstream validation call."
@@ -958,7 +959,7 @@ function endpointTarget(rawTarget, baseUrl) {
       : new URL(rawTarget, `${baseUrl || "https://skill.local"}/`);
     const params = {};
     for (const [key, value] of parsed.searchParams.entries()) params[key] = normalizeParamExample(value);
-    return { path: parsed.pathname, params };
+    return { path: decodePathTemplate(parsed.pathname), params };
   } catch {
     return null;
   }
@@ -982,13 +983,14 @@ function inferMethodFromTextWindow(text) {
 function endpointFromUrl({ url, method, title, params, description }) {
   const parsed = new URL(url);
   for (const [key, value] of parsed.searchParams.entries()) params[key] = normalizeParamExample(value);
+  const routePath = decodePathTemplate(parsed.pathname);
   return {
     method,
-    path: parsed.pathname,
+    path: routePath,
     title,
-    description: description || `Use this service to call ${method} ${parsed.pathname}.`,
+    description: description || `Use this service to call ${method} ${routePath}.`,
     params,
-    operationId: normalizeId(null, `${method} ${parsed.pathname}`, "service")
+    operationId: normalizeId(null, `${method} ${routePath}`, "service")
   };
 }
 
@@ -1027,6 +1029,30 @@ function normalizeParamExample(value) {
   return cleaned || "example";
 }
 
+function decodePathTemplate(path) {
+  const rawPath = String(path || "");
+  try {
+    return rawPath
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+  } catch {
+    return rawPath
+      .replace(/%7B/gi, "{")
+      .replace(/%7D/gi, "}");
+  }
+}
+
+function paramsFromPathTemplate(path) {
+  const params = {};
+  const re = /\{([^}/]+)\}/g;
+  let match;
+  while ((match = re.exec(String(path || "")))) {
+    params[match[1]] = sampleStringForName(match[1]);
+  }
+  return params;
+}
+
 function cleanEndpointTitle(value) {
   return String(value || "")
     .replace(/^\d+\.\s*/, "")
@@ -1039,6 +1065,10 @@ function htmlToText(html) {
   return String(html)
     .replace(/<script[\s\S]*?<\/script>/gi, "\n")
     .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<h1[^>]*>/gi, "\n# ")
+    .replace(/<h2[^>]*>/gi, "\n## ")
+    .replace(/<h3[^>]*>/gi, "\n### ")
+    .replace(/<h4[^>]*>/gi, "\n#### ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h\d|pre|code|tr)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
@@ -1093,15 +1123,15 @@ function parseApiEndpointDocs(text, sourceUrl, overviewUrl) {
     return {
       method: target.method,
       origin: target.origin,
-      path: target.path,
+      path: decodePathTemplate(target.path),
       authHeader: inferAuthHeaderFromDocs(content),
       title,
       description,
-      sampleRequest,
+      sampleRequest: { ...paramsFromPathTemplate(decodePathTemplate(target.path)), ...sampleRequest },
       previewData,
       sourceUrl,
-      operationId: normalizeId(null, `${target.method} ${target.origin}${target.path}`, "service"),
-      summary: `${title} via ${target.method} ${target.path}.`
+      operationId: normalizeId(null, `${target.method} ${target.origin}${decodePathTemplate(target.path)}`, "service"),
+      summary: `${title} via ${target.method} ${decodePathTemplate(target.path)}.`
     };
   });
 }
@@ -1117,21 +1147,22 @@ function parseEmbeddedOpenApiEndpoints(content, sourceUrl) {
         const operation = pathItem?.[method];
         if (!operation) continue;
         const methodUpper = method.toUpperCase();
-        const sampleRequest = sampleRequestFor(operation, pathItem, doc);
+        const decodedRoutePath = decodePathTemplate(routePath);
+        const sampleRequest = { ...paramsFromPathTemplate(decodedRoutePath), ...sampleRequestFor(operation, pathItem, doc) };
         const previewData = previewDataFor(operation, doc);
-        const title = operation.summary || titleFromPath(routePath, methodUpper);
+        const title = operation.summary || titleFromPath(decodedRoutePath, methodUpper);
         endpoints.push({
           method: methodUpper,
           origin,
-          path: routePath,
+          path: decodedRoutePath,
           authHeader,
           title,
           description: operation.description || "",
           sampleRequest,
           previewData,
           sourceUrl,
-          operationId: operation.operationId || normalizeId(null, `${methodUpper} ${origin}${routePath}`, "service"),
-          summary: operation.summary || `${title} via ${methodUpper} ${routePath}.`
+          operationId: operation.operationId || normalizeId(null, `${methodUpper} ${origin}${decodedRoutePath}`, "service"),
+          summary: operation.summary || `${title} via ${methodUpper} ${decodedRoutePath}.`
         });
       }
     }
@@ -1172,13 +1203,14 @@ function extractApiTargets(content, sourceUrl, overviewUrl) {
   }
 
   for (const { url, index } of externalUrls) {
-    if (targets.some((target) => target.origin === url.origin && target.path === (url.pathname.replace(/\/$/, "") || "/"))) continue;
+    const decodedPath = decodePathTemplate(url.pathname.replace(/\/$/, "") || "/");
+    if (targets.some((target) => target.origin === url.origin && target.path === decodedPath)) continue;
     const windowText = content.slice(Math.max(0, index - 160), Math.min(content.length, index + 260));
     targets.push({
       method: inferMethodFromTextWindow(windowText),
       origin: url.origin,
       hostname: url.hostname,
-      path: url.pathname.replace(/\/$/, "") || "/"
+      path: decodedPath
     });
   }
   return uniqueBy(targets, (target) => `${target.method} ${target.origin}${target.path}`)
@@ -1202,7 +1234,7 @@ function apiTargetFromMethodAndUrl(method, rawTarget, windowText, sourceUrl) {
       method: String(method || "GET").toUpperCase(),
       origin: url.origin,
       hostname: url.hostname,
-      path: url.pathname.replace(/\/$/, "") || "/"
+      path: decodePathTemplate(url.pathname.replace(/\/$/, "") || "/")
     };
   } catch {
     return null;
@@ -1557,6 +1589,7 @@ function resolveSchemaRef(schema, doc) {
 
 function sampleStringForName(name) {
   const lower = String(name || "").toLowerCase();
+  if (lower.includes("address") || lower === "wallet") return "0x0000000000000000000000000000000000000000";
   if (lower.includes("asset") || lower.includes("symbol")) return "BTC";
   if (lower.includes("chain")) return "base";
   if (lower.includes("window")) return "7d";
@@ -1564,7 +1597,13 @@ function sampleStringForName(name) {
 }
 
 function titleFromPath(routePath, method) {
-  const words = routePath.split("/").filter(Boolean).join(" ").replace(/[-_]/g, " ");
+  const words = decodePathTemplate(routePath)
+    .split("/")
+    .filter(Boolean)
+    .filter((part) => !/^api$/i.test(part) && !/^v\d+$/i.test(part))
+    .map((part) => part.replace(/^\{|\}$/g, ""))
+    .join(" ")
+    .replace(/[-_]/g, " ");
   return `${method.toUpperCase()} ${words}`.trim();
 }
 

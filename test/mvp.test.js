@@ -1524,6 +1524,52 @@ Content-Type: application/json
   }
 });
 
+test("Provider Studio decodes encoded path templates from API docs", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/api/overview") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html>
+        <a href="/api/points-leaderboard/%7Baddress%7D">Points Leaderboard</a>
+      `);
+      return;
+    }
+    if (req.url === "/api/points-leaderboard/%7Baddress%7D") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><main>
+        <h1>Points Leaderboard</h1>
+        <p>https://api.example.com/api/points-leaderboard/%7Baddress%7D</p>
+        <pre>GET /api/points-leaderboard/%7Baddress%7D HTTP/1.1
+Host: api.example.com
+apiKey: YOUR_API_KEY</pre>
+        <pre>{"data":[{"rank":1,"points":100}]}</pre>
+      </main>`);
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/api/overview`,
+      default_price: "0.01",
+      provider_name: "Example Data"
+    }, baseUrl);
+    assert.equal(discovered.ok, true);
+    assert.equal(discovered.drafts.length, 1);
+    const draft = discovered.drafts[0];
+    assert.equal(draft.title, "Points Leaderboard");
+    assert.equal(draft.path, "/api/points-leaderboard/{address}");
+    assert.equal(draft.upstream_url, "https://api.example.com/api/points-leaderboard/{address}");
+    assert.equal(draft.sample_request.address, "0x0000000000000000000000000000000000000000");
+    assert.equal(draft.service_id.includes("7baddress"), false);
+    assert.equal(draft.summary.includes("%7B"), false);
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {
   await withServer(async ({ baseUrl }) => {
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
