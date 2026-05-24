@@ -17,9 +17,11 @@ export function publicServiceRecord(record) {
   const provenance = summarizeProvenance(record);
   const requestData = requestDataContract(record);
   const responseData = responseDataContract(record);
+  const displayTitle = displayTitleForRecord(record);
   return {
     service_id: record.manifest.service_id,
     title: record.manifest.title,
+    display_title: displayTitle,
     description_for_agent: record.manifest.description_for_agent,
     capabilities: record.manifest.capabilities,
     pricing: record.manifest.pricing,
@@ -389,9 +391,11 @@ export function listServiceSummaries(store, {
 export function publicServiceSummary(record) {
   const trust = summarizeTrust(record);
   const health = summarizeHealth(record);
+  const displayTitle = displayTitleForRecord(record);
   return {
     service_id: record.manifest.service_id,
-    title: record.manifest.title,
+    title: displayTitle,
+    raw_title: record.manifest.title,
     description_for_agent: record.manifest.description_for_agent,
     provider_id: record.manifest.provider.provider_id,
     capabilities: record.manifest.capabilities || [],
@@ -409,6 +413,90 @@ export function publicServiceSummary(record) {
     created_at: record.created_at || null,
     updated_at: record.updated_at || null
   };
+}
+
+function displayTitleForRecord(record) {
+  const manifest = record.manifest || {};
+  const derived = displayTitleFromServiceId(manifest.service_id);
+  const title = cleanDisplayTitle(manifest.title);
+  if (derived && shouldPreferDerivedDisplayTitle(title, manifest.service_id, derived)) return derived;
+  return title || derived || manifest.service_id;
+}
+
+function cleanDisplayTitle(value) {
+  return String(value || "")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, "\"")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shouldPreferDerivedDisplayTitle(title, serviceId, derived) {
+  const value = String(title || "").toLowerCase();
+  const id = String(serviceId || "").toLowerCase();
+  if (!value) return true;
+  if (value.length < 4) return true;
+  if (/^(up to \d+\)?|no pagination|request example|copy|responses?|body|parameters?)$/i.test(title)) return true;
+  if (/^(mportant|ain)$/i.test(title)) return true;
+  if (/^(original|important|first-report)$/i.test(title) && /_(newsflash|article)_/.test(id)) return true;
+  if (/_(article|newsflash)_[a-z0-9]+$/.test(id) && /^all (articles|newsflashes)$/i.test(title)) return true;
+  if (/^get v\d+ /.test(value)) return true;
+  return false;
+}
+
+function displayTitleFromServiceId(serviceId) {
+  const id = String(serviceId || "").toLowerCase();
+  const methodPrefix = id.match(/^(get|post|put|patch)_(.+)$/);
+  if (!methodPrefix) return "";
+  const parts = methodPrefix[2].split("_").filter(Boolean).filter((part) => !/^api$/.test(part) && !/^v\d+$/.test(part));
+  if (!parts.length) return "";
+  const [head, ...rest] = parts;
+  if (head === "article") return displayTitleForArticle(rest);
+  if (head === "newsflash") return displayTitleForNewsflash(rest);
+  if (head === "search") return "Search articles and news";
+  if (head === "data" && rest.length) return `${titleCaseEndpointWords(rest)} data`;
+  return "";
+}
+
+function displayTitleForArticle(parts) {
+  const key = parts.join("_");
+  if (!key) return "All articles";
+  if (key === "24h") return "Articles from last 24h";
+  if (key === "important") return "Important articles";
+  if (key === "original") return "Original articles";
+  return `${titleCaseEndpointWords(parts)} articles`;
+}
+
+function displayTitleForNewsflash(parts) {
+  const key = parts.join("_");
+  if (!key) return "All newsflashes";
+  if (key === "24h") return "Newsflashes from last 24h";
+  if (key === "important") return "Important newsflashes";
+  if (key === "first") return "First important newsflash";
+  if (key === "onchain") return "On-chain newsflashes";
+  if (key === "financing") return "Financing newsflashes";
+  if (key === "prediction") return "Prediction market newsflashes";
+  if (key === "original") return "Original newsflashes";
+  if (key === "ai") return "AI newsflashes";
+  return `${titleCaseEndpointWords(parts)} newsflashes`;
+}
+
+function titleCaseEndpointWords(parts) {
+  return parts
+    .flatMap((part) => String(part).split(/[-_]+/))
+    .filter(Boolean)
+    .map(endpointWord)
+    .join(" ");
+}
+
+function endpointWord(word) {
+  const upper = new Set(["ai", "api", "aum", "btc", "dxy", "eth", "etf", "fbtc", "ibit", "m2", "pnl", "us", "usd"]);
+  const normalized = String(word || "").toLowerCase();
+  if (/^top\d+$/.test(normalized)) return `Top ${normalized.slice(3)}`;
+  if (/^\d+h$/.test(normalized)) return normalized;
+  if (upper.has(normalized)) return normalized.toUpperCase();
+  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : normalized;
 }
 
 function compareServiceSummaries(a, b, sort) {

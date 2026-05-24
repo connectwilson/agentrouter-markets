@@ -514,6 +514,7 @@ export function serviceDetailHtml(detail) {
   const endpoint = manifest.endpoint || {};
   const capabilities = manifest.capabilities || service.capabilities || [];
   const price = manifest.pricing || {};
+  const title = service.display_title || service.title || manifest.title || serviceId;
   const rawJsonHref = `/agent-router/service?service_id=${encodeURIComponent(serviceId)}&format=json`;
   const invokeExample = {
     service_id: serviceId,
@@ -524,13 +525,13 @@ export function serviceDetailHtml(detail) {
     }
   };
   return page({
-    title: `${service.title || serviceId} · AgentRouter`,
+    title: `${title} · AgentRouter`,
     body: `
       <main class="shell wide-shell detail-page">
         <section class="detail-hero">
           <div>
             <span class="eyebrow">Service capability</span>
-            <h1>${html(service.title || manifest.title || serviceId)}</h1>
+            <h1>${html(title)}</h1>
             <p class="lead">${html(manifest.description_for_agent || service.description_for_agent || "Agent-callable data service with verified provider response.")}</p>
             <div class="detail-actions">
               <a class="button primary" href="/agent?q=${encodeURIComponent(serviceId)}">Open in service hub</a>
@@ -928,8 +929,9 @@ function serviceClientScript() {
       catch { return { registered_services: 0, verified_services: 0, total_calls: 0, services: [] }; }
     }
     function apiCard(service, options = {}) {
+      const title = service.display_title || service.title || service.service_id;
       const description = service.description_for_agent || "Agent-callable data API with verified response envelope.";
-      const logo = initials(service.title || service.service_id);
+      const logo = initials(title);
       const selected = options.selected ? " selected" : "";
       const detailHref = "/agent-router/service?service_id=" + encodeURIComponent(service.service_id);
       const tagName = options.link ? "a" : "article";
@@ -940,7 +942,7 @@ function serviceClientScript() {
           <div class="api-main">
             <div class="logo">\${escapeHtml(logo)}</div>
             <div>
-              <h3>\${escapeHtml(service.title || service.service_id)}</h3>
+              <h3>\${escapeHtml(title)}</h3>
               <p>\${escapeHtml(truncate(description, 106))}</p>
               <div class="byline"><span>By \${escapeHtml(service.provider_id || "provider")}</span><span>Updated now</span></div>
               <div class="stat-row">

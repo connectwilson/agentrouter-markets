@@ -58,6 +58,10 @@ export function suggestCapabilities(text) {
   if (/portfolio|资产组合|持仓组合/.test(value)) tags.add("portfolio_data");
   if (/profiler|profile|画像/.test(value)) tags.add("address_intelligence");
   if (/prediction market|预测市场/.test(value)) tags.add("prediction_market_data");
+  if (/newsflash|news flash|news|快讯|资讯/.test(value)) tags.add("news_data");
+  if (/article|articles|report|research|文章|研报/.test(value)) tags.add("article_data");
+  if (/original|first[-\s]?report|first report|首发/.test(value)) tags.add("original_source_data");
+  if (/macro|m2|treasury|dxy|dollar index|yield|国债|美元指数/.test(value)) tags.add("macro_data");
   if (/hyperliquid|hl\b/.test(value)) {
     tags.add("hyperliquid_data");
     tags.add("crypto_derivatives");

@@ -1508,6 +1508,54 @@ test("Provider Studio imports ClawHub-style HTML embedded Skill readme", async (
   }
 });
 
+test("Provider Studio normalizes endpoint-aware Skill titles and tags", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/blockbeats-skill") {
+      res.writeHead(200, { "content-type": "text/markdown" });
+      res.end(`# BlockBeats API Skill
+
+Base URL: \`http://127.0.0.1:${upstream.address().port}\`
+Auth: Header \`api-key: $BLOCKBEATS_API_KEY\`
+
+### Data Endpoints
+
+| Endpoint | URL | Key Parameters |
+|----------|-----|----------------|
+| All articles | \`GET /v1/article\` | none |
+| All articles | \`GET /v1/article/24h\` | none |
+| up to 50) | \`GET /v1/article/important\` | none |
+| Original | \`GET /v1/newsflash/onchain\` | none |
+| (no pagination) | \`GET /v1/newsflash/original\` | none |
+| Request example (AI newsflash) | \`GET /v1/newsflash/ai\` | \`page=1\` |
+`);
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: 0, message: "", data: { rows: [{ value: 1 }] } }));
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/blockbeats-skill`,
+      default_price: "0.01",
+      secret_value: "bbp_test_key"
+    }, baseUrl);
+    const byPath = Object.fromEntries(discovered.drafts.map((draft) => [draft.path, draft]));
+    assert.equal(byPath["/v1/article"].title, "All articles");
+    assert.equal(byPath["/v1/article/24h"].title, "Articles from last 24h");
+    assert.equal(byPath["/v1/article/important"].title, "Important articles");
+    assert.equal(byPath["/v1/newsflash/onchain"].title, "On-chain newsflashes");
+    assert.equal(byPath["/v1/newsflash/original"].title, "Original newsflashes");
+    assert.equal(byPath["/v1/newsflash/ai"].title, "AI newsflashes");
+    assert.ok(byPath["/v1/article/important"].capabilities.includes("article_data"));
+    assert.ok(byPath["/v1/newsflash/onchain"].capabilities.includes("news_data"));
+    assert.ok(byPath["/v1/newsflash/onchain"].capabilities.includes("onchain_data"));
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test("Provider Studio explains CLI-only Skill documents instead of treating them as HTTP APIs", async () => {
   const upstream = http.createServer((req, res) => {
     if (req.url === "/cli-data-skill") {

@@ -582,7 +582,7 @@ function createDirectEndpointDraft({ apiUrl, providerId, providerTitle, defaultP
 function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, providerTitle, defaultPrice, secretValue, authHeader, skillUrl, skillTitle }) {
   const method = endpoint.method || "GET";
   const routePath = endpoint.path.startsWith("/") ? endpoint.path : new URL(endpoint.path, `${upstreamBaseUrl}/`).pathname;
-  const title = endpoint.title || titleFromPath(routePath, method);
+  const title = normalizeEndpointTitle(endpoint.title, routePath, method);
   const sampleRequest = { ...endpoint.params };
   const previewData = endpoint.previewData || { status: 0, message: "", data: { example: true } };
   const description = agentDescription({
@@ -625,7 +625,7 @@ function createApiDocsEndpointDraft({ endpoint, providerId, providerTitle, defau
   const routePath = decodePathTemplate(endpoint.path);
   const sampleRequest = { ...paramsFromPathTemplate(routePath), ...(endpoint.sampleRequest || {}) };
   const previewData = endpoint.previewData || { data: [{ example: true }] };
-  const title = endpoint.title || titleFromPath(routePath, method);
+  const title = normalizeEndpointTitle(endpoint.title, routePath, method);
   const summary = routingSummary({
     title,
     providerTitle,
@@ -1086,10 +1086,11 @@ function endpointFromUrl({ url, method, title, params, description }) {
   const parsed = new URL(url);
   for (const [key, value] of parsed.searchParams.entries()) params[key] = normalizeParamExample(value);
   const routePath = decodePathTemplate(parsed.pathname);
+  const normalizedTitle = normalizeEndpointTitle(title, routePath, method);
   return {
     method,
     path: routePath,
-    title,
+    title: normalizedTitle,
     description: description || `Use this service to call ${method} ${routePath}.`,
     params,
     operationId: normalizeId(null, `${method} ${routePath}`, "service")
@@ -1161,6 +1162,87 @@ function cleanEndpointTitle(value) {
     .replace(/[:：]\s*$/, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeEndpointTitle(value, routePath, method = "GET") {
+  const cleaned = cleanEndpointTitle(value);
+  const derived = friendlyTitleFromRoutePath(routePath);
+  if (!cleaned) return derived || titleFromPath(routePath, method);
+  if (derived && shouldPreferRouteTitle(cleaned, routePath, derived)) return derived;
+  return cleaned;
+}
+
+function shouldPreferRouteTitle(title, routePath, derived) {
+  const value = String(title || "").trim().toLowerCase();
+  const path = String(routePath || "").toLowerCase();
+  if (!value) return true;
+  if (value.length < 4) return true;
+  if (/^(get|post|put|patch)\s+/i.test(title)) return true;
+  if (/^(up to \d+\)?|no pagination|request example|copy|responses?|body|parameters?)$/i.test(value)) return true;
+  if (/^[a-z][a-z-]{3,20}$/.test(title) && !derived.toLowerCase().includes(value)) return true;
+  if (/(\/article|\/newsflash)(\/[^/]+)$/.test(path) && /^all (articles|newsflashes)$/i.test(title)) return true;
+  if (/\/newsflash\/(onchain|prediction|financing|first|original|ai|important)\b/.test(path)) return true;
+  if (/\/article\/(24h|important|original)\b/.test(path)) return true;
+  return false;
+}
+
+function friendlyTitleFromRoutePath(routePath) {
+  const parts = pathMeaningParts(routePath);
+  if (!parts.length) return "";
+  const [head, ...rest] = parts;
+  if (head === "article") return titleForArticleEndpoint(rest);
+  if (head === "newsflash") return titleForNewsflashEndpoint(rest);
+  if (head === "search") return "Search articles and news";
+  if (head === "data" && rest.length) return `${titleCaseEndpointWords(rest)} data`;
+  return "";
+}
+
+function pathMeaningParts(routePath) {
+  return decodePathTemplate(routePath)
+    .split("/")
+    .filter(Boolean)
+    .filter((part) => !/^api$/i.test(part) && !/^v\d+$/i.test(part))
+    .map((part) => part.replace(/^\{|\}$/g, "").toLowerCase());
+}
+
+function titleForArticleEndpoint(parts) {
+  const key = parts.join("_");
+  if (!key) return "All articles";
+  if (key === "24h") return "Articles from last 24h";
+  if (key === "important") return "Important articles";
+  if (key === "original") return "Original articles";
+  return `${titleCaseEndpointWords(parts)} articles`;
+}
+
+function titleForNewsflashEndpoint(parts) {
+  const key = parts.join("_");
+  if (!key) return "All newsflashes";
+  if (key === "24h") return "Newsflashes from last 24h";
+  if (key === "important") return "Important newsflashes";
+  if (key === "first") return "First important newsflash";
+  if (key === "onchain") return "On-chain newsflashes";
+  if (key === "financing") return "Financing newsflashes";
+  if (key === "prediction") return "Prediction market newsflashes";
+  if (key === "original") return "Original newsflashes";
+  if (key === "ai") return "AI newsflashes";
+  return `${titleCaseEndpointWords(parts)} newsflashes`;
+}
+
+function titleCaseEndpointWords(parts) {
+  return parts
+    .flatMap((part) => String(part).split(/[-_]+/))
+    .filter(Boolean)
+    .map(endpointWord)
+    .join(" ");
+}
+
+function endpointWord(word) {
+  const upper = new Set(["ai", "api", "aum", "btc", "dxy", "eth", "etf", "fbtc", "ibit", "m2", "pnl", "us", "usd"]);
+  const normalized = String(word || "").toLowerCase();
+  if (/^top\d+$/.test(normalized)) return `Top ${normalized.slice(3)}`;
+  if (/^\d+h$/.test(normalized)) return normalized;
+  if (upper.has(normalized)) return normalized.toUpperCase();
+  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : normalized;
 }
 
 function htmlToText(html) {
