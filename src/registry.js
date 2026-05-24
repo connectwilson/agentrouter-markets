@@ -166,6 +166,8 @@ export function searchServices(store, { query = "", capabilities = [], maxPrice,
       manifest.agent_contract?.summary,
       manifest.agent_contract?.request_shape_summary,
       manifest.agent_contract?.response_shape_summary,
+      JSON.stringify(manifest.agent_contract?.request_data || {}),
+      JSON.stringify(manifest.agent_contract?.response_data || {}),
       JSON.stringify(manifest.sample_request || {}),
       JSON.stringify(manifest.sample_response?.data || {}),
       JSON.stringify(record.validation_runs?.at(-1)?.result_preview || {})

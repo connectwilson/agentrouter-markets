@@ -742,6 +742,17 @@ function dataContractFor({ method, routePath, sampleRequest, previewData }) {
     response: {
       content_type: "application/json",
       preview_shape: shapeFor(previewData)
+    },
+    request_data: {
+      fields: Object.keys(sampleRequest || {}),
+      example: sampleRequest || {},
+      shape: shapeFor(sampleRequest || {})
+    },
+    response_data: {
+      fields: responseKeys(previewData, 16),
+      preview: previewData,
+      shape: shapeFor(previewData),
+      note: "Preview data is exposed before payment so the buyer Agent can judge task fit. Paid responses should keep the same general shape but may contain fresher or fuller data."
     }
   };
 }

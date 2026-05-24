@@ -880,7 +880,9 @@ export function studioHtml({ draft, loadedService } = {}) {
         draftReviewItem("Input", escapeHtml(draftInputSummary(draft))),
         draftReviewItem("Response", escapeHtml(draftResponseSummary(draft))),
         draftReviewItem("Source", escapeHtml(draftSourceLabel(draft))),
-        draftReviewItem("Agent summary", escapeHtml(summary), true)
+        draftReviewItem("Agent summary", escapeHtml(summary), true),
+        draftReviewItem("Request data", '<code>' + escapeHtml(compactJson(draft.data_contract?.request_data?.example || draft.sample_request || {}, 220)) + '</code>', true),
+        draftReviewItem("Response data", '<code>' + escapeHtml(compactJson(draft.data_contract?.response_data?.preview ?? draft.preview_data ?? {}, 220)) + '</code>', true)
       ].join("");
     }
 
@@ -930,6 +932,16 @@ export function studioHtml({ draft, loadedService } = {}) {
     function compactText(value, maxLength) {
       const text = String(value || "").replace(/\s+/g, " ").trim();
       return text.length > maxLength ? text.slice(0, maxLength - 1) + "…" : text;
+    }
+
+    function compactJson(value, maxLength) {
+      let text = "";
+      try {
+        text = JSON.stringify(value);
+      } catch {
+        text = String(value || "");
+      }
+      return compactText(text, maxLength);
     }
 
     function draftRowClass(draft) {

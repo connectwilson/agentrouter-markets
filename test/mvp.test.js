@@ -88,6 +88,8 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     });
     assert.equal(services.length, 1);
     assert.equal(services[0].service_id, "chain_fund_flow_7d_base");
+    assert.deepEqual(services[0].request_data.example, { chain: "base", days: 7 });
+    assert.ok(services[0].response_data.fields.includes("metrics.net_flow_usd"));
 
     const manifest = await connector.getManifest("chain_fund_flow_7d_base");
     assert.equal(manifest.title, "Base 7D Fund Flow");
@@ -1640,6 +1642,10 @@ test("Provider Studio generates routing-rich endpoint summaries and tags", async
     assert.match(draft.summary, /Inputs: chain, token_address, date, pagination, filters, order_by/);
     assert.match(draft.summary, /Returns JSON fields such as data/);
     assert.match(draft.summary, /Routing keywords:/);
+    assert.deepEqual(draft.data_contract.request_data.fields, ["chain", "token_address", "date", "pagination", "filters", "order_by"]);
+    assert.equal(draft.data_contract.request_data.example.token_address, "0x0000000000000000000000000000000000000000");
+    assert.ok(draft.data_contract.response_data.fields.includes("data.wallet_address"));
+    assert.equal(draft.data_contract.response_data.preview.data[0].tx_hash, "0x123");
     assert.ok(draft.capabilities.includes("token_god_mode"));
     assert.ok(draft.capabilities.includes("token_transfers"));
     assert.ok(draft.capabilities.includes("wallet_activity"));

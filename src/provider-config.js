@@ -297,6 +297,8 @@ function createAgentContract({ capabilities = [], sampleRequest = {}, sampleData
     example_questions: exampleQuestionsForCapabilities(capabilities),
     request_shape_summary: summarizeShape(sampleRequest),
     response_shape_summary: summarizeShape(sampleData),
+    request_data: requestDataContract(sampleRequest),
+    response_data: responseDataContract(sampleData),
     quality_expectations: {
       result_envelope: "agent_data_envelope_v1",
       must_include_metadata: ["data_sources", "generated_at", "freshness_seconds", "confidence", "limitations"],
@@ -308,6 +310,24 @@ function createAgentContract({ capabilities = [], sampleRequest = {}, sampleData
       not_for: []
     },
     summary
+  };
+}
+
+function requestDataContract(sampleRequest = {}) {
+  return {
+    purpose: "Use this example before payment to decide whether the service accepts the fields needed for the task.",
+    fields: Object.keys(sampleRequest || {}),
+    example: sampleRequest || {},
+    shape_summary: summarizeShape(sampleRequest)
+  };
+}
+
+function responseDataContract(sampleData = {}) {
+  return {
+    purpose: "Use this preview before payment to decide whether the service can return data useful for the task. It is a sample/preview, not a guaranteed paid result.",
+    fields: collectFieldPaths(sampleData, 16),
+    preview: sampleData || {},
+    shape_summary: summarizeShape(sampleData)
   };
 }
 
@@ -339,6 +359,26 @@ function summarizeShape(value) {
   if (Array.isArray(value)) return `array(${value.length} sample items)`;
   if (value && typeof value === "object") return `object keys: ${Object.keys(value).slice(0, 12).join(", ") || "none"}`;
   return typeof value;
+}
+
+function collectFieldPaths(value, limit = 16, prefix = "") {
+  if (limit <= 0) return [];
+  if (Array.isArray(value)) return value.length ? collectFieldPaths(value[0], limit, prefix) : [];
+  if (!value || typeof value !== "object") return [];
+  const paths = [];
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    paths.push(path);
+    if (paths.length >= limit) break;
+    if (child && typeof child === "object") {
+      for (const nested of collectFieldPaths(child, limit - paths.length, path)) {
+        paths.push(nested);
+        if (paths.length >= limit) break;
+      }
+    }
+    if (paths.length >= limit) break;
+  }
+  return paths;
 }
 
 function exampleQuestionsForCapabilities(capabilities = []) {

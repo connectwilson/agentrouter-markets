@@ -20,6 +20,9 @@ export function publicServiceRecord(record) {
     pricing: record.manifest.pricing,
     verification_status: record.verification_status,
     trust: summarizeTrust(record),
+    sample_request: record.manifest.sample_request || {},
+    request_data: requestDataContract(record),
+    response_data: responseDataContract(record),
     sample_response: record.manifest.sample_response,
     validation_result_preview: record.validation_runs?.at(-1)?.result_preview || null,
     source_provenance: summarizeProvenance(record),
@@ -28,6 +31,23 @@ export function publicServiceRecord(record) {
     badges: summarizeBadges(record),
     created_at: record.created_at || null,
     updated_at: record.updated_at || null
+  };
+}
+
+function requestDataContract(record) {
+  return record.manifest.agent_contract?.request_data || {
+    fields: Object.keys(record.manifest.sample_request || {}),
+    example: record.manifest.sample_request || {},
+    shape_summary: summarizeShape(record.manifest.sample_request || {})
+  };
+}
+
+function responseDataContract(record) {
+  const sampleData = record.manifest.sample_response?.data || {};
+  return record.manifest.agent_contract?.response_data || {
+    fields: collectFieldPaths(sampleData, 16),
+    preview: sampleData,
+    shape_summary: summarizeShape(sampleData)
   };
 }
 
@@ -290,6 +310,32 @@ function inferProvenanceLevel(claim = {}) {
   if (claim.source_type === "static_dataset") return "provider_owned";
   if (claim.source_type === "provider_declared_data_service" || claim.source_type === "api_wrapper") return "wrapped_api";
   return "unknown";
+}
+
+function summarizeShape(value) {
+  if (Array.isArray(value)) return `array(${value.length} sample items)`;
+  if (value && typeof value === "object") return `object keys: ${Object.keys(value).slice(0, 12).join(", ") || "none"}`;
+  return typeof value;
+}
+
+function collectFieldPaths(value, limit = 16, prefix = "") {
+  if (limit <= 0) return [];
+  if (Array.isArray(value)) return value.length ? collectFieldPaths(value[0], limit, prefix) : [];
+  if (!value || typeof value !== "object") return [];
+  const paths = [];
+  for (const [key, child] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    paths.push(path);
+    if (paths.length >= limit) break;
+    if (child && typeof child === "object") {
+      for (const nested of collectFieldPaths(child, limit - paths.length, path)) {
+        paths.push(nested);
+        if (paths.length >= limit) break;
+      }
+    }
+    if (paths.length >= limit) break;
+  }
+  return paths;
 }
 
 function latencyScore(averageLatencyMs) {
