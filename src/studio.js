@@ -212,6 +212,8 @@ export function studioHtml({ draft, loadedService } = {}) {
     .draft-review-item.full { grid-column: 1 / -1; }
     .draft-contract { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
     .draft-chip { display:inline-flex; align-items:center; border:1px solid #d7ded9; background:#fff; border-radius:999px; padding:3px 8px; color:#516158; font-size:11px; font-weight:650; }
+    .draft-chip.route { border-color:#b7ead0; background:#f2fff8; color:#174d36; }
+    .draft-chip.meta { color:#6b7370; }
     .draft-chip.ready { border-color:#afe9bb; background:#f2fff4; color:#174d24; }
     .draft-chip.warn { border-color:#ead4a6; background:#fff9ec; color:#734d00; }
     .draft-chip.error { border-color:#efb3ad; background:#fff1ef; color:#9f1d14; }
@@ -1105,10 +1107,14 @@ export function studioHtml({ draft, loadedService } = {}) {
     function draftContractChips(draft) {
       const inputKeys = Object.keys(draft.sample_request || {});
       const source = draft.source_type === "skill_import" ? "Skill import" : draft.discovery_note ? "Direct endpoint" : "OpenAPI";
+      const routeTags = (draft.capabilities || ["data_service"]).slice(0, 8).map((tag) =>
+        '<span class="draft-chip route">' + escapeHtml(tag) + '</span>'
+      );
       return [
-        '<span class="draft-chip">' + inputKeys.length + ' input fields</span>',
-        '<span class="draft-chip">' + escapeHtml(source) + '</span>',
-        draft.auth_header ? '<span class="draft-chip">Auth: ' + escapeHtml(draft.auth_header) + '</span>' : '',
+        ...routeTags,
+        '<span class="draft-chip meta">' + inputKeys.length + ' input fields</span>',
+        '<span class="draft-chip meta">' + escapeHtml(source) + '</span>',
+        draft.auth_header ? '<span class="draft-chip meta">Auth: ' + escapeHtml(draft.auth_header) + '</span>' : '',
         draft.publish_error ? '<span class="draft-chip error">Fix before publish</span>' : ''
       ].join("");
     }
