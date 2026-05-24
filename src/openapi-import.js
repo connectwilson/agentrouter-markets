@@ -27,6 +27,15 @@ export async function discoverApiServices(body, baseUrl) {
   const providerName = body.provider_name || null;
   const secretValue = body.secret_value || "";
   const authHeader = body.auth_header || "";
+  if (looksLikeNansenDocsSource(apiUrl)) {
+    return discoverNansenDocsServices({
+      docsUrl: apiUrl,
+      defaultPrice,
+      providerName,
+      secretValue,
+      authHeader
+    });
+  }
   if (looksLikeSkillSource(apiUrl)) {
     return discoverSkillServices({
       skillUrl: apiUrl,
@@ -100,6 +109,59 @@ export async function discoverApiServices(body, baseUrl) {
     provider: {
       provider_id: providerId,
       provider_name: providerTitle
+    },
+    drafts,
+    skipped
+  };
+}
+
+async function discoverNansenDocsServices({ docsUrl, defaultPrice, providerName, secretValue, authHeader }) {
+  const overview = await fetchTextDocument(docsUrl);
+  const docLinks = parseNansenOverviewLinks(overview.raw, docsUrl);
+  if (!docLinks.length) {
+    const error = new Error("Nansen docs import failed: no endpoint documentation links were found.");
+    error.statusCode = 422;
+    throw error;
+  }
+  const providerTitle = providerName || "Nansen";
+  const providerId = normalizeId(null, providerTitle, "provider");
+  const endpoints = [];
+  const skipped = [];
+  for (const link of docLinks) {
+    try {
+      const page = await fetchTextDocument(link);
+      const endpoint = parseNansenEndpointDoc(page.text, link);
+      if (!endpoint) {
+        skipped.push({ source: link, reason: "no_api_endpoint_found" });
+        continue;
+      }
+      endpoints.push(endpoint);
+    } catch (error) {
+      skipped.push({ source: link, reason: error.message });
+    }
+  }
+  const deduped = uniqueBy(endpoints, (endpoint) => `${endpoint.method} ${endpoint.path}`);
+  const drafts = deduped.map((endpoint) => createNansenEndpointDraft({
+    endpoint,
+    providerId,
+    providerTitle,
+    defaultPrice,
+    secretValue,
+    authHeader,
+    docsUrl
+  }));
+  return {
+    ok: true,
+    mode: "nansen_docs",
+    source: docsUrl,
+    api_url: "https://api.nansen.ai",
+    provider: {
+      provider_id: providerId,
+      provider_name: providerTitle
+    },
+    docs: {
+      endpoint_count: drafts.length,
+      auth_header: authHeader || "apiKey"
     },
     drafts,
     skipped
@@ -531,6 +593,45 @@ function createSkillEndpointDraft({ endpoint, upstreamBaseUrl, providerId, provi
   };
 }
 
+function createNansenEndpointDraft({ endpoint, providerId, providerTitle, defaultPrice, secretValue, authHeader, docsUrl }) {
+  const method = endpoint.method || "POST";
+  const sampleRequest = endpoint.sampleRequest || {};
+  const previewData = endpoint.previewData || { data: [{ example: true }], pagination: { page: 1, per_page: 10, is_last_page: true } };
+  const title = endpoint.title || titleFromPath(endpoint.path, method);
+  const description = agentDescription({
+    title,
+    providerTitle,
+    method,
+    routePath: endpoint.path,
+    sampleRequest,
+    baseDescription: endpoint.description,
+    sourceTitle: "Nansen API docs"
+  });
+  return {
+    selected: true,
+    service_id: normalizeId(null, `nansen ${method} ${endpoint.path}`, "service"),
+    provider_id: providerId,
+    provider_name: providerTitle,
+    title,
+    description_for_agent: description,
+    capabilities: suggestCapabilities(`${title} ${description} ${endpoint.path} nansen smart money profiler token portfolio hyperliquid`).split(","),
+    price: defaultPrice,
+    method,
+    path: endpoint.path,
+    upstream_url: `https://api.nansen.ai${endpoint.path}`,
+    auth_header: authHeader || "apiKey",
+    secret_name: "NANSEN_API_KEY",
+    secret_value: secretValue,
+    sample_request: sampleRequest,
+    preview_data: previewData,
+    summary: endpoint.summary || resultSummary({ title, providerTitle, routePath: endpoint.path, previewData }),
+    data_contract: dataContractFor({ method, routePath: endpoint.path, sampleRequest, previewData }),
+    source_type: "nansen_docs_import",
+    source_url: endpoint.sourceUrl || docsUrl,
+    discovery_note: "Generated from Nansen API docs. All Nansen API endpoints use POST requests with JSON bodies and apiKey authentication."
+  };
+}
+
 function agentDescription({ title, providerTitle, method, routePath, sampleRequest = {}, baseDescription = "", sourceTitle = "" }) {
   const cleanBase = cleanDescription(baseDescription);
   const params = Object.keys(sampleRequest);
@@ -583,6 +684,32 @@ function looksLikeSkillSource(apiUrl) {
   }
 }
 
+function looksLikeNansenDocsSource(apiUrl) {
+  try {
+    const url = new URL(apiUrl);
+    return ((/(^|\.)docs\.nansen\.ai$/i.test(url.hostname) && /^\/api(\/|$)/i.test(url.pathname))
+      || url.pathname === "/api/overview");
+  } catch {
+    return false;
+  }
+}
+
+async function fetchTextDocument(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const error = new Error(`${url} returned HTTP ${response.status}`);
+    error.statusCode = 422;
+    throw error;
+  }
+  const contentType = response.headers.get("content-type") || "";
+  const raw = await response.text();
+  return {
+    source: url,
+    raw,
+    text: contentType.includes("html") ? htmlToText(raw) : raw
+  };
+}
+
 async function fetchSkillDocument(skillUrl) {
   const response = await fetch(skillUrl);
   if (!response.ok) {
@@ -606,8 +733,13 @@ function parseSkillDocument(text, skillUrl) {
     || "";
   const endpoints = parseSkillEndpoints(text, baseUrl);
   if (!endpoints.length) {
-    const error = new Error("Skill import failed: no HTTP API endpoints were found in the skill document.");
+    const cliCommands = detectCliSkillCommands(text);
+    const error = new Error(cliCommands.length
+      ? `Skill import failed: this is a CLI-based Skill, not an HTTP API Skill. Provider Studio can import HTTP API endpoints, but this Skill runs local commands such as: ${cliCommands.slice(0, 3).join("; ")}. Use an API/OpenAPI URL, or add a CLI adapter before publishing it as a data service.`
+      : "Skill import failed: no HTTP API endpoints were found in the skill document.");
     error.statusCode = 422;
+    error.code = cliCommands.length ? "CLI_SKILL_NOT_HTTP_API" : "NO_HTTP_ENDPOINTS_IN_SKILL";
+    error.validation = cliCommands.length ? { detected_cli_commands: cliCommands.slice(0, 12) } : undefined;
     throw error;
   }
   return {
@@ -647,6 +779,19 @@ function parseSkillEndpoints(text, baseUrl) {
     if (!endpoints.has(`${endpoint.method} ${endpoint.path}`)) endpoints.set(`${endpoint.method} ${endpoint.path}`, endpoint);
   }
   return [...endpoints.values()].filter((endpoint) => !SKIP_PATH_RE.test(endpoint.path));
+}
+
+function detectCliSkillCommands(text) {
+  const commands = [];
+  const re = /(?:^|\n)\s*([a-z][a-z0-9_-]*(?:\s+[a-z0-9:_./=-]+){1,12})(?:\s|$)/gi;
+  let match;
+  while ((match = re.exec(String(text || "")))) {
+    const command = match[1].trim();
+    if (/^(curl|GET|POST|PUT|PATCH)\b/i.test(command)) continue;
+    if (!/\b(nansen|python|node|npm|npx|bun|uv|deno|go|cargo|docker)\b/i.test(command)) continue;
+    if (!commands.includes(command)) commands.push(command);
+  }
+  return commands;
 }
 
 function parseCurlEndpoints(text, baseUrl) {
@@ -852,6 +997,165 @@ function htmlToText(html) {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+function parseNansenOverviewLinks(html, overviewUrl) {
+  const links = new Set();
+  const overviewHost = new URL(overviewUrl).hostname;
+  const re = /href=["']([^"'#?]+)(?:[#?][^"']*)?["']/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    const href = match[1];
+    let url;
+    try {
+      url = new URL(href, overviewUrl);
+    } catch {
+      continue;
+    }
+    if (!/(^|\.)docs\.nansen\.ai$/i.test(url.hostname) && url.hostname !== overviewHost) continue;
+    if (!/^\/api\//i.test(url.pathname)) continue;
+    if (isNansenNonEndpointDocPath(url.pathname)) continue;
+    links.add(url.toString().replace(/\/$/, ""));
+  }
+  return [...links].sort();
+}
+
+function isNansenNonEndpointDocPath(pathname) {
+  const path = pathname.replace(/\/$/, "");
+  if (path === "/api/overview") return true;
+  if (/\/api-changelog(\/|$)/i.test(path)) return true;
+  const parentDocs = new Set([
+    "/api/smart-money",
+    "/api/profiler",
+    "/api/token-god-mode",
+    "/api/hyperliquid",
+    "/api/prediction-market"
+  ]);
+  return parentDocs.has(path);
+}
+
+function parseNansenEndpointDoc(text, sourceUrl) {
+  const content = String(text || "");
+  const title = cleanEndpointTitle(firstMatch(content, /^#\s+(.+)$/m)) || titleFromSkillUrl(sourceUrl);
+  const fullUrlMatch = content.match(/https:\/\/api\.nansen\.ai(\/api\/v\d+\/[a-z0-9/_-]+)/i);
+  const pathMatch = fullUrlMatch?.[1]
+    || firstMatch(content, /\bPOST\s+(\/api\/v\d+\/[a-z0-9/_-]+)\s+HTTP\/1\.1/i)
+    || firstMatch(content, /\bpost\s*\n\s*(?:https:\/\/api\.nansen\.ai)?(\/api\/v\d+\/[a-z0-9/_-]+)/i);
+  if (!pathMatch) return null;
+  const path = pathMatch.replace(/\/$/, "");
+  const description = extractNansenDescription(content, title, path);
+  const sampleRequest = extractNansenRequestBody(content, path) || nansenFallbackSampleRequest(path);
+  const previewData = extractNansenPreviewData(content, path) || { data: [{ example: true }] };
+  return {
+    method: "POST",
+    path,
+    title,
+    description,
+    sampleRequest,
+    previewData,
+    sourceUrl,
+    summary: `${title} via Nansen ${path}.`
+  };
+}
+
+function extractNansenDescription(content, title, path) {
+  const pathIndex = content.indexOf(`https://api.nansen.ai${path}`);
+  const afterPath = pathIndex >= 0 ? content.slice(pathIndex + `https://api.nansen.ai${path}`.length) : "";
+  const description = afterPath
+    .split(/\n(?:Authorizations|Body|Responses|Copy)\b/i)[0]
+    .replace(/\s+/g, " ")
+    .trim();
+  return description || `${title} from Nansen API.`;
+}
+
+function extractNansenRequestBody(content, path) {
+  const start = content.search(new RegExp(`POST\\s+${escapeRegExp(path)}\\s+HTTP\\/1\\.1`, "i"));
+  if (start < 0) return null;
+  const firstJson = extractFirstBalancedJson(content.slice(start));
+  return firstJson && !Array.isArray(firstJson) ? firstJson : null;
+}
+
+function extractNansenPreviewData(content, path) {
+  const start = content.search(new RegExp(`POST\\s+${escapeRegExp(path)}\\s+HTTP\\/1\\.1`, "i"));
+  if (start < 0) return null;
+  const segment = content.slice(start);
+  const first = extractFirstBalancedJsonWithEnd(segment);
+  if (!first) return null;
+  const second = extractFirstBalancedJson(segment.slice(first.end));
+  if (!second || Array.isArray(second)) return null;
+  if (JSON.stringify(second) === JSON.stringify(first.value)) return null;
+  return second;
+}
+
+function extractFirstBalancedJson(value) {
+  return extractFirstBalancedJsonWithEnd(value)?.value || null;
+}
+
+function extractFirstBalancedJsonWithEnd(value) {
+  const input = String(value || "");
+  const start = input.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < input.length; index += 1) {
+    const char = input[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return { value: JSON.parse(input.slice(start, index + 1)), end: index + 1 };
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function nansenFallbackSampleRequest(path) {
+  if (/smart-money|holdings|netflow|dex-trades|dcas|tgm|token|flows|transfers/i.test(path)) {
+    return {
+      chains: ["ethereum"],
+      pagination: { page: 1, per_page: 10 }
+    };
+  }
+  if (/address|profiler/i.test(path)) {
+    return {
+      address: "0x0000000000000000000000000000000000000000",
+      chain: "ethereum",
+      pagination: { page: 1, per_page: 10 }
+    };
+  }
+  if (/agent/i.test(path)) return { query: "Summarize current market activity." };
+  return { pagination: { page: 1, per_page: 10 } };
+}
+
+function uniqueBy(items, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const key = keyFn(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function extractSkillReadmeFromHtml(html) {

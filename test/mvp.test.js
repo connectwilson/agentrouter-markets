@@ -1347,6 +1347,128 @@ test("Provider Studio imports ClawHub-style HTML embedded Skill readme", async (
   }
 });
 
+test("Provider Studio explains CLI-only Skill documents instead of treating them as HTTP APIs", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/nansen-cli-skill") {
+      res.writeHead(200, { "content-type": "text/markdown" });
+      res.end(`---
+name: nansen-smart-money-tracker
+allowed-tools: Bash(nansen:*)
+---
+
+# Smart Money
+
+All commands: \`nansen research smart-money <sub> [options]\`
+
+\`\`\`bash
+nansen research smart-money netflow --chain solana --limit 10
+nansen research smart-money holdings --chain solana --limit 10
+\`\`\`
+`);
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    await assert.rejects(
+      discoverApiServices({
+        api_url: `${baseUrl}/nansen-cli-skill`,
+        default_price: "0.01",
+        secret_value: "nansen_test_key"
+      }, baseUrl),
+      (error) => {
+        assert.equal(error.statusCode, 422);
+        assert.equal(error.code, "CLI_SKILL_NOT_HTTP_API");
+        assert.match(error.message, /CLI-based Skill/);
+        assert.ok(error.validation.detected_cli_commands.some((command) => command.includes("nansen research smart-money")));
+        return true;
+      }
+    );
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+test("Provider Studio imports Nansen docs overview into POST API drafts", async () => {
+  const upstream = http.createServer((req, res) => {
+    if (req.url === "/api/overview") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html>
+        <a href="/api/smart-money/netflows">Netflows</a>
+        <a href="/api/smart-money/holdings">Holdings</a>
+        <a href="/api/smart-money">Smart Money parent</a>
+      `);
+      return;
+    }
+    if (req.url === "/api/smart-money/netflows") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><main>
+        <h1>Netflows</h1>
+        <p>Get aggregated token flow analysis for smart money wallets.</p>
+        <p>post</p>
+        <p>https://api.nansen.ai/api/v1/smart-money/netflow</p>
+        <p>Authorizations</p><p>ApiKeyAuth</p><p>apiKey string Required</p>
+        <pre>POST /api/v1/smart-money/netflow HTTP/1.1
+Host: api.nansen.ai
+apiKey: YOUR_API_KEY
+Content-Type: application/json
+{
+  "chains": ["ethereum", "solana"],
+  "pagination": {"page": 1, "per_page": 10},
+  "order_by": [{"field": "net_flow_24h_usd", "direction": "DESC"}]
+}</pre>
+        <pre>{
+  "data": [{"token_symbol": "ETH", "net_flow_24h_usd": 1}],
+  "pagination": {"page": 1, "per_page": 10, "is_last_page": true}
+}</pre>
+      </main>`);
+      return;
+    }
+    if (req.url === "/api/smart-money/holdings") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(`<!doctype html><main>
+        <h1>Holdings</h1>
+        <p>https://api.nansen.ai/api/v1/smart-money/holdings</p>
+        <pre>POST /api/v1/smart-money/holdings HTTP/1.1
+Host: api.nansen.ai
+apiKey: YOUR_API_KEY
+Content-Type: application/json
+{
+  "chains": ["ethereum"],
+  "pagination": {"page": 1, "per_page": 10}
+}</pre>
+        <pre>{"data":[{"token_symbol":"ETH","value_usd":1}]}</pre>
+      </main>`);
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${upstream.address().port}`;
+    const discovered = await discoverApiServices({
+      api_url: `${baseUrl}/api/overview`,
+      default_price: "0.01",
+      secret_value: "nansen_test_key"
+    }, baseUrl);
+    assert.equal(discovered.mode, "nansen_docs");
+    assert.equal(discovered.provider.provider_name, "Nansen");
+    assert.equal(discovered.docs.auth_header, "apiKey");
+    assert.equal(discovered.drafts.length, 2);
+    const netflow = discovered.drafts.find((draft) => draft.path === "/api/v1/smart-money/netflow");
+    assert.equal(netflow.method, "POST");
+    assert.equal(netflow.auth_header, "apiKey");
+    assert.deepEqual(netflow.sample_request.chains, ["ethereum", "solana"]);
+    assert.equal(netflow.preview_data.data[0].token_symbol, "ETH");
+  } finally {
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test("Provider Studio published direct endpoints are immediately routable by validation data", async () => {
   await withServer(async ({ baseUrl }) => {
     const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {

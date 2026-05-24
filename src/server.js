@@ -133,8 +133,20 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/studio/import/discover") {
     const body = await readJson(req);
-    const result = await discoverApiServices(body, baseUrl);
-    sendJson(res, 200, markExistingDrafts(result, store));
+    try {
+      const result = await discoverApiServices(body, baseUrl);
+      sendJson(res, 200, markExistingDrafts(result, store));
+    } catch (error) {
+      console.error("[studio/import/discover] failed", JSON.stringify({
+        api_url: body.api_url,
+        default_method: body.default_method || "",
+        has_secret: Boolean(body.secret_value),
+        auth_header: body.auth_header || "",
+        statusCode: error.statusCode || 500,
+        message: error.message
+      }));
+      throw error;
+    }
     return;
   }
 
