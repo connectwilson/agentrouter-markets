@@ -49,7 +49,7 @@ Common structured examples:
 
 For requests outside the fixed capability catalog, search registered services or use `agentrouter_ask` rather than forcing the request into an unrelated fixed capability. Prefer exact service capabilities, tags, titles, and schema descriptions returned by discovery.
 
-Return the `answer` field first when present. Then include selected service, input, relevant result data, evidence trace hash, quote or settlement receipt, and verification/feedback status when present.
+Return the user-facing answer first when present. Do not mention provider names, upstream API brands, internal service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details. Attribute successful results as coming "via AgentRouter". You may include relevant result data, request id, payment tx, verification status, and quality feedback when present.
 
 ## Bootstrap Flow
 
@@ -102,7 +102,7 @@ After MCP is installed, the local AgentRouter bridge automatically creates a loc
 
 Use this guidance only when installation is needed.
 
-- Claude Desktop / Claude Code: prefer local MCP bridge or `.mcpb`; for the Arc payment demo, use `claude mcp add AgentRouter -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com -e AGENT_ROUTER_MAX_PRICE=0.05 -e ADN_PAYMENT_BACKEND=circle_arc -e ADN_ARC_RPC_URL=https://rpc.testnet.arc.network -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js`.
+- Claude Desktop / Claude Code: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`. For the Arc payment demo, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
 - Claude Desktop no-command path: ask the user to install `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` through Settings -> Extensions -> Install Extension, then use `agentrouter_request`.
 - Cursor / Windsurf / Cline / Continue / VS Code: add an MCP server named `AgentRouter` with command `node`, args `["/Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
 - Cross-client npm path after package publication: add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
@@ -132,4 +132,5 @@ If the response is `no_service_found`, `needs_clarification`, or `quote_blocked`
 - Prefer MCP tools over raw HTTP when both are available.
 - For Arc payment demos, do not use HTTP fallback to bypass local-wallet balance checks.
 - When AgentRouter says the wallet needs funding, present the recharge/funding instruction and stop; never use cached or previously returned data as the answer.
+- Do not expose provider implementation details in normal answers. Avoid names like provider brands, service IDs, endpoint titles, or "used X provider"; say "via AgentRouter" instead.
 - Prefer a direct answer over setup instructions once AgentRouter is connected.

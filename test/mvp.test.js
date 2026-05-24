@@ -76,7 +76,8 @@ test("home page and Provider Studio render separately", async () => {
     const agentHtml = await agent.text();
     assert.match(agentHtml, /API Hub for agents/);
     assert.match(agentHtml, /Available services/);
-    assert.match(agentHtml, /claude mcp add AgentRouter/);
+    assert.match(agentHtml, /Universal MCP command/);
+    assert.match(agentHtml, /npx -y @agentrouter\/mcp/);
 
     const studio = await fetch(`${baseUrl}/studio`);
     assert.equal(studio.status, 200);
@@ -84,6 +85,74 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(studioHtml, /Provider Studio/);
     assert.match(studioHtml, /Verify & Publish Selected/);
     assert.doesNotMatch(studioHtml, /Buyer auth/);
+  });
+});
+
+test("GitHub and Google login entrypoints render and GitHub OAuth callback creates a session", async () => {
+  await withServer(async ({ server, baseUrl }) => {
+    const login = await fetch(`${baseUrl}/auth/login`);
+    assert.equal(login.status, 200);
+    const loginHtml = await login.text();
+    assert.match(loginHtml, /Continue with GitHub|Set GITHUB_CLIENT_ID/);
+    assert.match(loginHtml, /Set GOOGLE_CLIENT_ID/);
+
+    const previousEnv = {
+      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET
+    };
+    const previousFetch = globalThis.fetch;
+    try {
+      process.env.GITHUB_CLIENT_ID = "github-client";
+      process.env.GITHUB_CLIENT_SECRET = "github-secret";
+      const start = await fetch(`${baseUrl}/auth/github/start`, { redirect: "manual" });
+      assert.equal(start.status, 302);
+      const location = start.headers.get("location");
+      assert.match(location, /^https:\/\/github\.com\/login\/oauth\/authorize/);
+      const state = new URL(location).searchParams.get("state");
+      assert.ok(server.store.oauthStates.has(state));
+
+      globalThis.fetch = async (url) => {
+        const target = String(url);
+        if (target === "https://github.com/login/oauth/access_token") {
+          return new Response(JSON.stringify({ access_token: "test-access-token" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        if (target === "https://api.github.com/user") {
+          return new Response(JSON.stringify({
+            id: 42,
+            login: "octo",
+            name: "Octo User",
+            email: "octo@example.com",
+            avatar_url: "https://avatars.example/octo.png"
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        throw new Error(`Unexpected fetch ${target}`);
+      };
+
+      const callback = await previousFetch(`${baseUrl}/auth/github/callback?code=abc&state=${encodeURIComponent(state)}`, { redirect: "manual" });
+      assert.equal(callback.status, 302);
+      assert.equal(callback.headers.get("location"), "/");
+      const cookie = callback.headers.get("set-cookie");
+      assert.match(cookie, /ar_session=/);
+
+      const me = await previousFetch(`${baseUrl}/auth/me`, { headers: { cookie } });
+      assert.equal(me.status, 200);
+      const payload = await me.json();
+      assert.equal(payload.authenticated, true);
+      assert.equal(payload.user.provider, "github");
+      assert.equal(payload.user.email, "octo@example.com");
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousEnv.GITHUB_CLIENT_ID === undefined) delete process.env.GITHUB_CLIENT_ID;
+      else process.env.GITHUB_CLIENT_ID = previousEnv.GITHUB_CLIENT_ID;
+      if (previousEnv.GITHUB_CLIENT_SECRET === undefined) delete process.env.GITHUB_CLIENT_SECRET;
+      else process.env.GITHUB_CLIENT_SECRET = previousEnv.GITHUB_CLIENT_SECRET;
+    }
   });
 });
 
@@ -595,10 +664,13 @@ test("AgentRouter MCP server exposes Claude-callable tools", async () => {
       });
       const routed = JSON.parse(called.content[0].text);
       assert.equal(routed.ok, true);
-      assert.equal(routed.selected_service.service_id, "btc_liquidation_max_pain_demo");
+      assert.equal(routed.selected_service, undefined);
+      assert.equal(routed.service_match.matched, true);
       assert.equal(routed.request.capability, "perp_liquidation_max_pain");
       assert.equal(routed.result.data.max_liquidation_pain_price, 103500);
       assert.match(routed.result.request_id, /^req_/);
+      assert.equal(JSON.stringify(routed).includes("btc_liquidation_max_pain_demo"), false);
+      assert.equal(routed.presentation_policy.hide_provider_details, true);
     } finally {
       client.close();
     }
