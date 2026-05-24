@@ -1072,6 +1072,25 @@ test("AgentRouter resolves token symbols before invoking token-address services"
     });
     assert.equal(searchResponse.status, 201);
 
+    const dexTradesResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "token_dex_trades",
+        title: "Token God Mode DEX Trades",
+        provider_name: "Token Flow Lab",
+        description_for_agent: "Use this service for token-level DEX trades and token swap activity.",
+        capabilities: "data_service,token_god_mode,token_data,dex_trades,token_activity",
+        price: "0.01",
+        sample_request: "{\"chain\":\"ethereum\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"1d\"}",
+        sample_data: "{\"token_symbol\":\"AZTEC\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"trades\":[]}",
+        live_data: "{\"token_symbol\":\"AZTEC\",\"token_address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"trades\":[]}",
+        summary: "Token-level DEX trades."
+      })
+    });
+    assert.equal(dexTradesResponse.status, 201);
+
     const flowResponse = await fetch(`${baseUrl}/studio/providers`, {
       method: "POST",
       headers: { "content-type": "application/json" },

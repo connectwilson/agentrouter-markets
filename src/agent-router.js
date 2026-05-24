@@ -774,6 +774,9 @@ export function selectService(candidates, intent) {
     if (intent.wants_liquidation && /liquidation|max pain|max-pain|derivatives|perp/.test(haystack)) score += 4;
     if ((intent.wants_netflow || intent.wants_smart_money_netflow) && /net[\s_-]?flow|netflow|净流入|净流出/.test(haystack)) score += 4;
     if (intent.wants_smart_money_activity && /token god mode|token_god_mode|flow intelligence|flow_intelligence|who bought|who_bought|bought_sold|buyer_seller|token flow|token_flow/.test(haystack)) score += 8;
+    if (intent.wants_smart_money_activity && /who bought|who_bought|bought_sold|buyer_seller|buyer seller|smart money/.test(haystack)) score += 5;
+    if (intent.wants_smart_money_activity && /flow intelligence|flow_intelligence|token flow|token_flow/.test(haystack)) score += 3;
+    if (intent.wants_smart_money_activity && /dex[\s_-]?trades?|trades? data/.test(haystack)) score -= 2;
     if (intent.wants_smart_money_activity && /capital_flow_analysis|chain fund flow|chain_fund_flow|market-wide|chain-level/.test(haystack)) score -= 8;
     if (intent.wants_smart_money_activity && /token[_\s-]?search|entity[_\s-]?search/.test(haystack)) score -= 2;
     if (intent.wants_related_wallets && /leaderboard|ranking|rank|points/.test(haystack)) score -= 4;
