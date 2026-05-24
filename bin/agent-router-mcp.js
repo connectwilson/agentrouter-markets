@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import http from "node:http";
+import { getArcUsdcBalance } from "../src/arc-payment.js";
 import { invokePaidServiceWithLocalWallet } from "../src/local-invoke.js";
 import { routeTaskWithLocalWallet } from "../src/local-route.js";
 import { currentPaymentBackend } from "../src/payment-adapter.js";
@@ -234,7 +235,19 @@ async function callTool(name, args) {
   }
 
   if (name === "agentrouter_wallet_status") {
-    return walletStatus();
+    const status = await walletStatus();
+    if (status.initialized && currentPaymentBackend() === "circle_arc") {
+      try {
+        status.arc_testnet_usdc = await getArcUsdcBalance(status.address);
+      } catch (error) {
+        status.arc_testnet_usdc = {
+          ok: false,
+          status: "balance_unavailable",
+          message: error.message
+        };
+      }
+    }
+    return status;
   }
 
   if (name === "agentrouter_wallet_create") {
@@ -287,15 +300,31 @@ async function requestWithLocalWallet(args) {
     consumer_context: args.consumer_context || {}
   });
   if (!quote.ok) return quote;
-  const invocation = await invokePaidServiceWithLocalWallet({
-    baseUrl,
-    serviceId: quote.selected_service.service_id,
-    input: quote.input,
-    budget: {
-      max_amount: args.constraints?.max_price_usdc || args.budget?.max_amount || "0.05",
-      currency: args.budget?.currency || "USDC"
+  let invocation;
+  try {
+    invocation = await invokePaidServiceWithLocalWallet({
+      baseUrl,
+      serviceId: quote.selected_service.service_id,
+      input: quote.input,
+      budget: {
+        max_amount: args.constraints?.max_price_usdc || args.budget?.max_amount || "0.05",
+        currency: args.budget?.currency || "USDC"
+      }
+    });
+  } catch (error) {
+    if (error.code === "WALLET_INSUFFICIENT_ARC_USDC") {
+      return {
+        ok: false,
+        status: error.status || "wallet_needs_funding",
+        message: error.message,
+        selected_service: quote.selected_service,
+        quote: quote.quote,
+        wallet: error.wallet,
+        next_step: "Fund this local AgentRouter wallet with Arc Testnet USDC, then retry the same AgentRouter request."
+      };
     }
-  });
+    throw error;
+  }
   return {
     ok: true,
     status: "paid_with_local_wallet",

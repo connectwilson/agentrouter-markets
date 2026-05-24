@@ -1,4 +1,4 @@
-import { sendArcUsdcTransfer } from "./arc-payment.js";
+import { assertArcUsdcBalance, sendArcUsdcTransfer } from "./arc-payment.js";
 import { hashJson } from "./evidence.js";
 import { createArcPaymentProof, createWalletPaymentProof } from "./payment.js";
 import { createSettlementReceipt, currentPaymentBackend } from "./payment-adapter.js";
@@ -49,7 +49,9 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   });
   const wallet = await readWallet();
   let arcTransfer = null;
+  let arcBalance = null;
   if (currentPaymentBackend() === "circle_arc") {
+    arcBalance = await assertArcUsdcBalance({ wallet, payment });
     arcTransfer = await sendArcUsdcTransfer({ wallet, payment });
   }
   const proof = currentPaymentBackend() === "circle_arc" ? createArcPaymentProof({
@@ -94,6 +96,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     challenge_expires_at: payment.expires_at,
     status: paidResponse.ok && result.status === "success" ? "success" : "error",
     backend: currentPaymentBackend(),
+    balance_before_payment: arcBalance,
     arc_transfer: arcTransfer
   };
   event.event_hash = hashJson(event);

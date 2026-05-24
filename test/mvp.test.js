@@ -2521,9 +2521,11 @@ test("circle_arc backend verifies x402-style Arc USDC payment before returning p
   const previousProviderReceive = process.env.ADN_PROVIDER_RECEIVE_ADDRESS;
   const previousTransferMode = process.env.ADN_ARC_TRANSFER_MODE;
   const previousVerifyMode = process.env.ADN_ARC_VERIFY_MODE;
+  const previousBalanceMock = process.env.ADN_ARC_BALANCE_MOCK;
   process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x1111111111111111111111111111111111111111";
   process.env.ADN_ARC_TRANSFER_MODE = "mock";
   process.env.ADN_ARC_VERIFY_MODE = "mock";
+  process.env.ADN_ARC_BALANCE_MOCK = "1";
   try {
     await withServer(async ({ baseUrl }) => {
       process.env.ADN_PAYMENT_BACKEND = "circle_arc";
@@ -2556,6 +2558,47 @@ test("circle_arc backend verifies x402-style Arc USDC payment before returning p
     else process.env.ADN_ARC_TRANSFER_MODE = previousTransferMode;
     if (previousVerifyMode === undefined) delete process.env.ADN_ARC_VERIFY_MODE;
     else process.env.ADN_ARC_VERIFY_MODE = previousVerifyMode;
+    if (previousBalanceMock === undefined) delete process.env.ADN_ARC_BALANCE_MOCK;
+    else process.env.ADN_ARC_BALANCE_MOCK = previousBalanceMock;
+  }
+});
+
+test("circle_arc local wallet returns funding guidance before payment when USDC balance is too low", async () => {
+  await resetWalletForTests();
+  const previousBackend = process.env.ADN_PAYMENT_BACKEND;
+  const previousProviderReceive = process.env.ADN_PROVIDER_RECEIVE_ADDRESS;
+  const previousTransferMode = process.env.ADN_ARC_TRANSFER_MODE;
+  const previousVerifyMode = process.env.ADN_ARC_VERIFY_MODE;
+  const previousBalanceMock = process.env.ADN_ARC_BALANCE_MOCK;
+  process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x1111111111111111111111111111111111111111";
+  process.env.ADN_ARC_TRANSFER_MODE = "mock";
+  process.env.ADN_ARC_VERIFY_MODE = "mock";
+  process.env.ADN_ARC_BALANCE_MOCK = "0";
+  try {
+    await withServer(async ({ baseUrl }) => {
+      process.env.ADN_PAYMENT_BACKEND = "circle_arc";
+      await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
+      const invoke = await runCli(["invoke", "chain_fund_flow_7d_base", "{\"chain\":\"base\",\"days\":7}"], {
+        ADN_REGISTRY_URL: baseUrl,
+        ADN_PAYMENT_BACKEND: "circle_arc",
+        ADN_ARC_TRANSFER_MODE: "mock",
+        ADN_ARC_VERIFY_MODE: "mock",
+        ADN_ARC_BALANCE_MOCK: "0"
+      });
+      assert.notEqual(invoke.code, 0);
+      assert.match(invoke.stderr, /Arc Testnet USDC balance is 0/);
+    });
+  } finally {
+    if (previousBackend === undefined) delete process.env.ADN_PAYMENT_BACKEND;
+    else process.env.ADN_PAYMENT_BACKEND = previousBackend;
+    if (previousProviderReceive === undefined) delete process.env.ADN_PROVIDER_RECEIVE_ADDRESS;
+    else process.env.ADN_PROVIDER_RECEIVE_ADDRESS = previousProviderReceive;
+    if (previousTransferMode === undefined) delete process.env.ADN_ARC_TRANSFER_MODE;
+    else process.env.ADN_ARC_TRANSFER_MODE = previousTransferMode;
+    if (previousVerifyMode === undefined) delete process.env.ADN_ARC_VERIFY_MODE;
+    else process.env.ADN_ARC_VERIFY_MODE = previousVerifyMode;
+    if (previousBalanceMock === undefined) delete process.env.ADN_ARC_BALANCE_MOCK;
+    else process.env.ADN_ARC_BALANCE_MOCK = previousBalanceMock;
   }
 });
 
