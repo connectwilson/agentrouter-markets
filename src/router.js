@@ -961,22 +961,26 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     message: "token_smart_money_activity requires token_symbol or token_address."
   };
 
-  const resolver = searchServices(store, {
+  const verifiedResolver = pickTokenResolver(searchServices(store, {
     query: "token search",
     verifiedOnly: true,
     maxPrice: constraints.max_price_usdc || budget.max_amount
-  }).map((service) => ({
-    service,
-    score: tokenResolverScore(service)
-  })).filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.service;
+  }));
+  const fallbackResolver = verifiedResolver ? null : pickTokenResolver(searchServices(store, {
+    query: "token search",
+    verifiedOnly: false,
+    maxPrice: constraints.max_price_usdc || budget.max_amount
+  }));
+  const resolver = verifiedResolver || fallbackResolver;
 
   if (!resolver) return {
     ok: false,
     status: "token_resolver_not_found",
     token_symbol: tokenSymbol,
-    message: "No verified token resolver service is registered."
+    message: "No token resolver service is registered."
   };
+
+  const resolverVerificationMode = verifiedResolver ? "verified" : "trusted_pending";
 
   const resolverInput = {
     search_query: tokenSymbol,
@@ -994,6 +998,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
       status: "token_resolution_failed",
       token_symbol: tokenSymbol,
       resolver_service_id: resolver.service_id,
+      resolver_verification_mode: resolverVerificationMode,
       resolver_input: resolverInput,
       error: invocation.body.error
     };
@@ -1008,6 +1013,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     status: "token_not_found",
     token_symbol: tokenSymbol,
     resolver_service_id: resolver.service_id,
+    resolver_verification_mode: resolverVerificationMode,
     resolver_input: resolverInput,
     message: "Token resolver did not return a matching contract address."
   };
@@ -1021,6 +1027,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     matched_name: match.name || null,
     matched_symbol: match.symbol || null,
     resolver_service_id: resolver.service_id,
+    resolver_verification_mode: resolverVerificationMode,
     resolver_input: resolverInput,
     intent: {
       ...intent,
@@ -1029,6 +1036,14 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
       chain: match.chain || normalizeProviderChain(intent.chain || "ethereum")
     }
   };
+}
+
+function pickTokenResolver(services) {
+  return services.map((service) => ({
+    service,
+    score: tokenResolverScore(service)
+  })).filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.service;
 }
 
 function findTokenMatch(data, { tokenSymbol, chain }) {

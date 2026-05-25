@@ -485,30 +485,45 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
   }
 
   const maxPrice = constraints.max_price_usdc || budget.max_amount || "0.05";
-  const services = await post("/connector/search_services", {
+  const verifiedServices = await post("/connector/search_services", {
     query: "token search",
     verified_only: true,
     max_price: maxPrice
   });
-  if (!Array.isArray(services)) {
+  if (!Array.isArray(verifiedServices)) {
     return {
       ok: false,
       status: "token_resolver_search_failed",
       token_symbol: tokenSymbol,
-      search_response: services
+      search_response: verifiedServices
     };
   }
 
-  const resolver = services
-    .map((service) => ({ service, score: tokenResolverScore(service) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.service;
+  let resolver = pickTokenResolver(verifiedServices);
+  let resolverVerificationMode = "verified";
+  if (!resolver) {
+    const fallbackServices = await post("/connector/search_services", {
+      query: "token search",
+      verified_only: false,
+      max_price: maxPrice
+    });
+    if (!Array.isArray(fallbackServices)) {
+      return {
+        ok: false,
+        status: "token_resolver_search_failed",
+        token_symbol: tokenSymbol,
+        search_response: fallbackServices
+      };
+    }
+    resolver = pickTokenResolver(fallbackServices);
+    resolverVerificationMode = "trusted_pending";
+  }
   if (!resolver) {
     return {
       ok: false,
       status: "token_resolver_not_found",
       token_symbol: tokenSymbol,
-      message: "No verified token resolver service is registered."
+      message: "No token resolver service is registered."
     };
   }
 
@@ -548,6 +563,7 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
       status: "token_not_found",
       token_symbol: tokenSymbol,
       resolver_service_id: resolver.service_id,
+      resolver_verification_mode: resolverVerificationMode,
       resolver_input: resolverInput,
       message: "Token resolver did not return a matching contract address."
     };
@@ -562,6 +578,7 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
     matched_name: match.name || null,
     matched_symbol: match.symbol || null,
     resolver_service_id: resolver.service_id,
+    resolver_verification_mode: resolverVerificationMode,
     resolver_input: resolverInput,
     resolver_evidence_recording: invocation.evidence_recording,
     resolver_service: resolver,
@@ -572,6 +589,13 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
       chain: match.chain || chain
     }
   };
+}
+
+function pickTokenResolver(services) {
+  return services
+    .map((service) => ({ service, score: tokenResolverScore(service) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.service;
 }
 
 function fundingRequiredResponse({ error, selectedService, quote }) {
@@ -615,6 +639,7 @@ function publicTokenResolution(tokenResolution) {
     chain: tokenResolution.chain,
     matched_name: tokenResolution.matched_name || null,
     matched_symbol: tokenResolution.matched_symbol || null,
+    resolver_verification_mode: tokenResolution.resolver_verification_mode || null,
     resolver_request_id: tokenResolution.resolver_evidence_recording?.request_id || null,
     resolver_input: tokenResolution.resolver_input || null
   };
