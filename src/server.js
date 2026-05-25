@@ -1,4 +1,5 @@
 import http from "node:http";
+import fs from "node:fs/promises";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
@@ -19,16 +20,17 @@ import { agentHtml, homeHtml, humanHtml, serviceDetailHtml } from "./home.js";
 import { readProviderConfig } from "./provider-config.js";
 import { authProviders, authUserKey, beginOAuth, clearSessionCookie, completeOAuth, currentUser, logout } from "./auth.js";
 
-const clientLogoLabels = {
-  "claude.svg": "Claude",
-  "cursor.svg": "Cursor",
-  "gemini.svg": "Gemini",
-  "nous-research.svg": "Hermes",
-  "openai.svg": "Codex",
-  "opencode.svg": "OpenCode",
-  "openclaw.svg": "OpenClaw",
-  "windsurf.svg": "Windsurf"
+const clientLogoPaths = {
+  "claude.svg": new URL("../public/assets/client-logos/claude.svg", import.meta.url),
+  "cursor.svg": new URL("../public/assets/client-logos/cursor.svg", import.meta.url),
+  "gemini.svg": new URL("../public/assets/client-logos/gemini.svg", import.meta.url),
+  "nous-research.svg": new URL("../public/assets/client-logos/nous-research.svg", import.meta.url),
+  "openai.svg": new URL("../public/assets/client-logos/openai.svg", import.meta.url),
+  "opencode.svg": new URL("../public/assets/client-logos/opencode.svg", import.meta.url),
+  "openclaw.svg": new URL("../public/assets/client-logos/openclaw.svg", import.meta.url),
+  "windsurf.svg": new URL("../public/assets/client-logos/windsurf.svg", import.meta.url)
 };
+const brandLogoPath = new URL("../public/assets/brand/logo.png", import.meta.url);
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -705,44 +707,34 @@ function safeReturnTo(value) {
 
 async function sendClientLogo(req, res, url) {
   const fileName = decodeURIComponent(url.pathname.replace("/assets/client-logos/", ""));
-  const label = clientLogoLabels[fileName];
-  if (!label) return sendNotFound(res, "CLIENT_LOGO_NOT_FOUND");
-  const body = clientLogoSvg(label);
-  res.writeHead(200, {
-    "content-type": "image/svg+xml; charset=utf-8",
-    "cache-control": "public, max-age=86400"
-  });
-  res.end(req.method === "HEAD" ? undefined : body);
+  const filePath = clientLogoPaths[fileName];
+  if (!filePath) return sendNotFound(res, "CLIENT_LOGO_NOT_FOUND");
+  try {
+    const body = await fs.readFile(filePath, "utf8");
+    if (!body.includes("<svg")) return sendNotFound(res, "CLIENT_LOGO_INVALID");
+    res.writeHead(200, {
+      "content-type": "image/svg+xml; charset=utf-8",
+      "cache-control": "public, max-age=86400",
+      "content-length": Buffer.byteLength(body)
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    sendNotFound(res, "CLIENT_LOGO_NOT_FOUND");
+  }
 }
 
 async function sendBrandLogo(req, res) {
-  const body = brandLogoSvg();
-  res.writeHead(200, {
-    "content-type": "image/svg+xml; charset=utf-8",
-    "cache-control": "public, max-age=86400",
-    "content-length": Buffer.byteLength(body)
-  });
-  res.end(req.method === "HEAD" ? undefined : body);
-}
-
-function brandLogoSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 48" role="img" aria-label="AgentRouter"><rect x="2" y="2" width="52" height="44" fill="#fff" stroke="#202124" stroke-width="3"/><path d="M13 31h11l5-12 5 18 5-11h6" fill="none" stroke="#202124" stroke-width="4" stroke-linecap="square" stroke-linejoin="round"/><circle cx="15" cy="16" r="4" fill="#5cff73"/><circle cx="42" cy="16" r="4" fill="#dffcff" stroke="#202124" stroke-width="2"/></svg>`;
-}
-
-function clientLogoSvg(label) {
-  const letters = String(label || "AI").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "AI";
-  const hue = Math.abs([...String(label)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360);
-  const bg = `hsl(${hue} 86% 94%)`;
-  const fg = `hsl(${hue} 72% 28%)`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="${escapeSvg(label)}"><rect x="3" y="3" width="42" height="42" rx="12" fill="${bg}" stroke="#d9dfe6" stroke-width="2"/><text x="24" y="29" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" fill="${fg}">${escapeSvg(letters)}</text></svg>`;
-}
-
-function escapeSvg(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  try {
+    const body = await fs.readFile(brandLogoPath);
+    res.writeHead(200, {
+      "content-type": "image/png",
+      "cache-control": "public, max-age=86400",
+      "content-length": body.length
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    sendNotFound(res, "BRAND_LOGO_NOT_FOUND");
+  }
 }
 
 function localServerPaidInvocationsAllowed(baseUrl) {
@@ -1304,7 +1296,6 @@ async function recordCompletedAgentCall(store, body = {}) {
   evidence.arc_anchor = await anchorEvidenceOnArc(evidence);
   const existingEvidence = store.evidenceEvents.find((event) =>
     (event.request_id && event.request_id === requestId) ||
-    (event.payment_tx && feedbackEvent.payment_tx && event.payment_tx === feedbackEvent.payment_tx) ||
     event.trace_hash === evidence.trace_hash
   );
   const savedEvidence = existingEvidence || evidence;
