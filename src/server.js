@@ -5,7 +5,7 @@ import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from ".
 import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet, registerServiceErc8004Identity } from "./registry.js";
+import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet, registerServiceErc8004Identity, withCurrentRuntimeEndpoint } from "./registry.js";
 import { createEvidenceEnvelope, hashJson } from "./evidence.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
@@ -355,7 +355,7 @@ async function routeRequest(req, res, store, baseUrl) {
     const serviceId = url.pathname.split("/")[2];
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
-    sendJson(res, 200, record.manifest);
+    sendJson(res, 200, withCurrentRuntimeEndpoint(record.manifest, baseUrl));
     return;
   }
 
@@ -434,7 +434,7 @@ async function routeRequest(req, res, store, baseUrl) {
     const { service_id: serviceId } = await readJson(req);
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
-    sendJson(res, 200, record.manifest);
+    sendJson(res, 200, withCurrentRuntimeEndpoint(record.manifest, baseUrl));
     return;
   }
 

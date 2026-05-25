@@ -21,6 +21,7 @@ process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x2c4d600a04c0d3bbb1e3cc8a13e54e21c2
 
 const { createServer, seedDemoService } = await import("../src/server.js");
 const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
+const { withCurrentRuntimeEndpoint } = await import("../src/registry.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
 const { discoverApiServices } = await import("../src/openapi-import.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
@@ -383,6 +384,18 @@ test("payment backend aliases real mode to x402", () => {
   else process.env.ADN_PAYMENT_BACKEND = previousBackend;
   if (previousMode === undefined) delete process.env.ADN_PAYMENT_MODE;
   else process.env.ADN_PAYMENT_MODE = previousMode;
+});
+
+test("custom provider manifests rebind to the current public runtime URL", () => {
+  const manifest = {
+    service_id: "example_custom",
+    endpoint: {
+      method: "POST",
+      url: "http://127.0.0.1:10000/provider/custom/example_custom"
+    }
+  };
+  const rebound = withCurrentRuntimeEndpoint(manifest, "https://agentrouter-markets.onrender.com");
+  assert.equal(rebound.endpoint.url, "https://agentrouter-markets.onrender.com/provider/custom/example_custom");
 });
 
 test("AgentRouter HTTP endpoint routes and invokes BTC liquidation task", async () => {

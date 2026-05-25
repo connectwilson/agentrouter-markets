@@ -755,7 +755,7 @@ export async function loadProviderConfigs(store, baseUrl, { validate = true } = 
   return loaded;
 }
 
-function withCurrentRuntimeEndpoint(manifest, baseUrl) {
+export function withCurrentRuntimeEndpoint(manifest, baseUrl) {
   const endpointUrl = manifest?.endpoint?.url || "";
   if (!baseUrl || !endpointUrl) return manifest;
   let pathname = "";
