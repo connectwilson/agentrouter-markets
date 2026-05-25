@@ -409,6 +409,13 @@ test("request base URL honors forwarded HTTPS headers for OAuth redirects", () =
   assert.equal(baseUrl, "https://agentrouter-markets.onrender.com");
 });
 
+test("request base URL infers HTTPS for Render hosts without forwarded protocol", () => {
+  const baseUrl = getRequestBaseUrl({
+    headers: { host: "agentrouter-markets.onrender.com" }
+  });
+  assert.equal(baseUrl, "https://agentrouter-markets.onrender.com");
+});
+
 test("AgentRouter HTTP endpoint routes and invokes BTC liquidation task", async () => {
   await withServer(async ({ baseUrl }) => {
     const response = await fetch(`${baseUrl}/agent-router/ask`, {

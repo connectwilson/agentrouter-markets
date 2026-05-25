@@ -35,7 +35,7 @@ export function getRequestBaseUrl(req) {
     || process.env.RENDER_EXTERNAL_HOSTNAME
     || "127.0.0.1";
   const protocol = firstHeader(req, "x-forwarded-proto")
-    || (process.env.RENDER_EXTERNAL_HOSTNAME ? "https" : "http");
+    || inferredProtocol(host);
   return `${protocol}://${host}`;
 }
 
@@ -43,6 +43,13 @@ function firstHeader(req, name) {
   const value = req.headers?.[name];
   const raw = Array.isArray(value) ? value[0] : value;
   return String(raw || "").split(",")[0].trim();
+}
+
+function inferredProtocol(host) {
+  const value = String(host || "").toLowerCase();
+  if (process.env.RENDER_EXTERNAL_HOSTNAME || value.endsWith(".onrender.com")) return "https";
+  if (process.env.NODE_ENV === "production" && !/^localhost(?::|$)|^127\.0\.0\.1(?::|$)/.test(value)) return "https";
+  return "http";
 }
 
 export function parseCapabilities(value) {
