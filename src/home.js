@@ -1,23 +1,56 @@
-const installCommand = "claude mcp add AgentRouter -- npx -y @agentrouter/mcp";
-const localInstallCommand = "claude mcp add AgentRouter -e AGENT_ROUTER_URL=http://127.0.0.1:8800 -- npx -y @agentrouter/mcp";
+const installCommand = "npx -y @agentrouter/mcp";
+const localInstallConfig = `{
+  "mcpServers": {
+    "AgentRouter": {
+      "command": "npx",
+      "args": ["-y", "@agentrouter/mcp"],
+      "env": {
+        "AGENT_ROUTER_URL": "http://127.0.0.1:8800",
+        "AGENT_ROUTER_MAX_PRICE": "0.05"
+      }
+    }
+  }
+}`;
 
-export function homeHtml() {
+const supportedClientLogos = [
+  { label: "Claude", file: "claude.svg" },
+  { label: "Codex", file: "openai.svg" },
+  { label: "Hermes", file: "nous-research.svg" },
+  { label: "Cursor", file: "cursor.svg" },
+  { label: "Windsurf", file: "windsurf.svg" },
+  { label: "OpenCode", file: "opencode.svg" },
+  { label: "Gemini", file: "gemini.svg" },
+  { label: "OpenClaw", file: "openclaw.svg" }
+];
+
+export function homeHtml({ auth = {} } = {}) {
   return page({
     title: "AgentRouter Markets",
+    auth,
     body: `
       <header class="hero">
         <div class="dot-grid" aria-hidden="true"></div>
         <div class="shell wide-shell hero-center">
-          <span class="eyebrow">Agent-native data access</span>
-          <h1>AgentRouter Markets</h1>
-          <p class="lead">A service registry where agents can find working data APIs, call them through one interface, and turn every result into quality feedback.</p>
+          <h1>Agent-native API routing layer</h1>
+          <p class="lead">AgentRouter gives your agent access to verifiable premium data sources, per call, with no subscriptions.</p>
+          <a class="hero-cta" href="/agent">Explore Data/APIs</a>
 
           <div class="install-strip" aria-label="AgentRouter install command">
-            <div>
-              <span>One-line install</span>
-              <code id="home-install-command">${html(installCommand)}</code>
+            <div class="install-top">
+              <span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="install-label">install</span>
             </div>
-            <button type="button" id="home-copy-install">Copy</button>
+            <div class="install-command">
+              <code id="home-install-command"><span class="prompt">$</span> ${html(installCommand)}</code>
+              <button type="button" id="home-copy-install">Copy</button>
+            </div>
+          </div>
+          <p class="install-note">No API key. No sign-up. Works immediately.</p>
+          <div class="client-row" aria-label="Supported AI agent tools">
+            <span>Works with</span>
+            <div class="client-logos">
+              ${supportedClientLogos.map(clientLogoItem).join("")}
+            </div>
           </div>
 
           <div class="hero-paths">
@@ -180,11 +213,23 @@ export function homeHtml() {
   });
 }
 
-export function humanHtml() {
+function clientLogoItem(client) {
+  const label = html(client.label);
+  return `
+    <span class="client-logo" tabindex="0" aria-label="${label}">
+      <img src="/assets/client-logos/${html(client.file)}" alt="" loading="lazy">
+      <span>${label}</span>
+    </span>
+  `;
+}
+
+export function humanHtml({ auth = {} } = {}) {
+  if (!auth.user) return humanGuestHtml({ auth });
   return appPage({
     title: "For human",
     subtitle: "Manage provided data/APIs, edit services, and track USDC received.",
     active: "human",
+    auth,
     body: `
       <main>
         <div class="shell wide-shell provider-console">
@@ -334,17 +379,74 @@ export function humanHtml() {
             rows.join("") || '<div class="empty-row">No service operations yet.</div>'
           ].join("");
         }
-        loadStats().then(renderPage);
+        loadProviderStats().then(renderPage);
+        async function loadProviderStats() {
+          try {
+            const response = await fetch("/human/stats");
+            if (!response.ok) throw new Error("auth required");
+            return await response.json();
+          } catch {
+            return { registered_services: 0, verified_services: 0, total_calls: 0, providers: [], services: [] };
+          }
+        }
       </script>
     `
   });
 }
 
-export function agentHtml() {
+function humanGuestHtml({ auth = {} } = {}) {
+  const configuredProvider = (auth.providers || []).find((provider) => provider.configured);
+  const loginHref = configuredProvider ? `/auth/${configuredProvider.id}/start?return_to=%2Fstudio` : "/auth/login?return_to=%2Fstudio";
+  return appPage({
+    title: "For human",
+    subtitle: "Publish data/API services after signing in.",
+    active: "human",
+    auth,
+    body: `
+      <main>
+        <div class="shell wide-shell provider-console">
+          <section class="provider-hero provider-gate">
+            <div>
+              <span class="eyebrow">Provider workspace</span>
+              <h2>Your API inventory stays private</h2>
+              <p>Sign in to see the APIs you have uploaded, edit provider metadata, track calls, and view USDC received. Public visitors only see this introduction, not provider dashboards or private inventory.</p>
+            </div>
+            <div class="provider-actions">
+              <a class="button primary" href="${html(loginHref)}">Add data/API</a>
+              <a class="button ghost" href="/agent">Browse public services</a>
+            </div>
+          </section>
+
+          <section class="guest-provider-grid">
+            <article>
+              <span class="eyebrow">01</span>
+              <h3>Import a working API</h3>
+              <p>Paste an endpoint, OpenAPI URL, docs page, or Skill link after login. Studio generates service metadata and an agent-readable contract.</p>
+            </article>
+            <article>
+              <span class="eyebrow">02</span>
+              <h3>Validate before publish</h3>
+              <p>AgentRouter only publishes endpoints that return real JSON data and pass the paid-service envelope checks.</p>
+            </article>
+            <article>
+              <span class="eyebrow">03</span>
+              <h3>Track your own services</h3>
+              <p>Your dashboard shows only your uploaded APIs, calls, success rate, trust feedback, and estimated USDC volume.</p>
+            </article>
+          </section>
+        </div>
+      </main>
+    `
+  });
+}
+
+export function agentHtml({ auth = {} } = {}) {
   return appPage({
     title: "For agent",
     subtitle: "Install once, search the API hub, and route to registered services.",
     active: "agent",
+    auth,
+    showHeader: false,
     body: `
       <main>
         <div class="shell wide-shell agent-market">
@@ -353,17 +455,6 @@ export function agentHtml() {
               <span class="eyebrow">API Hub for agents</span>
               <h2>Discover callable services</h2>
               <p>Search by task, provider, or capability. AgentRouter returns a buyer-friendly marketplace card plus the request shape an AI client can invoke.</p>
-            </div>
-            <div class="install-banner compact-install">
-              <strong>One-line install</strong>
-              <div class="command-wrap static-command">
-                <button class="copy-button" type="button" id="copy-install-top">Copy</button>
-                <code>${html(installCommand)}</code>
-              </div>
-              <details>
-                <summary>Local development endpoint</summary>
-                <code>${html(localInstallCommand)}</code>
-              </details>
             </div>
           </section>
 
@@ -408,27 +499,12 @@ export function agentHtml() {
       </main>
       <script>
         ${serviceClientScript()}
-        const installCommand = ${JSON.stringify(installCommand)};
-        const localInstallCommand = ${JSON.stringify(localInstallCommand)};
         const categories = ["All", "Data", "Crypto", "Market Data", "On-chain", "Derivatives", "Wallet"];
         const pageSize = 24;
         let servicePage = { services: [], total: 0, limit: pageSize, offset: 0, has_more: false };
         let activeCategory = "All";
         let currentPage = 0;
         let searchTimer = null;
-        document.getElementById("copy-install-top").addEventListener("click", async () => {
-          copyInstallCommand("copy-install-top");
-        });
-        async function copyInstallCommand(id) {
-          const button = document.getElementById(id);
-          try {
-            await navigator.clipboard.writeText(installCommand);
-            button.textContent = "Copied";
-            setTimeout(() => button.textContent = "Copy", 1200);
-          } catch {
-            button.textContent = "Select text";
-          }
-        }
         document.getElementById("service-search").addEventListener("input", () => {
           clearTimeout(searchTimer);
           searchTimer = setTimeout(() => {
@@ -504,7 +580,7 @@ export function agentHtml() {
   });
 }
 
-export function serviceDetailHtml(detail) {
+export function serviceDetailHtml(detail, { auth = {} } = {}) {
   const service = detail.service || {};
   const manifest = detail.manifest || {};
   const validation = detail.latest_validation || {};
@@ -526,6 +602,7 @@ export function serviceDetailHtml(detail) {
   };
   return page({
     title: `${title} · AgentRouter`,
+    auth,
     body: `
       <main class="shell wide-shell detail-page">
         <section class="detail-hero">
@@ -596,11 +673,12 @@ export function serviceDetailHtml(detail) {
   });
 }
 
-function appPage({ title, subtitle, active, body }) {
+function appPage({ title, subtitle, active, auth = {}, showHeader = true, body }) {
   return page({
     title: `${title} · AgentRouter Markets`,
+    auth,
     body: `
-      <header class="app-header">
+      ${showHeader ? `<header class="app-header">
         <div class="shell wide-shell app-title">
           <div>
             <span class="eyebrow">${html(active === "human" ? "Provider workspace" : "Agent API hub")}</span>
@@ -612,13 +690,14 @@ function appPage({ title, subtitle, active, body }) {
             <a class="${active === "agent" ? "active" : ""}" href="/agent">For agent</a>
           </nav>
         </div>
-      </header>
+      </header>` : ""}
       ${body}
     `
   });
 }
 
-function page({ title, body }) {
+function page({ title, auth = {}, body }) {
+  const user = auth.user || null;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -630,18 +709,13 @@ function page({ title, body }) {
 <body>
   <div class="topbar">
     <div class="shell nav">
-      <a class="brand" href="/"><span>AgentRouter</span><small>Markets</small></a>
-      <form class="top-search" action="/agent" method="GET">
-        <input name="q" placeholder="Search service, provider, capability..." />
-      </form>
+      <a class="brand" href="/" aria-label="AgentRouter home">${brandLogo()}</a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="/agent">SERVICES</a>
-        <a href="/human">PROVIDERS</a>
-        <a href="/agent-router/trust">FEEDBACK</a>
-        <a href="/agent-router/observations">ROUTES</a>
-        <a href="/studio">STUDIO</a>
+        <a href="/">Home</a>
+        <a href="/agent">Services</a>
+        <a href="/human">Provider Studio</a>
       </nav>
-      <div class="nav-tools" aria-hidden="true"><span></span><span></span></div>
+      ${user ? `<a class="auth-link signed-in" href="/auth/login">${html(user.name || user.email || "Account")}</a>` : '<a class="auth-link" href="/auth/login">LOGIN</a>'}
     </div>
   </div>
   ${body}
@@ -681,34 +755,57 @@ function styles() {
     button, input, select { font:inherit; }
     .shell { max-width:1160px; margin:0 auto; padding:0 24px; }
     .wide-shell { max-width:1520px; }
-    .topbar { position:sticky; top:0; z-index:20; border-top:4px solid var(--color-accent-cool); border-bottom:1px solid var(--color-line); background:rgba(255,255,255,.96); backdrop-filter:blur(10px); }
-    .nav { min-height:68px; display:grid; grid-template-columns:220px minmax(240px, 1fr) auto auto; align-items:center; gap:16px; }
-    .brand { display:grid; gap:0; font-weight:780; line-height:1.05; font-size:18px; }
-    .brand small { color:var(--color-ink); font-weight:520; font-size:13px; }
-    .top-search input { width:100%; min-height:36px; border:1px solid var(--color-line); background:#fbfbfb; color:var(--color-ink); padding:8px 13px; outline:none; border-radius:0; }
-    .top-search input:focus, .hero-search input:focus, .search-row input:focus, .search-row select:focus { border-color:var(--color-faint); background:#fff; }
-    .nav-links { display:flex; align-items:center; gap:22px; color:#5f5f5f; font-size:12px; font-weight:650; white-space:nowrap; }
-    .nav-tools { display:flex; gap:12px; }
-    .nav-tools span { width:35px; height:35px; border:1px solid var(--color-line); background:#fff; display:block; position:relative; }
-    .nav-tools span:first-child::after { content:""; width:10px; height:10px; border:2px solid var(--color-ink); border-radius:50%; position:absolute; inset:0; margin:auto; }
-    .nav-tools span:last-child::after { content:""; width:14px; height:14px; border-radius:50%; border-right:2px solid var(--color-accent-warm); border-bottom:2px solid var(--color-accent-warm); position:absolute; inset:0; margin:auto; }
+    .topbar { position:sticky; top:0; z-index:20; border-top:3px solid var(--color-accent-cool); border-bottom:1px solid var(--color-line); background:rgba(255,255,255,.98); backdrop-filter:blur(10px); }
+    .topbar .shell { max-width:none; padding:0 32px; }
+    .nav { min-height:76px; display:grid; grid-template-columns:minmax(190px, 1fr) auto minmax(190px, 1fr); align-items:center; gap:28px; }
+    .brand { display:inline-flex; align-items:center; justify-self:start; gap:12px; min-height:42px; color:var(--color-ink); }
+    .brand-icon { width:48px; height:42px; display:inline-flex; align-items:center; justify-content:center; overflow:hidden; flex:0 0 auto; }
+    .brand-icon img { width:44px; height:38px; object-fit:contain; display:block; }
+    .brand-word { font-size:24px; font-weight:850; line-height:1; letter-spacing:0; }
+    .hero-search input:focus, .search-row input:focus, .search-row select:focus { border-color:var(--color-faint); background:#fff; }
+    .nav-links { display:flex; align-items:center; justify-content:center; gap:32px; color:#636867; font-size:16px; font-weight:620; white-space:nowrap; text-transform:none; }
+    .nav-links a { display:inline-flex; align-items:center; min-height:38px; border-bottom:2px solid transparent; }
+    .nav-links a:hover, .nav-links a:focus-visible { color:var(--color-ink); border-bottom-color:var(--color-accent-cool); outline:0; }
+    .auth-link { justify-self:end; min-height:42px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--color-line); border-radius:14px; padding:0 22px; background:#fff; color:var(--color-ink); font-size:14px; font-weight:800; text-transform:uppercase; }
+    .auth-link:hover, .auth-link:focus-visible { border-color:var(--color-strong-line); background:#fbfbfb; outline:0; }
+    .auth-link.signed-in { max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-transform:none; }
     .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; border:2px solid var(--color-ink); border-radius:0; background:#fff; color:var(--color-ink); padding:9px 16px; font-weight:760; cursor:pointer; text-transform:uppercase; font-size:12px; letter-spacing:0; }
     .button::before, .path-action::before { content:">"; margin-right:10px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .button.primary { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-accent-ink); }
     .button.ghost { background:#fff; }
-    .hero { padding:0 0 34px; min-height:calc(100vh - 68px); }
+    .hero { padding:0 0 34px; min-height:calc(100vh - 66px); }
     .dot-grid { height:126px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; background-position:0 3px; }
     .hero-center { text-align:center; padding-top:94px; display:grid; justify-items:center; }
     .eyebrow { display:inline-flex; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; letter-spacing:0; }
     h1 { margin:16px 0 16px; font-size:64px; line-height:1.04; font-weight:720; letter-spacing:0; overflow-wrap:anywhere; }
     .lead { margin:0; color:var(--color-muted); font-size:20px; line-height:1.72; max-width:860px; }
-    .install-strip { width:min(980px, 100%); margin-top:64px; border:2px solid var(--color-line); background:#f7f7f7; display:grid; grid-template-columns:minmax(0, 1fr) 128px; text-align:left; }
-    .install-strip div { min-width:0; padding:20px 24px; display:grid; gap:8px; }
-    .install-strip span { color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
-    .install-strip code { display:block; color:var(--color-ink); font-family:var(--font-mono); font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .install-strip button { border:0; border-left:2px solid var(--color-line); background:#fff; color:var(--color-ink); cursor:pointer; font-weight:800; text-transform:uppercase; font-size:12px; }
-    .install-strip button:hover { background:var(--color-accent); }
-    .hero-paths { width:100%; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:32px; margin-top:74px; text-align:left; }
+    .hero-cta { min-height:48px; margin-top:28px; display:inline-flex; align-items:center; justify-content:center; border:2px solid var(--color-ink); border-radius:0; background:#fff; color:var(--color-ink); padding:0 22px; font-size:13px; font-weight:800; text-transform:uppercase; }
+    .hero-cta::before { content:">"; margin-right:10px; font-family:var(--font-mono); }
+    .hero-cta:hover, .hero-cta:focus-visible { background:var(--color-accent); border-color:var(--color-accent); color:var(--color-accent-ink); outline:0; }
+    .install-strip { width:min(1050px, 100%); margin-top:58px; border:1px solid #303236; border-radius:20px; background:#0e0f11; color:#f7f7f7; text-align:left; overflow:hidden; box-shadow:0 22px 50px rgba(20, 24, 26, .16); }
+    .install-top { min-height:56px; border-bottom:1px solid #2a2c30; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:0 28px; }
+    .status-dots { display:flex; align-items:center; gap:10px; }
+    .status-dots i { display:block; width:13px; height:13px; border-radius:50%; }
+    .status-dots i:nth-child(1) { background:#ff5f57; }
+    .status-dots i:nth-child(2) { background:#ffbd2e; }
+    .status-dots i:nth-child(3) { background:#28c840; }
+    .install-label { color:#8c8f96; font-family:var(--font-mono); font-size:18px; font-weight:520; }
+    .install-command { min-width:0; min-height:104px; display:grid; grid-template-columns:minmax(0, 1fr) 92px; align-items:center; gap:18px; padding:0 28px 0 36px; }
+    .install-strip code { display:block; min-width:0; color:#f5f5f5; font-family:var(--font-mono); font-size:22px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .install-strip .prompt { color:#ff2da1; margin-right:12px; }
+    .install-strip button { min-height:40px; border:1px solid #3d4045; border-radius:8px; background:#15171a; color:#f4f4f5; cursor:pointer; font-weight:800; text-transform:uppercase; font-size:12px; }
+    .install-strip button:hover { border-color:#666a70; background:#1f2226; }
+    .install-note { margin:20px 0 0; color:#7b7f86; font-size:18px; line-height:1.4; }
+    .client-row { width:min(880px, 100%); margin-top:24px; display:flex; align-items:flex-start; justify-content:center; gap:20px; color:#7b7f86; font-size:16px; }
+    .client-row > span { min-height:46px; display:inline-flex; align-items:center; white-space:nowrap; }
+    .client-logos { min-width:0; display:flex; align-items:flex-start; justify-content:center; flex-wrap:wrap; gap:9px; padding-bottom:34px; }
+    .client-logo { position:relative; width:46px; height:46px; display:inline-flex; align-items:center; justify-content:center; border:1px solid #ececec; border-radius:14px; background:#fbfbfb; box-shadow:0 8px 20px rgba(25, 28, 31, 0); transition:transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; outline:0; }
+    .client-logo img { width:32px; height:32px; object-fit:contain; filter:grayscale(1); opacity:.62; transition:filter 150ms ease, opacity 150ms ease; }
+    .client-logo span { position:absolute; left:50%; top:calc(100% + 10px); transform:translate(-50%, -4px); max-width:120px; color:#5f6468; font-size:13px; font-weight:740; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity 150ms ease, transform 150ms ease; }
+    .client-logo:hover, .client-logo:focus-visible { z-index:3; transform:translateY(-7px) scale(1.2); border-color:#dedede; background:#fff; box-shadow:0 18px 34px rgba(25, 28, 31, .12); }
+    .client-logo:hover img, .client-logo:focus-visible img { filter:none; opacity:1; }
+    .client-logo:hover span, .client-logo:focus-visible span { opacity:1; transform:translate(-50%, 0); }
+    .hero-paths { width:100%; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:32px; margin-top:62px; text-align:left; }
     .hero-search { width:min(680px, 100%); margin-top:58px; display:grid; grid-template-columns:minmax(0,1fr) 124px; }
     .hero-search input { min-height:64px; border:2px solid var(--color-line); background:#fafafa; color:var(--color-ink); padding:0 20px; font-size:18px; outline:none; border-radius:0; min-width:0; }
     .hero-search button { border:2px solid var(--color-ink); border-left:0; background:#fff; color:var(--color-ink); font-weight:760; text-transform:uppercase; font-size:12px; cursor:pointer; }
@@ -793,7 +890,12 @@ function styles() {
     .pager button:disabled { border-color:#d7ded8; color:#9aa59d; background:#f6f8f5; cursor:not-allowed; }
     .pager span { color:var(--color-muted); font-weight:700; min-width:80px; text-align:center; }
     .provider-hero { border:1px solid var(--color-line); border-radius:8px; background:var(--color-panel); padding:32px; }
+    .provider-gate { min-height:310px; align-items:center; }
     .provider-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
+    .guest-provider-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; margin-top:22px; }
+    .guest-provider-grid article { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:24px; }
+    .guest-provider-grid h3 { margin:10px 0 8px; font-size:24px; line-height:1.12; }
+    .guest-provider-grid p { margin:0; color:var(--color-muted); line-height:1.55; }
     .provider-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; margin-bottom:24px; }
     .provider-metric { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:20px; min-width:0; }
     .provider-metric span { display:block; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
@@ -895,23 +997,40 @@ function styles() {
     .note { color:var(--color-muted); font-size:13px; line-height:1.45; }
     .footer { border-top:1px solid var(--color-line); color:var(--color-muted); padding:26px 0 36px; }
     @media (max-width:980px) {
-      .nav { grid-template-columns:1fr auto; gap:12px; padding:10px 24px; }
-      .top-search { grid-column:1 / -1; order:3; }
-      .nav-tools { order:2; }
-      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview, .market-hero, .provider-hero, .market-shell, .provider-workbench, .detail-hero, .detail-grid { grid-template-columns:1fr; }
-      .landing-grid, .metrics, .search-row, .step-row, .hero-paths, .stats-grid, .network-tables, .market-grid, .provider-grid, .provider-metrics, .market-toolbar, .provider-toolbar, .provider-imports, .import-options { grid-template-columns:1fr; }
+      .topbar .shell { padding:0 18px; }
+      .nav { min-height:64px; grid-template-columns:1fr auto; gap:14px; }
+      .brand { min-height:36px; }
+      .brand { gap:9px; }
+      .brand-icon { width:40px; height:36px; border-radius:10px; }
+      .brand-icon img { width:37px; height:32px; }
+      .brand-word { font-size:20px; }
       .nav-links { display:none; }
+      .auth-link { min-height:38px; border-radius:12px; padding:0 14px; font-size:12px; }
+      .auth-link.signed-in { max-width:118px; }
+      .hero-grid, .hub-layout, .human-layout, .playground-body, .overview, .market-hero, .provider-hero, .market-shell, .provider-workbench, .detail-hero, .detail-grid { grid-template-columns:1fr; }
+      .landing-grid, .metrics, .search-row, .step-row, .hero-paths, .stats-grid, .network-tables, .market-grid, .provider-grid, .provider-metrics, .market-toolbar, .provider-toolbar, .provider-imports, .import-options, .guest-provider-grid { grid-template-columns:1fr; }
       .app-title { display:grid; }
       .section-nav { min-width:0; }
       .playground, .filter-rail, .provider-rail { position:static; }
       .endpoint-list { border-right:0; border-bottom:1px solid var(--color-line); }
       .hero-search { grid-template-columns:1fr; }
       .hero-search button { min-height:48px; border:2px solid #252525; border-top:0; }
-      .install-strip { grid-template-columns:1fr; }
-      .install-strip button { min-height:46px; border-left:0; border-top:2px solid var(--color-line); }
+      .install-strip { border-radius:16px; margin-top:40px; }
+      .install-top { min-height:48px; padding:0 18px; }
+      .install-label { font-size:15px; }
+      .install-command { min-height:104px; grid-template-columns:1fr; gap:12px; padding:22px 18px; }
+      .install-strip code { font-size:16px; }
+      .install-strip button { width:100%; min-height:44px; }
+      .install-note { font-size:15px; margin-top:14px; }
+      .client-row { display:grid; justify-items:center; gap:12px; font-size:14px; }
+      .client-row > span { min-height:auto; }
+      .client-logos { max-width:360px; gap:8px; padding-bottom:30px; }
+      .client-logo { width:42px; height:42px; border-radius:12px; }
+      .client-logo img { width:29px; height:29px; }
       .hero-center { padding-top:48px; }
       .dot-grid { height:72px; }
       h1 { font-size:42px; }
+      .hero-cta { min-height:44px; margin-top:22px; padding:0 18px; font-size:12px; }
       .app-title h1 { font-size:38px; }
       .stat-block strong { font-size:46px; }
       .service-row { grid-template-columns:minmax(0, 1fr) 74px; }
@@ -1024,6 +1143,13 @@ function outputSummary(schema, preview) {
   const properties = schema?.properties;
   if (properties && typeof properties === "object") return Object.keys(properties).join(", ");
   return "JSON response envelope";
+}
+
+function brandLogo() {
+  return `
+    <span class="brand-icon" aria-hidden="true"><img src="/assets/brand/logo.png" alt=""></span>
+    <span class="brand-word">AgentRouter</span>
+  `;
 }
 
 function html(value) {

@@ -30,6 +30,8 @@ export async function routeTaskWithLocalWallet({ baseUrl, task, constraints = {}
     ...resolved,
     result: invocation.result,
     local_payment: invocation.local_payment,
+    evidence_recording: invocation.evidence_recording,
+    consumer_feedback_request: invocation.evidence_recording?.consumer_feedback_request || null,
     verification,
     routing_event: {
       event_version: "agent_route_event_v1",

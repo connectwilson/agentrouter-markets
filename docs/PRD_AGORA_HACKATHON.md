@@ -228,9 +228,11 @@ btc_liquidation_max_pain_demo
     "settlement_receipt": {}
   },
   "arc_anchor": {
-    "network": "arc",
-    "status": "simulated_anchor",
-    "event_type": "AgentRouterEvidence"
+    "network": "arc-testnet",
+    "status": "submitted",
+    "event_type": "AgentRouterEvidence",
+    "storage_model": "full_evidence_offchain_hashes_on_arc",
+    "tx_hash": "0x..."
   }
 }
 ```
@@ -576,7 +578,7 @@ trust_score =
 
 The key is not to overbuild reputation. The demo only needs to show that every call improves future routing.
 
-### 9.7 Evidence and Arc Anchor
+### 9.7 Evidence, Arc Anchor, and ERC-8004 Reputation
 
 Each successful structured invocation should return an evidence envelope:
 
@@ -597,9 +599,26 @@ Each successful structured invocation should return an evidence envelope:
   },
   "arc_anchor": {
     "anchor_version": "agent_router_arc_anchor_v1",
-    "network": "arc",
-    "status": "simulated_anchor",
-    "event_type": "AgentRouterEvidence"
+    "network": "arc-testnet",
+    "status": "submitted",
+    "event_type": "AgentRouterEvidence",
+    "storage_model": "full_evidence_offchain_hashes_on_arc",
+    "tx_hash": "0x..."
+  },
+  "trust_anchor": {
+    "primary_standard": "ERC-8004",
+    "erc8004": {
+      "registry_type": "reputation",
+      "function_name": "giveFeedback",
+      "agent_id": "1001",
+      "value": 9500,
+      "value_decimals": 2,
+      "tag1": "data_quality",
+      "tag2": "intent_fit",
+      "feedback_uri": "https://agentrouter.../agent-router/feedback?request_id=req_...",
+      "feedback_hash": "0x...",
+      "tx_hash": "0x..."
+    }
   }
 }
 ```
@@ -608,8 +627,10 @@ MVP stance:
 
 - Trust scores are computed offchain in the AgentRouter database.
 - Evidence hashes are the audit surface.
-- The hackathon demo can show simulated Arc anchors first.
-- Production can later pin evidence on Arc and/or publish ERC-8004-style attestations.
+- The custom Arc anchor is used for immutable evidence trace integrity.
+- ERC-8004 Identity Registry gives each provider service a standard onchain `agent_id`.
+- ERC-8004 Reputation Registry is used for standard post-call consumer feedback once that `agent_id` is configured.
+- The hackathon demo can show mock ERC-8004 submission locally and real Arc Testnet submission when registry credentials are configured.
 
 This directly addresses the "reasoning trace as product" idea without making AgentRouter responsible for all reasoning. AgentRouter produces evidence traces for service calls; the main agent or market agent owns reasoning and market creation.
 
@@ -627,14 +648,16 @@ Implementation status as of 2026-05-18:
 - Done: basic trust score and provider selection reason
 - Done: `POST /agent-router/quote`
 - Done: payment backend abstraction with `dev`, `x402`, `omniagentpay`, and `circle_arc` backend names
-- Done: `agent_router_evidence_v1` envelope with trace/result/verification hashes and simulated Arc anchor
+- Done: `agent_router_evidence_v1` envelope with trace/result/verification hashes and Arc anchor support
+- Done: provider services can expose ERC-8004 registration metadata and register Identity Registry agent IDs
+- Done: post-call consumer feedback can be submitted to ERC-8004 Reputation Registry on Arc Testnet
 - Done: `GET /agent-router/evidence`
 - Done: `GET /agent-router/trust`
 - Done: MCP `agentrouter_request` preferred structured tool
 - Still pending: real Arc/Circle settlement
 - Still pending: real OmniAgentPay adapter
 - Still pending: more than one strong market data provider for the same capability
-- Still pending: onchain trust anchoring or ERC-8004-style attestations
+- Still pending: one confirmed production-like Arc Testnet identity + reputation transaction pair in the demo video
 
 ### P0: Formal Structured Request Endpoint
 

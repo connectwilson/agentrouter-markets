@@ -14,6 +14,9 @@ process.env.ADN_PAYMENT_BACKEND = "circle_arc";
 process.env.ADN_ARC_BALANCE_MOCK = "1000";
 process.env.ADN_ARC_TRANSFER_MODE = "mock";
 process.env.ADN_ARC_VERIFY_MODE = "mock";
+process.env.ADN_ARC_ANCHOR_MODE = "mock";
+process.env.ADN_ERC8004_MODE = "mock";
+process.env.ADN_ERC8004_AGENT_ID = "1001";
 process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x2c4d600a04c0d3bbb1e3cc8a13e54e21c2b6c0bb";
 
 const { createServer, seedDemoService } = await import("../src/server.js");
@@ -28,6 +31,7 @@ const { normalizeEndpoint } = await import("../src/http-utils.js");
 const { createMemoryStore } = await import("../src/store.js");
 const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
+const { invokePaidServiceWithLocalWallet } = await import("../src/local-invoke.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -37,12 +41,43 @@ async function withServer(fn, options = {}) {
   await resetWalletForTests();
   await initSessionWallet();
   const server = createServer(options.serverBaseUrl ? { baseUrl: options.serverBaseUrl } : {});
+  const authCookie = "ar_session=test-session";
+  const testUser = {
+    provider: "github",
+    id: "test-provider",
+    name: "Test Provider",
+    email: "provider@example.com",
+    avatar_url: "",
+    handle: "test-provider"
+  };
+  server.store.authSessions.set("test-session", {
+    user: testUser,
+    created_at: Date.now(),
+    expires_at: Date.now() + 60 * 60 * 1000
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (input, init = {}) => {
+    const requestUrl = typeof input === "string" ? input : input?.url;
+    const method = String(init.method || input?.method || "GET").toUpperCase();
+    let parsed = null;
+    try { parsed = new URL(requestUrl); } catch {}
+    const isLocal = parsed?.origin === baseUrl;
+    const needsProviderAuth = isLocal && (
+      (method !== "GET" && parsed.pathname.startsWith("/studio/")) ||
+      (method === "POST" && /^\/services\/[^/]+\/payout$/.test(parsed.pathname))
+    );
+    if (!needsProviderAuth) return previousFetch(input, init);
+    const headers = new Headers(init.headers || input?.headers || {});
+    if (!headers.has("cookie")) headers.set("cookie", authCookie);
+    return previousFetch(input, { ...init, headers });
+  };
   try {
     await seedDemoService(baseUrl, server.store);
-    await fn({ server, baseUrl });
+    await fn({ server, baseUrl, authCookie, testUser, rawFetch: previousFetch });
   } finally {
+    globalThis.fetch = previousFetch;
     await new Promise((resolve) => server.close(resolve));
   }
 }
@@ -57,7 +92,7 @@ test("registry seeds and validates demo service", async () => {
 });
 
 test("home page and Provider Studio render separately", async () => {
-  await withServer(async ({ baseUrl }) => {
+  await withServer(async ({ baseUrl, authCookie, rawFetch }) => {
     const home = await fetch(`${baseUrl}/`);
     assert.equal(home.status, 200);
     const homeHtml = await home.text();
@@ -68,18 +103,31 @@ test("home page and Provider Studio render separately", async () => {
     const human = await fetch(`${baseUrl}/human`);
     assert.equal(human.status, 200);
     const humanHtml = await human.text();
-    assert.match(humanHtml, /Provider Dashboard/);
-    assert.match(humanHtml, /Your API cards/);
+    assert.match(humanHtml, /Your API inventory stays private/);
+    assert.match(humanHtml, /Add data\/API/);
+    assert.doesNotMatch(humanHtml, /Your API cards/);
+
+    const humanStats = await fetch(`${baseUrl}/human/stats`);
+    assert.equal(humanStats.status, 401);
 
     const agent = await fetch(`${baseUrl}/agent`);
     assert.equal(agent.status, 200);
     const agentHtml = await agent.text();
     assert.match(agentHtml, /API Hub for agents/);
     assert.match(agentHtml, /Available services/);
-    assert.match(agentHtml, /Universal MCP command/);
-    assert.match(agentHtml, /npx -y @agentrouter\/mcp/);
+    assert.doesNotMatch(agentHtml, /Universal MCP command/);
 
-    const studio = await fetch(`${baseUrl}/studio`);
+    const lockedStudio = await fetch(`${baseUrl}/studio`, { redirect: "manual" });
+    assert.equal(lockedStudio.status, 302);
+    assert.match(lockedStudio.headers.get("location"), /\/auth\/login\?return_to=%2Fstudio/);
+    const lockedStudioPost = await rawFetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    assert.equal(lockedStudioPost.status, 401);
+
+    const studio = await fetch(`${baseUrl}/studio`, { headers: { cookie: authCookie } });
     assert.equal(studio.status, 200);
     const studioHtml = await studio.text();
     assert.match(studioHtml, /Provider Studio/);
@@ -104,7 +152,7 @@ test("GitHub and Google login entrypoints render and GitHub OAuth callback creat
     try {
       process.env.GITHUB_CLIENT_ID = "github-client";
       process.env.GITHUB_CLIENT_SECRET = "github-secret";
-      const start = await fetch(`${baseUrl}/auth/github/start`, { redirect: "manual" });
+      const start = await fetch(`${baseUrl}/auth/github/start?return_to=%2Fstudio`, { redirect: "manual" });
       assert.equal(start.status, 302);
       const location = start.headers.get("location");
       assert.match(location, /^https:\/\/github\.com\/login\/oauth\/authorize/);
@@ -136,7 +184,7 @@ test("GitHub and Google login entrypoints render and GitHub OAuth callback creat
 
       const callback = await previousFetch(`${baseUrl}/auth/github/callback?code=abc&state=${encodeURIComponent(state)}`, { redirect: "manual" });
       assert.equal(callback.status, 302);
-      assert.equal(callback.headers.get("location"), "/");
+      assert.equal(callback.headers.get("location"), "/studio");
       const cookie = callback.headers.get("set-cookie");
       assert.match(cookie, /ar_session=/);
 
@@ -146,6 +194,18 @@ test("GitHub and Google login entrypoints render and GitHub OAuth callback creat
       assert.equal(payload.authenticated, true);
       assert.equal(payload.user.provider, "github");
       assert.equal(payload.user.email, "octo@example.com");
+
+      const human = await previousFetch(`${baseUrl}/human`, { headers: { cookie } });
+      assert.equal(human.status, 200);
+      const humanHtml = await human.text();
+      assert.match(humanHtml, /Provider Dashboard/);
+      assert.match(humanHtml, /Your API cards/);
+
+      const humanStats = await previousFetch(`${baseUrl}/human/stats`, { headers: { cookie } });
+      assert.equal(humanStats.status, 200);
+      const stats = await humanStats.json();
+      assert.equal(stats.registered_services, 0);
+      assert.equal(Array.isArray(stats.services), true);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousEnv.GITHUB_CLIENT_ID === undefined) delete process.env.GITHUB_CLIENT_ID;
@@ -185,6 +245,34 @@ test("published services can bind an Arc payout wallet without re-registration",
     assert.equal(invalid.status, 422);
     const errorPayload = await invalid.json();
     assert.equal(errorPayload.error.code, "INVALID_PAYOUT_ADDRESS");
+  });
+});
+
+test("published services can register ERC-8004 identity metadata and use it for feedback", async () => {
+  await withServer(async ({ baseUrl, server }) => {
+    const metadataResponse = await fetch(`${baseUrl}/.well-known/erc8004/agents/chain_fund_flow_7d_base.json`);
+    assert.equal(metadataResponse.status, 200);
+    const metadata = await metadataResponse.json();
+    assert.equal(metadata.type, "erc8004-agent-v1");
+    assert.equal(metadata.services[0].service_id, "chain_fund_flow_7d_base");
+    assert.equal(metadata.registrations[0].chain, "arc-testnet");
+
+    const registerResponse = await fetch(`${baseUrl}/services/chain_fund_flow_7d_base/erc8004/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    assert.equal(registerResponse.status, 200);
+    const payload = await registerResponse.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.erc8004.standard, "ERC-8004");
+    assert.equal(payload.erc8004.registry_type, "identity");
+    assert.equal(payload.erc8004.status, "registered");
+    assert.equal(payload.manifest.registration.erc8004.agent_id, "1001");
+    assert.equal(payload.manifest.provider.erc8004_agent_id, "1001");
+
+    const record = server.store.services.get("chain_fund_flow_7d_base");
+    assert.equal(record.manifest.registration.erc8004.identity_registry, payload.erc8004.registry_address);
   });
 });
 
@@ -369,8 +457,10 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.equal(routed.evidence.service_id, "btc_liquidation_max_pain_demo");
     assert.match(routed.evidence.trace_hash, /^0x[0-9a-f]{64}$/);
     assert.match(routed.evidence.result_hash, /^0x[0-9a-f]{64}$/);
-    assert.equal(routed.evidence.arc_anchor.network, "arc");
-    assert.equal(routed.evidence.arc_anchor.status, "simulated_anchor");
+    assert.equal(routed.evidence.arc_anchor.network, "arc-testnet");
+    assert.equal(routed.evidence.arc_anchor.status, "anchored");
+    assert.equal(routed.evidence.arc_anchor.mode, "mock");
+    assert.equal(routed.evidence.arc_anchor.storage_model, "full_evidence_offchain_hashes_on_arc");
     assert.equal(routed.observation.observation_version, "agent_router_route_observation_v1");
     assert.equal(routed.observation.status, "routed");
     assert.equal(routed.observation.selected_service_id, "btc_liquidation_max_pain_demo");
@@ -381,7 +471,7 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.equal(evidenceResponse.status, 200);
     const evidenceEvents = await evidenceResponse.json();
     assert.equal(evidenceEvents.storage, "offchain_memory_db");
-    assert.equal(evidenceEvents.chain_anchor, "simulated_arc_anchor");
+    assert.equal(evidenceEvents.chain_anchor, "arc_testnet_hash_anchor");
     assert.equal(evidenceEvents.count, 1);
     assert.equal(evidenceEvents.events[0].trace_hash, routed.evidence.trace_hash);
 
@@ -421,6 +511,74 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.equal(observations.storage, "offchain_memory_db");
     assert.equal(observations.count, 1);
     assert.equal(observations.observations[0].observation_id, routed.observation.observation_id);
+  });
+});
+
+test("local wallet paid invocation records evidence trace verification and consumer feedback", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const invocation = await invokePaidServiceWithLocalWallet({
+      baseUrl,
+      serviceId: "btc_liquidation_max_pain_demo",
+      input: { asset: "BTC", market_type: "perpetual_futures", window: "current" },
+      budget: { max_amount: "0.05", currency: "USDC" }
+    });
+    assert.equal(invocation.result.status, "success");
+    assert.equal(invocation.evidence_recording.ok, true);
+    assert.equal(invocation.evidence_recording.status, "completed_invocation_recorded");
+    assert.equal(invocation.evidence_recording.request_id, invocation.result.request_id);
+    assert.equal(invocation.evidence_recording.verification.schema_valid, true);
+    assert.equal(invocation.evidence_recording.payment_verification.ok, true);
+    assert.equal(invocation.evidence_recording.payment_verification.status, "verified_arc_usdc_transfer");
+    assert.equal(invocation.evidence_recording.feedback.payment_tx, invocation.local_payment.payment_tx);
+    assert.match(invocation.evidence_recording.evidence.trace_hash, /^0x[0-9a-f]{64}$/);
+    assert.equal(invocation.evidence_recording.evidence.request_id, invocation.result.request_id);
+    assert.equal(invocation.evidence_recording.evidence.arc_anchor.status, "anchored");
+    assert.equal(invocation.evidence_recording.evidence.arc_anchor.mode, "mock");
+    assert.equal(invocation.evidence_recording.consumer_feedback_request.request_id, invocation.result.request_id);
+
+    const evidenceResponse = await fetch(`${baseUrl}/agent-router/evidence?request_id=${invocation.result.request_id}`);
+    assert.equal(evidenceResponse.status, 200);
+    const evidencePayload = await evidenceResponse.json();
+    assert.equal(evidencePayload.count, 1);
+    assert.equal(evidencePayload.events[0].trace_hash, invocation.evidence_recording.evidence.trace_hash);
+
+    const feedbackEventsResponse = await fetch(`${baseUrl}/agent-router/feedback?request_id=${invocation.result.request_id}`);
+    assert.equal(feedbackEventsResponse.status, 200);
+    const feedbackEvents = await feedbackEventsResponse.json();
+    assert.equal(feedbackEvents.count, 1);
+    assert.equal(feedbackEvents.events[0].verification.schema_valid, true);
+
+    const consumerFeedbackResponse = await fetch(`${baseUrl}/agent-router/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        request_id: invocation.result.request_id,
+        consumer_id: "test_main_agent",
+        feedback: {
+          intent_fit: "yes",
+          answer_useful: "yes",
+          data_quality_score: 0.9,
+          used_in_final_answer: true,
+          reason: "The paid result was fresh, parseable, and answered the liquidation max-pain task.",
+          confidence: 0.85
+        }
+      })
+    });
+    assert.equal(consumerFeedbackResponse.status, 200);
+    const consumerFeedback = await consumerFeedbackResponse.json();
+    assert.equal(consumerFeedback.ok, true);
+    assert.equal(consumerFeedback.arc_anchor.status, "anchored");
+    assert.equal(consumerFeedback.arc_anchor.event_type, "AgentRouterFeedback");
+    assert.equal(consumerFeedback.erc8004.standard, "ERC-8004");
+    assert.equal(consumerFeedback.erc8004.status, "submitted");
+    assert.equal(consumerFeedback.erc8004.registry_type, "reputation");
+    assert.equal(consumerFeedback.trust_anchor.primary_standard, "ERC-8004");
+
+    const updatedFeedback = await fetch(`${baseUrl}/agent-router/feedback?request_id=${invocation.result.request_id}`).then((res) => res.json());
+    assert.equal(updatedFeedback.events[0].consumer_feedback.answer_useful, "yes");
+    assert.equal(updatedFeedback.events[0].consumer_rating, 0.975);
+    assert.equal(updatedFeedback.events[0].consumer_feedback_arc_anchor.status, "anchored");
+    assert.equal(updatedFeedback.events[0].consumer_feedback_erc8004.status, "submitted");
   });
 });
 

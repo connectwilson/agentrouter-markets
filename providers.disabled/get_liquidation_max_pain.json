@@ -1,0 +1,142 @@
+{
+  "provider_config_version": "adn_provider_config_v1",
+  "source": {
+    "type": "hosted_http",
+    "upstream_url": "http://127.0.0.1:8802/mock/api/v1/liquidation/max-pain",
+    "upstream_method": "GET",
+    "auth": {
+      "mode": "none",
+      "header": "authorization",
+      "secret_name": "PROVIDER_SECRET",
+      "secret_value": ""
+    },
+    "summary": "Get Liquidation Max Pain returned asset, max_liquidation_pain_price, estimated_liquidation_notional_usd."
+  },
+  "manifest": {
+    "manifest_version": "agent_data_service_manifest_v1",
+    "service_id": "get_liquidation_max_pain",
+    "provider": {
+      "provider_id": "mock_derivatives_api",
+      "agent_identity": {
+        "standard": "erc-8004-compatible",
+        "agent_registry": "optional",
+        "agent_id": "optional",
+        "agent_uri": "optional"
+      }
+    },
+    "title": "Get Liquidation Max Pain",
+    "description_for_agent": "Fetch BTC perpetual liquidation max-pain data.",
+    "capabilities": [
+      "data_service",
+      "crypto_derivatives",
+      "perp_liquidation_max_pain"
+    ],
+    "not_for": [],
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "output_schema": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "service_id",
+        "request_id",
+        "status",
+        "query",
+        "data",
+        "metadata"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "service_id": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "query": {
+          "type": "object"
+        },
+        "data": {
+          "type": "object"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "sample_request": {
+      "asset": "BTC"
+    },
+    "sample_response": {
+      "schema_version": "agent_data_envelope_v1",
+      "service_id": "get_liquidation_max_pain",
+      "request_id": "sample_req",
+      "status": "success",
+      "query": {
+        "asset": "BTC"
+      },
+      "data": {
+        "asset": "BTC",
+        "max_liquidation_pain_price": 103500,
+        "estimated_liquidation_notional_usd": 820000000
+      },
+      "metadata": {
+        "data_sources": [
+          "provider_config_hosted_http"
+        ],
+        "generated_at": "2026-05-18T13:41:39.608Z",
+        "freshness_seconds": 86400,
+        "is_estimated": true,
+        "confidence": 0.7,
+        "limitations": [
+          "Preview response is static and not a live paid response."
+        ]
+      },
+      "agent_hints": {
+        "good_for": [
+          "MVP validation",
+          "Agent response parsing"
+        ],
+        "warnings": [
+          "Use paid invocation for the full response."
+        ],
+        "suggested_followups": []
+      },
+      "summary": "Get Liquidation Max Pain returned asset, max_liquidation_pain_price, estimated_liquidation_notional_usd. (sample response)",
+      "sample_type": "preview"
+    },
+    "pricing": {
+      "amount": "0.01",
+      "currency": "USDC",
+      "network": "base",
+      "protocol": "x402"
+    },
+    "endpoint": {
+      "url": "http://127.0.0.1:8802/provider/custom/get_liquidation_max_pain",
+      "method": "POST"
+    },
+    "runtime_secrets": {
+      "required": false,
+      "custody": "hosted_runtime_config",
+      "public": false
+    },
+    "data_source_claim": {
+      "source_type": "provider_declared_data_service",
+      "authorization_status": "provider_declared",
+      "redistribution_status": "provider_declared",
+      "credential_custody": "none",
+      "platform_stores_credentials": false
+    },
+    "freshness": {
+      "update_frequency": "on_request",
+      "max_data_lag_seconds": 300
+    }
+  }
+}

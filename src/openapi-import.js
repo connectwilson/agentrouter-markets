@@ -234,7 +234,7 @@ function resolveOpenApiServerUrl(doc, sourceUrl, requestedUrl) {
   return requestedUrl.replace(/\/$/, "");
 }
 
-export async function publishApiDrafts(body, store, baseUrl) {
+export async function publishApiDrafts(body, store, baseUrl, { user = null, ownerKey = "" } = {}) {
   const drafts = Array.isArray(body.drafts) ? body.drafts : [];
   if (!drafts.length) {
     const error = new Error("drafts must include at least one service draft");
@@ -245,10 +245,10 @@ export async function publishApiDrafts(body, store, baseUrl) {
   if (shouldPublishToRemote({ body, baseUrl, remoteUrl })) {
     return publishApiDraftsToRemote({ body, remoteUrl });
   }
-  return publishApiDraftsLocal(body, store, baseUrl);
+  return publishApiDraftsLocal(body, store, baseUrl, { user, ownerKey });
 }
 
-async function publishApiDraftsLocal(body, store, baseUrl) {
+async function publishApiDraftsLocal(body, store, baseUrl, { user = null, ownerKey = "" } = {}) {
   const drafts = Array.isArray(body.drafts) ? body.drafts : [];
   const published = [];
   const failed = [];
@@ -272,6 +272,7 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
         summary: draft.summary,
         payoutAddress: draft.payout_address || ""
       });
+      applyOwnerMetadata(config.manifest, { user, ownerKey });
       const duplicate = store.services.get(config.manifest.service_id) || findDuplicateService(store, config.manifest);
       if (duplicate) {
         const validation = duplicate.validation_runs?.at(-1) || { ok: duplicate.verification_status === "verified" };
@@ -349,6 +350,22 @@ async function publishApiDraftsLocal(body, store, baseUrl) {
     ok: published.length > 0 && failed.length === 0,
     published,
     failed
+  };
+}
+
+function applyOwnerMetadata(manifest, { user = null, ownerKey = "" } = {}) {
+  if (!ownerKey) return;
+  manifest.registration = {
+    ...(manifest.registration || {}),
+    owner: {
+      user_key: ownerKey,
+      provider: user?.provider || "",
+      user_id: user?.id || "",
+      handle: user?.handle || "",
+      email: user?.email || "",
+      name: user?.name || "",
+      created_at: new Date().toISOString()
+    }
   };
 }
 

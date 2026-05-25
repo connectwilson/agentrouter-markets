@@ -17,6 +17,7 @@ export function createEvidenceEnvelope({
   const tracePayload = {
     route_type: routeType,
     request,
+    request_id: result?.request_id || feedback?.request_id || null,
     service_id: manifest.service_id,
     provider_id: manifest.provider.provider_id,
     input_hash: inputHash,
@@ -31,6 +32,7 @@ export function createEvidenceEnvelope({
   return {
     evidence_version: "agent_router_evidence_v1",
     route_type: routeType,
+    request_id: result?.request_id || feedback?.request_id || null,
     service_id: manifest.service_id,
     provider_id: manifest.provider.provider_id,
     selected_service: selectedService,
@@ -46,16 +48,20 @@ export function createEvidenceEnvelope({
       settlement_receipt: feedback?.settlement_receipt || null,
       payment_tx: feedback?.payment_tx || null
     },
+    payment_tx: feedback?.payment_tx || null,
     verification,
     arc_anchor: {
       anchor_version: "agent_router_arc_anchor_v1",
-      network: "arc",
-      status: "simulated_anchor",
+      network: "arc-testnet",
+      caip2: "eip155:5042002",
+      chain_id: 5042002,
+      status: "not_configured",
       event_type: "AgentRouterEvidence",
+      storage_model: "full_evidence_offchain_hashes_on_arc",
+      request_id: result?.request_id || feedback?.request_id || null,
       trace_hash: traceHash,
       result_hash: resultHash,
-      service_id: manifest.service_id,
-      provider_id: manifest.provider.provider_id,
+      verification_hash: verificationHash,
       created_at: createdAt
     },
     created_at: createdAt

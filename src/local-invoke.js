@@ -11,7 +11,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     throw new Error(`Service costs ${manifest.pricing.amount} ${manifest.pricing.currency}, above budget ${budget.max_amount} ${budget.currency}.`);
   }
   if (isRealX402Enabled()) {
-    return invokeOfficialX402Service({ manifest, serviceId, input });
+    return invokeOfficialX402Service({ baseUrl, manifest, serviceId, input });
   }
   if (currentPaymentBackend() !== "circle_arc") {
     throw new Error("Local paid invocation requires ADN_PAYMENT_BACKEND=circle_arc or official x402 configuration.");
@@ -116,14 +116,36 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   };
   feedback.feedback_hash = hashJson(feedback);
 
+  const evidenceRecording = await recordCompletedInvocation({
+    baseUrl,
+    serviceId,
+    input,
+    result,
+    feedback,
+    localPayment: event,
+    budget,
+    request: {
+      capability: "direct_service_invocation",
+      params: input,
+      constraints: {
+        max_price_usdc: budget.max_amount,
+        currency: budget.currency || "USDC"
+      },
+      consumer_context: {
+        source: "local_agent_wallet"
+      }
+    }
+  });
+
   return {
     result,
     local_payment: event,
-    feedback
+    feedback,
+    evidence_recording: evidenceRecording
   };
 }
 
-async function invokeOfficialX402Service({ manifest, serviceId, input }) {
+async function invokeOfficialX402Service({ baseUrl, manifest, serviceId, input }) {
   const wallet = await readWallet();
   const started = Date.now();
   const body = methodAllowsBody(manifest.endpoint.method) ? JSON.stringify(input) : undefined;
@@ -150,34 +172,81 @@ async function invokeOfficialX402Service({ manifest, serviceId, input }) {
     backend: "x402"
   };
   await recordPayment(event);
+  const feedback = {
+    event_version: "agent_service_feedback_v1",
+    request_id: result?.request_id || `req_${Date.now()}`,
+    service_id: serviceId,
+    provider_id: manifest.provider.provider_id,
+    consumer_id: "local_agent_wallet",
+    payment_tx: paid.payment_tx,
+    settlement_receipt: createSettlementReceipt({
+      manifest,
+      challenge: {
+        amount: event.amount,
+        asset: event.currency,
+        network: event.network,
+        pay_to: event.pay_to
+      },
+      txHash: paid.payment_tx
+    }),
+    status: "success",
+    schema_valid: true,
+    latency_ms: Date.now() - started,
+    consumer_rating: 1,
+    notes: ["Paid through official x402 client flow."],
+    payment_backend: currentPaymentBackend()
+  };
+  const evidenceRecording = await recordCompletedInvocation({
+    baseUrl,
+    serviceId,
+    input,
+    result,
+    feedback,
+    localPayment: event,
+    budget: { max_amount: manifest.pricing.amount, currency: manifest.pricing.currency },
+    request: {
+      capability: "direct_service_invocation",
+      params: input,
+      constraints: {
+        max_price_usdc: manifest.pricing.amount,
+        currency: manifest.pricing.currency
+      },
+      consumer_context: {
+        source: "local_agent_wallet",
+        x402_client: "official"
+      }
+    }
+  });
   return {
     result,
     local_payment: event,
-    feedback: {
-      event_version: "agent_service_feedback_v1",
-      request_id: result?.request_id || `req_${Date.now()}`,
-      service_id: serviceId,
-      provider_id: manifest.provider.provider_id,
-      consumer_id: "local_agent_wallet",
-      payment_tx: paid.payment_tx,
-      settlement_receipt: createSettlementReceipt({
-        manifest,
-        challenge: {
-          amount: event.amount,
-          asset: event.currency,
-          network: event.network,
-          pay_to: event.pay_to
-        },
-        txHash: paid.payment_tx
-      }),
-      status: "success",
-      schema_valid: true,
-      latency_ms: Date.now() - started,
-      consumer_rating: 1,
-      notes: ["Paid through official x402 client flow."],
-      payment_backend: currentPaymentBackend()
-    }
+    feedback,
+    evidence_recording: evidenceRecording
   };
+}
+
+async function recordCompletedInvocation({ baseUrl, serviceId, input, result, feedback, localPayment, budget, request }) {
+  if (!baseUrl) return { ok: false, status: "skipped", reason: "missing_registry_url" };
+  try {
+    return await postJson(baseUrl, "/agent-router/calls/complete", {
+      service_id: serviceId,
+      request,
+      input,
+      result,
+      feedback,
+      local_payment: localPayment,
+      budget
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      status: "evidence_recording_failed",
+      error: {
+        message: error.message,
+        payload: error.payload || null
+      }
+    };
+  }
 }
 
 async function postJson(baseUrl, path, body) {

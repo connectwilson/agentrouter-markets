@@ -7,7 +7,9 @@ export function createMemoryStore() {
     feedbackEvents: [],
     qualityEvents: [],
     evidenceEvents: [],
-    routeObservations: []
+    routeObservations: [],
+    authSessions: new Map(),
+    oauthStates: new Map()
   };
 }
 
@@ -375,8 +377,10 @@ export function summarizeBadges(record) {
   return badges;
 }
 
-export function summarizeRegistryStats(store) {
-  const services = [...store.services.values()].map((record) => {
+export function summarizeRegistryStats(store, { ownerKey = "" } = {}) {
+  const records = [...store.services.values()]
+    .filter((record) => !ownerKey || record.manifest?.registration?.owner?.user_key === ownerKey);
+  const services = records.map((record) => {
     const trust = summarizeTrust(record);
     const publicRecord = publicServiceRecord(record);
     return {

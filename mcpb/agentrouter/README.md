@@ -4,9 +4,10 @@ AgentRouter connects Claude Desktop to the Agent Native Data Network through MCP
 
 ## Tools
 
-- `agentrouter_request`: preferred structured capability request path. Use this first whenever the main agent can parse the user request.
+- `agentrouter_request`: preferred structured capability request path. Use this first whenever the main agent can parse the user request. Successful calls record verification/evidence and return a feedback request.
 - `agentrouter_quote`: route and quote without invoking a provider.
 - `agentrouter_capabilities`: list capability schemas.
+- `agentrouter_feedback`: submit post-call usefulness/intent-fit feedback after answering.
 - `agentrouter_ask`: last-resort natural-language fallback for demos.
 
 ## Configuration
@@ -14,4 +15,4 @@ AgentRouter connects Claude Desktop to the Agent Native Data Network through MCP
 - `AgentRouter URL`: defaults to `https://agentrouter-markets.onrender.com`.
 - `Default Max Price`: defaults to `0.05` USDC.
 
-The main agent should parse user language into structured requests whenever possible. AgentRouter handles routing, quote, invocation, verification, and evidence.
+The main agent should parse user language into structured requests whenever possible. AgentRouter handles routing, quote, invocation, verification, and evidence. After a successful call, the main agent should submit `agentrouter_feedback` automatically; the user should only need to ask the data question.

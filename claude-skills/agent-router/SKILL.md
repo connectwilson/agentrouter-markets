@@ -12,10 +12,11 @@ AgentRouter discovers, routes to, and invokes registered API/data services from 
 When the user asks to use AgentRouter:
 
 1. If MCP tools are already available, use them directly:
-   - `agentrouter_request`: default path; use after you parse the user request into a structured capability request
+   - `agentrouter_request`: default path; use after you parse the user request into a structured capability request. Successful paid calls automatically record payment verification, evidence trace, deterministic verification, and a feedback request.
    - `agentrouter_capabilities`: call this first when you are unsure which structured capability or params to use
    - `agentrouter_quote`: structured request -> route + quote + budget guard only
-   - `agentrouter_ask`: last-resort fallback/demo; use only when you cannot produce a structured request from the user request and capability catalog
+   - `agentrouter_ask`: last-resort natural-language helper; use only when you cannot produce a structured request from the user request and capability catalog
+   - `agentrouter_feedback`: submit post-call consumer feedback after you have judged whether the AgentRouter result answered the user's request. This is part of the default successful-call flow, not something the user should have to ask for.
    - `agentrouter_wallet_status`: check local encrypted EVM wallet readiness, active payment backend, and Arc Testnet USDC balance when Arc settlement is enabled
    - `agentrouter_wallet_create`: manual fallback wallet bootstrap; normally not needed because the local MCP bridge auto-creates a session wallet during initialization
    - `agentrouter_wallet_setup`: advanced wallet bootstrap; opens a one-time local setup page for a user-chosen encryption passphrase
@@ -49,7 +50,14 @@ Common structured examples:
 
 For requests outside the fixed capability catalog, search registered services or use `agentrouter_ask` rather than forcing the request into an unrelated fixed capability. Prefer exact service capabilities, tags, titles, and schema descriptions returned by discovery.
 
-Return the user-facing answer first when present. Do not mention provider names, upstream API brands, internal service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details. Attribute successful results as coming "via AgentRouter". You may include relevant result data, request id, payment tx, verification status, and quality feedback when present.
+Default successful-call flow:
+
+1. Route and invoke the data request with `agentrouter_request` whenever you can produce a structured capability request. Use `agentrouter_ask` only as fallback.
+2. Use the returned data to answer the user's actual question.
+3. Immediately submit `agentrouter_feedback` using the returned `request_id`. Do not require the user to ask for feedback/evidence/verification.
+4. In the user-visible answer, show the business answer first. Only include request id, payment tx, evidence trace hash, or verification details when the user asks for audit/debug details or when something failed.
+
+Return the user-facing answer first when present. Do not mention provider names, upstream API brands, internal service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details. Attribute successful results as coming "via AgentRouter".
 
 ## Bootstrap Flow
 
@@ -79,7 +87,7 @@ AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com
 AGENT_ROUTER_MAX_PRICE=0.05
 ```
 
-For Arc hackathon demos with real local-wallet settlement, install or restart the MCP bridge with:
+For Arc local-wallet settlement, install or restart the MCP bridge with:
 
 ```text
 AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com
@@ -88,7 +96,7 @@ ADN_PAYMENT_BACKEND=circle_arc
 ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
 ```
 
-In this mode AgentRouter still uses the same x402-style HTTP 402 challenge, but the local wallet sends Arc Testnet USDC directly to the provider payout wallet and the provider verifies the transaction before returning data. For paid Arc demo calls, first call `agentrouter_wallet_status`. If `arc_payment_active` is false, tell the user this MCP session was not installed with Arc settlement and do not present the remote HTTP fallback as a paid call. If the wallet balance is lower than the selected quote, stop and ask the user to fund the returned wallet address before retrying.
+In this mode AgentRouter still uses the same x402-style HTTP 402 challenge, but the local wallet sends Arc Testnet USDC directly to the provider payout wallet and the provider verifies the transaction before returning data. For paid Arc calls, first call `agentrouter_wallet_status`. If `arc_payment_active` is false, tell the user this MCP session was not installed with Arc settlement and do not present the remote HTTP fallback as a paid call. If the wallet balance is lower than the selected quote, stop and ask the user to fund the returned wallet address before retrying.
 
 If the user runs a local AgentRouter server, use:
 
@@ -102,7 +110,7 @@ After MCP is installed, the local AgentRouter bridge automatically creates a loc
 
 Use this guidance only when installation is needed.
 
-- Claude Desktop / Claude Code: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`. For the Arc payment demo, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
+- Claude Desktop / Claude Code: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`. For Arc settlement, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
 - Claude Desktop no-command path: ask the user to install `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` through Settings -> Extensions -> Install Extension, then use `agentrouter_request`.
 - Cursor / Windsurf / Cline / Continue / VS Code: add an MCP server named `AgentRouter` with command `node`, args `["/Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
 - Cross-client npm path after package publication: add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
@@ -116,11 +124,12 @@ Successful AgentRouter responses usually include:
 - `ok: true`
 - `protocol`
 - `answer` when using natural-language fallback
-- `selected_service`
 - `input`
 - `result`
 - `quote` or `feedback`
 - `evidence`
+- `evidence_recording`
+- `consumer_feedback_request`
 
 If the response is `no_service_found`, `needs_clarification`, or `quote_blocked`, explain that status directly and do not invent data.
 
@@ -130,7 +139,8 @@ If the response is `no_service_found`, `needs_clarification`, or `quote_blocked`
 - Do not claim data exists unless AgentRouter returns it.
 - Do not silently install or modify local tools without user confirmation.
 - Prefer MCP tools over raw HTTP when both are available.
-- For Arc payment demos, do not use HTTP fallback to bypass local-wallet balance checks.
+- For Arc payments, do not use HTTP fallback to bypass local-wallet balance checks.
 - When AgentRouter says the wallet needs funding, present the recharge/funding instruction and stop; never use cached or previously returned data as the answer.
+- After a successful AgentRouter result, submit `agentrouter_feedback` by default. The user should not need to say "submit feedback", "record evidence", or "verify this call".
 - Do not expose provider implementation details in normal answers. Avoid names like provider brands, service IDs, endpoint titles, or "used X provider"; say "via AgentRouter" instead.
 - Prefer a direct answer over setup instructions once AgentRouter is connected.

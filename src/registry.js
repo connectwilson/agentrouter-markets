@@ -9,6 +9,7 @@ import { listPersistentServiceEvents, writePersistentServiceEvent } from "./pers
 import { readProviderConfig, writeProviderConfig } from "./provider-config.js";
 import { assertArcUsdcBalance, sendArcUsdcTransfer, isEvmAddress } from "./arc-payment.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
+import { registerErc8004AgentIdentity } from "./erc8004.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -121,12 +122,96 @@ export async function updateServicePayoutWallet(store, serviceId, payoutAddress)
   };
 }
 
+export async function registerServiceErc8004Identity(store, serviceId, { baseUrl = "", metadataUri = "" } = {}) {
+  const record = store.services.get(serviceId);
+  if (!record) {
+    const error = new Error(`Service ${serviceId} was not found.`);
+    error.statusCode = 404;
+    error.code = "SERVICE_NOT_FOUND";
+    throw error;
+  }
+  const registration = await registerErc8004AgentIdentity({
+    manifest: record.manifest,
+    baseUrl,
+    metadataUri
+  });
+  if (!["registered", "submitted"].includes(registration.status)) {
+    const error = new Error(registration.error || "ERC-8004 identity registration failed.");
+    error.statusCode = 422;
+    error.code = "ERC8004_REGISTRATION_FAILED";
+    error.registration = registration;
+    throw error;
+  }
+
+  applyErc8004RegistrationToManifest(record.manifest, registration);
+  record.updated_at = new Date().toISOString();
+  if (record.manifest.provider?.provider_id) {
+    store.providers.set(record.manifest.provider.provider_id, record.manifest.provider);
+  }
+
+  let persisted = false;
+  try {
+    const config = await readProviderConfig(serviceId);
+    applyErc8004RegistrationToManifest(config.manifest, registration);
+    await writeProviderConfig(config);
+    persisted = true;
+  } catch (error) {
+    if (error?.code && error.code !== "ENOENT") throw error;
+  }
+
+  await writePersistentServiceEvent({
+    eventType: "erc8004_identity",
+    serviceId,
+    requestId: registration.tx_hash || registration.agent_id || null,
+    event: {
+      event_version: "agent_router_erc8004_identity_v1",
+      service_id: serviceId,
+      provider_id: record.manifest.provider.provider_id,
+      erc8004: registration,
+      created_at: new Date().toISOString()
+    }
+  });
+
+  return {
+    ok: true,
+    service_id: serviceId,
+    persisted,
+    erc8004: registration,
+    manifest: record.manifest,
+    service: publicServiceRecord(record)
+  };
+}
+
 function applyPayoutToManifest(manifest, payoutAddress) {
   manifest.provider = manifest.provider || {};
   manifest.provider.payout_address = payoutAddress;
   manifest.pricing = manifest.pricing || {};
   manifest.pricing.pay_to = payoutAddress;
   manifest.pricing.settlement_model = "direct_provider_wallet";
+}
+
+function applyErc8004RegistrationToManifest(manifest, registration = {}) {
+  manifest.registration = {
+    ...(manifest.registration || {}),
+    erc8004: {
+      ...(manifest.registration?.erc8004 || {}),
+      standard: "ERC-8004",
+      network: registration.network || "arc-testnet",
+      caip2: registration.caip2 || "eip155:5042002",
+      chain_id: registration.chain_id || 5042002,
+      agent_id: registration.agent_id || manifest.registration?.erc8004?.agent_id || null,
+      metadata_uri: registration.metadata_uri || manifest.registration?.erc8004?.metadata_uri || null,
+      metadata_hash: registration.metadata_hash || manifest.registration?.erc8004?.metadata_hash || null,
+      identity_registry: registration.registry_address || manifest.registration?.erc8004?.identity_registry || null,
+      reputation_registry: registration.reputation_registry_address || manifest.registration?.erc8004?.reputation_registry || null,
+      validation_registry: registration.validation_registry_address || manifest.registration?.erc8004?.validation_registry || null,
+      tx_hash: registration.tx_hash || manifest.registration?.erc8004?.tx_hash || null,
+      status: registration.status,
+      updated_at: new Date().toISOString()
+    }
+  };
+  manifest.provider = manifest.provider || {};
+  if (registration.agent_id) manifest.provider.erc8004_agent_id = String(registration.agent_id);
 }
 
 function normalizeManifestCapabilities(manifest) {
@@ -271,7 +356,7 @@ export async function invokePaidService(store, serviceId, input, budget) {
     serviceId,
     manifest,
     payment: challenge.payment,
-    consumerId: "consumer_demo_agent"
+    consumerId: "agentrouter_consumer"
   });
   const paidResponse = await fetch(manifest.endpoint.url, {
     method: manifest.endpoint.method || "POST",
@@ -298,7 +383,7 @@ export async function invokePaidService(store, serviceId, input, budget) {
     request_id: body.request_id || `req_${Date.now()}`,
     service_id: serviceId,
     provider_id: manifest.provider.provider_id,
-    consumer_id: "consumer_demo_agent",
+    consumer_id: "agentrouter_consumer",
     payment_tx: paymentTx,
     settlement_receipt: settlementReceipt,
     status: paidResponse.ok ? "success" : "error",
@@ -529,6 +614,38 @@ export async function hydratePersistentServiceEvents(store) {
       }
       if (!store.feedbackEvents.some((item) => item.event_version === event.event_version && item.request_id === event.request_id && item.consumer_id === event.consumer_id)) {
         store.feedbackEvents.push(event);
+      }
+      continue;
+    }
+    if (row.event_type === "consumer_feedback_anchor") {
+      const record = store.services.get(row.service_id);
+      if (record) {
+        const target = [...record.feedback_events].reverse().find((item) => item.request_id === row.request_id);
+        if (target) {
+          target.consumer_feedback_arc_anchor = event.arc_anchor;
+          if (event.erc8004) target.consumer_feedback_erc8004 = event.erc8004;
+          if (event.trust_anchor) target.consumer_feedback_trust_anchor = event.trust_anchor;
+        }
+      }
+      const target = [...store.feedbackEvents].reverse().find((item) =>
+        item.request_id === row.request_id &&
+        item.service_id === row.service_id &&
+        item.event_version === "agent_consumer_feedback_v1"
+      );
+      if (target) {
+        target.arc_anchor = event.arc_anchor;
+        if (event.erc8004) target.erc8004 = event.erc8004;
+        if (event.trust_anchor) target.trust_anchor = event.trust_anchor;
+      }
+      continue;
+    }
+    if (row.event_type === "erc8004_identity") {
+      const record = store.services.get(row.service_id);
+      if (record && event.erc8004) {
+        applyErc8004RegistrationToManifest(record.manifest, event.erc8004);
+        if (record.manifest.provider?.provider_id) {
+          store.providers.set(record.manifest.provider.provider_id, record.manifest.provider);
+        }
       }
       continue;
     }

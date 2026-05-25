@@ -1,16 +1,36 @@
 import http from "node:http";
+import fs from "node:fs/promises";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
-import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet } from "./registry.js";
+import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet, registerServiceErc8004Identity } from "./registry.js";
+import { createEvidenceEnvelope, hashJson } from "./evidence.js";
 import { discoverApiServices, publishApiDrafts } from "./openapi-import.js";
 import { getCapabilityCatalog, quoteCapabilityRequest, resolveRoute, routeCapabilityRequest, routeTask } from "./router.js";
+import { writePersistentServiceEvent } from "./persistence.js";
+import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
+import { isArcNetwork, verifyArcUsdcTransfer } from "./arc-payment.js";
+import { anchorConsumerFeedbackOnArc, anchorEvidenceOnArc } from "./arc-anchor.js";
+import { createErc8004AgentMetadata, submitErc8004Feedback } from "./erc8004.js";
 import { askAgentRouter } from "./agent-router.js";
 import { createProviderFromStudio, draftFromServiceRecord, studioHtml } from "./studio.js";
 import { agentHtml, homeHtml, humanHtml, serviceDetailHtml } from "./home.js";
 import { readProviderConfig } from "./provider-config.js";
+import { authProviders, authUserKey, beginOAuth, clearSessionCookie, completeOAuth, currentUser, logout } from "./auth.js";
+
+const clientLogoPaths = {
+  "claude.svg": "/Users/huazhenghao/Documents/claude.svg",
+  "cursor.svg": "/Users/huazhenghao/Documents/cursor.svg",
+  "gemini.svg": "/Users/huazhenghao/Documents/gemini.svg",
+  "nous-research.svg": "/Users/huazhenghao/Documents/nous research.svg",
+  "openai.svg": "/Users/huazhenghao/Documents/openai.svg",
+  "opencode.svg": "/Users/huazhenghao/Documents/opencode.svg",
+  "openclaw.svg": "/Users/huazhenghao/Documents/openclaw.svg",
+  "windsurf.svg": "/Users/huazhenghao/Documents/windsurf.svg"
+};
+const brandLogoPath = "/Users/huazhenghao/Downloads/logo.png";
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -33,6 +53,17 @@ export function createServer({ store = createMemoryStore(), baseUrl = "" } = {})
 
 async function routeRequest(req, res, store, baseUrl) {
   const url = new URL(req.url, baseUrl);
+  const auth = { user: currentUser(req, store), providers: authProviders() };
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/assets/client-logos/")) {
+    await sendClientLogo(req, res, url);
+    return;
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/assets/brand/logo.png") {
+    await sendBrandLogo(req, res);
+    return;
+  }
 
   if (req.method === "GET" && url.pathname === "/health") {
     sendJson(res, 200, { ok: true });
@@ -44,8 +75,79 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
+  if (req.method === "GET" && /^\/\.well-known\/erc8004\/agents\/[^/]+\.json$/.test(url.pathname)) {
+    const serviceId = decodeURIComponent(url.pathname.split("/").pop().replace(/\.json$/, ""));
+    const record = store.services.get(serviceId);
+    if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+    sendJson(res, 200, createErc8004AgentMetadata({ manifest: record.manifest, baseUrl }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/auth/me") {
+    sendJson(res, 200, { authenticated: Boolean(auth.user), user: auth.user });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/auth/login") {
+    sendHtml(res, 200, loginHtml({
+      auth,
+      error: url.searchParams.get("error") || "",
+      returnTo: safeReturnTo(url.searchParams.get("return_to") || "/")
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/auth/logout") {
+    redirect(res, "/", { "set-cookie": logout(req, store, baseUrl) });
+    return;
+  }
+
+  if (req.method === "GET" && /^\/auth\/(github|google)\/start$/.test(url.pathname)) {
+    const providerId = url.pathname.split("/")[2];
+    redirect(res, beginOAuth({
+      providerId,
+      store,
+      baseUrl,
+      returnTo: safeReturnTo(url.searchParams.get("return_to") || "/")
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && /^\/auth\/(github|google)\/callback$/.test(url.pathname)) {
+    const providerId = url.pathname.split("/")[2];
+    try {
+      const result = await completeOAuth({
+        providerId,
+        code: url.searchParams.get("code") || "",
+        state: url.searchParams.get("state") || "",
+        store,
+        baseUrl
+      });
+      redirect(res, result.returnTo || "/", { "set-cookie": result.cookie });
+    } catch (error) {
+      redirect(res, `/auth/login?error=${encodeURIComponent(error.message)}`, {
+        "set-cookie": clearSessionCookie(baseUrl)
+      });
+    }
+    return;
+  }
+
   if (req.method === "GET" && (url.pathname === "/stats" || url.pathname === "/agent-router/stats")) {
     sendJson(res, 200, summarizeRegistryStats(store));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/human/stats") {
+    if (!auth.user) {
+      sendJson(res, 401, {
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Sign in to view your provider dashboard."
+        }
+      });
+      return;
+    }
+    sendJson(res, 200, summarizeRegistryStats(store, { ownerKey: authUserKey(auth.user) }));
     return;
   }
 
@@ -95,7 +197,7 @@ async function routeRequest(req, res, store, baseUrl) {
       recent_health_checks: (record.health_checks || []).slice(-20)
     };
     if (wantsHtml(req, url)) {
-      sendHtml(res, 200, serviceDetailHtml(payload));
+      sendHtml(res, 200, serviceDetailHtml(payload, { auth }));
       return;
     }
     sendJson(res, 200, payload);
@@ -103,33 +205,36 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "GET" && url.pathname === "/") {
-    sendHtml(res, 200, homeHtml());
+    sendHtml(res, 200, homeHtml({ auth }));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/human") {
-    sendHtml(res, 200, humanHtml());
+    sendHtml(res, 200, humanHtml({ auth }));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/agent") {
-    sendHtml(res, 200, agentHtml());
+    sendHtml(res, 200, agentHtml({ auth }));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/studio") {
+    if (!requireAuth(req, res, auth, url)) return;
     const serviceId = url.searchParams.get("service_id");
     if (serviceId) {
       const record = store.services.get(serviceId);
       if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+      if (!requireServiceOwner(req, res, auth, record)) return;
       const config = await readProviderConfig(serviceId).catch(() => null);
       sendHtml(res, 200, studioHtml({
         draft: draftFromServiceRecord(record, config),
-        loadedService: { service_id: serviceId }
+        loadedService: { service_id: serviceId },
+        auth
       }));
       return;
     }
-    sendHtml(res, 200, studioHtml());
+    sendHtml(res, 200, studioHtml({ auth }));
     return;
   }
 
@@ -139,20 +244,26 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "POST" && url.pathname === "/studio/use-draft") {
+    if (!requireAuth(req, res, auth, url)) return;
     const body = await readForm(req);
     const draft = JSON.parse(body.draft || "{}");
-    sendHtml(res, 200, studioHtml({ draft }));
+    sendHtml(res, 200, studioHtml({ draft, auth }));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/studio/providers") {
+    if (!requireAuth(req, res, auth, url)) return;
     const body = await readJson(req);
-    const result = await createProviderFromStudio(body, store, baseUrl);
+    const result = await createProviderFromStudio(body, store, baseUrl, {
+      user: auth.user,
+      ownerKey: authUserKey(auth.user)
+    });
     sendJson(res, result.ok ? 201 : 422, result);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/studio/import/discover") {
+    if (!requireAuth(req, res, auth, url)) return;
     const body = await readJson(req);
     try {
       const result = await discoverApiServices(body, baseUrl);
@@ -172,6 +283,7 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "GET" && url.pathname === "/studio/import/discover-page") {
+    if (!requireAuth(req, res, auth, url)) return;
     const result = await discoverApiServices({
       api_url: url.searchParams.get("import_api_url") || url.searchParams.get("api_url"),
       default_price: url.searchParams.get("import_default_price") || url.searchParams.get("default_price") || "0.01",
@@ -182,14 +294,19 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "POST" && url.pathname === "/studio/import/publish") {
+    if (!requireAuth(req, res, auth, url)) return;
     const body = await readJson(req);
-    const result = await publishApiDrafts(body, store, baseUrl);
+    const result = await publishApiDrafts(body, store, baseUrl, {
+      user: auth.user,
+      ownerKey: authUserKey(auth.user)
+    });
     sendJson(res, result.ok ? 201 : 422, result);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/services/register") {
     const manifest = await readJson(req);
+    attachOwnerToManifest(manifest, auth.user);
     const record = registerService(store, manifest, baseUrl);
     sendJson(res, 201, publicServiceRecord(record));
     return;
@@ -197,8 +314,23 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname.startsWith("/services/") && url.pathname.endsWith("/payout")) {
     const serviceId = decodeURIComponent(url.pathname.split("/")[2] || "");
+    if (!requireAuth(req, res, auth, url)) return;
+    const record = store.services.get(serviceId);
+    if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+    if (!requireServiceOwner(req, res, auth, record)) return;
     const body = await readJson(req);
     const result = await updateServicePayoutWallet(store, serviceId, body.payout_address || body.payoutAddress || "");
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/services/") && url.pathname.endsWith("/erc8004/register")) {
+    const serviceId = decodeURIComponent(url.pathname.split("/")[2] || "");
+    const body = await readJson(req).catch(() => ({}));
+    const result = await registerServiceErc8004Identity(store, serviceId, {
+      baseUrl,
+      metadataUri: body.metadata_uri || body.metadataUri || ""
+    });
     sendJson(res, 200, result);
     return;
   }
@@ -245,8 +377,44 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "POST" && url.pathname === "/agent-router/feedback") {
     const body = await readJson(req);
+    if (!body.service_id) {
+      body.service_id = resolveFeedbackServiceId(store, body.request_id || body.feedback?.request_id);
+    }
     const result = recordConsumerFeedback(store, body);
+    const trustAnchor = await recordConsumerFeedbackAnchor(store, result, baseUrl, {
+      deferErc8004ToConsumer: Boolean(body.defer_erc8004_to_consumer)
+    });
+    result.arc_anchor = trustAnchor.arc_anchor;
+    result.erc8004 = trustAnchor.erc8004;
+    result.trust_anchor = trustAnchor;
     sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agent-router/feedback/erc8004") {
+    const body = await readJson(req);
+    const result = recordClientSubmittedErc8004Feedback(store, body);
+    sendJson(res, result.ok ? 200 : 422, result);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agent-router/feedback") {
+    const requestId = url.searchParams.get("request_id");
+    const serviceId = url.searchParams.get("service_id");
+    const events = listFeedbackEvents(store, { requestId, serviceId });
+    sendJson(res, 200, {
+      feedback_event_version: "agent_router_feedback_events_v1",
+      storage: "offchain_memory_db",
+      count: events.length,
+      events
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/agent-router/calls/complete") {
+    const body = await readJson(req);
+    const result = await recordCompletedAgentCall(store, body);
+    sendJson(res, result.ok ? 201 : 422, result);
     return;
   }
 
@@ -352,13 +520,17 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/agent-router/evidence") {
     const serviceId = url.searchParams.get("service_id");
-    const events = serviceId
-      ? store.evidenceEvents.filter((event) => event.service_id === serviceId)
-      : store.evidenceEvents;
+    const requestId = url.searchParams.get("request_id");
+    const paymentTx = url.searchParams.get("payment_tx");
+    const events = store.evidenceEvents
+      .filter((event) => !serviceId || event.service_id === serviceId)
+      .filter((event) => !requestId || event.request_id === requestId)
+      .filter((event) => !paymentTx || event.payment_tx === paymentTx || event.payment?.payment_tx === paymentTx);
     sendJson(res, 200, {
       evidence_event_version: "agent_router_evidence_events_v1",
       storage: "offchain_memory_db",
-      chain_anchor: "simulated_arc_anchor",
+      chain_anchor: "arc_testnet_hash_anchor",
+      storage_model: "full_evidence_offchain_hashes_on_arc",
       count: events.length,
       events
     });
@@ -500,6 +672,70 @@ async function routeRequest(req, res, store, baseUrl) {
   sendNotFound(res, "ROUTE_NOT_FOUND");
 }
 
+function requireAuth(req, res, auth, url) {
+  if (auth.user) return true;
+  if (req.method === "GET") {
+    redirect(res, `/auth/login?return_to=${encodeURIComponent(safeReturnTo(url.pathname + url.search))}`);
+    return false;
+  }
+  sendJson(res, 401, {
+    error: {
+      code: "AUTH_REQUIRED",
+      message: "Sign in to continue."
+    }
+  });
+  return false;
+}
+
+function requireServiceOwner(req, res, auth, record) {
+  const ownerKey = record?.manifest?.registration?.owner?.user_key || "";
+  if (!ownerKey || ownerKey === authUserKey(auth.user)) return true;
+  sendJson(res, 403, {
+    error: {
+      code: "FORBIDDEN_SERVICE_OWNER",
+      message: "This service belongs to another provider account."
+    }
+  });
+  return false;
+}
+
+function safeReturnTo(value) {
+  const path = String(value || "/");
+  if (!path.startsWith("/") || path.startsWith("//")) return "/";
+  return path;
+}
+
+async function sendClientLogo(req, res, url) {
+  const fileName = decodeURIComponent(url.pathname.replace("/assets/client-logos/", ""));
+  const filePath = clientLogoPaths[fileName];
+  if (!filePath) return sendNotFound(res, "CLIENT_LOGO_NOT_FOUND");
+  try {
+    const body = await fs.readFile(filePath, "utf8");
+    if (!body.includes("<svg")) return sendNotFound(res, "CLIENT_LOGO_INVALID");
+    res.writeHead(200, {
+      "content-type": "image/svg+xml; charset=utf-8",
+      "cache-control": "public, max-age=3600"
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    sendNotFound(res, "CLIENT_LOGO_NOT_FOUND");
+  }
+}
+
+async function sendBrandLogo(req, res) {
+  try {
+    const body = await fs.readFile(brandLogoPath);
+    res.writeHead(200, {
+      "content-type": "image/png",
+      "cache-control": "public, max-age=3600",
+      "content-length": body.length
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    sendNotFound(res, "BRAND_LOGO_NOT_FOUND");
+  }
+}
+
 function localServerPaidInvocationsAllowed(baseUrl) {
   try {
     const hostname = new URL(baseUrl).hostname;
@@ -585,6 +821,11 @@ function wantsHtml(req, url) {
   return accept.includes("text/html") && !accept.includes("application/json");
 }
 
+function redirect(res, location, headers = {}) {
+  res.writeHead(302, { location, ...headers });
+  res.end();
+}
+
 function markExistingDrafts(result, store) {
   return {
     ...result,
@@ -652,6 +893,80 @@ function discoverPageHtml(result) {
   <h2>Raw Drafts</h2>
   <pre>${escapeHtml(JSON.stringify(result.drafts, null, 2))}</pre>
   <p><a href="/studio">Back to Provider Studio</a></p>
+</body>
+</html>`;
+}
+
+function loginHtml({ auth, error = "", returnTo = "/" }) {
+  const providers = auth.providers || [];
+  const providerCards = providers.map((provider) => {
+    const body = provider.configured
+      ? `<a class="login-provider" href="/auth/${provider.id}/start?return_to=${escapeHtml(encodeURIComponent(safeReturnTo(returnTo)))}">Continue with ${escapeHtml(provider.label)}</a>`
+      : `<div class="login-provider disabled">
+          <strong>${escapeHtml(provider.label)}</strong>
+          <span>Set ${escapeHtml(provider.client_id_env)} and ${escapeHtml(provider.client_secret_env)}.</span>
+        </div>`;
+    return `<section class="login-card">${body}</section>`;
+  }).join("");
+  const signedIn = auth.user
+    ? `<div class="login-user">
+        ${auth.user.avatar_url ? `<img src="${escapeHtml(auth.user.avatar_url)}" alt="" />` : ""}
+        <div><strong>${escapeHtml(auth.user.name)}</strong><span>${escapeHtml(auth.user.email || auth.user.provider)}</span></div>
+        <a href="/auth/logout">Sign out</a>
+      </div>`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login · AgentRouter</title>
+  <style>
+    :root { --ink:#202124; --muted:#696f72; --line:#dedede; --panel:#f6f7f5; --accent:#dffcff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:#fff; }
+    a { color:inherit; text-decoration:none; }
+    .topbar { border-top:3px solid var(--accent); border-bottom:1px solid var(--line); }
+    .nav { max-width:920px; min-height:60px; margin:0 auto; padding:0 24px; display:flex; align-items:center; justify-content:space-between; }
+    .brand { font-size:20px; font-weight:840; }
+    .nav a:last-child { color:var(--muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    main { min-height:calc(100vh - 61px); display:grid; place-items:center; padding:56px 24px; }
+    .login-panel { width:min(520px, 100%); display:grid; gap:18px; }
+    .eyebrow { color:var(--muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    h1 { margin:0; font-size:42px; line-height:1.05; }
+    p { margin:0; color:var(--muted); font-size:16px; line-height:1.55; }
+    .login-options { display:grid; gap:10px; margin-top:14px; }
+    .login-provider { min-height:54px; border:1px solid var(--line); background:#fff; display:flex; align-items:center; justify-content:center; padding:0 18px; font-size:14px; font-weight:800; }
+    .login-provider:hover { border-color:#b9c2c5; background:#fbfbfb; }
+    .login-provider.disabled { justify-content:space-between; gap:18px; color:var(--muted); background:var(--panel); font-weight:700; }
+    .login-provider.disabled span { font-size:12px; text-align:right; }
+    .login-error { border:1px solid #f2b8b5; background:#fff7f7; color:#8c1d18; padding:12px 14px; font-size:13px; line-height:1.4; }
+    .login-user { border:1px solid var(--line); background:var(--panel); padding:14px; display:grid; grid-template-columns:40px minmax(0,1fr) auto; gap:12px; align-items:center; }
+    .login-user img { width:40px; height:40px; border-radius:50%; }
+    .login-user strong, .login-user span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .login-user span { color:var(--muted); font-size:13px; margin-top:2px; }
+    .login-user a { font-size:12px; font-weight:800; text-transform:uppercase; }
+    @media (max-width:520px) {
+      h1 { font-size:34px; }
+      .login-provider.disabled { display:grid; justify-content:stretch; }
+      .login-provider.disabled span { text-align:left; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="nav"><a class="brand" href="/">AgentRouter</a><a href="/">Back home</a></div>
+  </header>
+  <main>
+    <section class="login-panel">
+      <span class="eyebrow">Account</span>
+      <h1>Login</h1>
+      <p>Sign in to AgentRouter with GitHub or Google. Provider onboarding credentials stay in Provider Studio; OAuth is only for user identity.</p>
+      ${error ? `<div class="login-error">${escapeHtml(error)}</div>` : ""}
+      ${signedIn}
+      <div class="login-options">${providerCards}</div>
+    </section>
+  </main>
 </body>
 </html>`;
 }
@@ -896,6 +1211,440 @@ function mockOpenApi(baseUrl) {
   };
 }
 
+async function recordCompletedAgentCall(store, body = {}) {
+  const serviceId = body.service_id || body.feedback?.service_id || body.result?.service_id;
+  const record = store.services.get(serviceId);
+  if (!record) {
+    return {
+      ok: false,
+      status: "service_not_found",
+      error: { code: "SERVICE_NOT_FOUND", message: `No registered service ${serviceId || ""}.` }
+    };
+  }
+
+  const manifest = record.manifest;
+  const result = body.result || {};
+  const input = body.input || body.request?.params || {};
+  const request = body.request || {
+    capability: "direct_service_invocation",
+    params: input,
+    constraints: body.budget?.max_amount ? { max_price_usdc: body.budget.max_amount } : {},
+    consumer_context: { source: "completed_call_record" }
+  };
+  const requestId = result.request_id || body.feedback?.request_id || `req_${Date.now()}`;
+  if (!result.request_id) result.request_id = requestId;
+
+  const verification = verifyServiceResult({
+    result,
+    manifest,
+    intent: request.params || input,
+    constraints: request.constraints || {}
+  });
+  const feedbackEvent = normalizeOperationalFeedback({
+    body,
+    manifest,
+    requestId,
+    verification
+  });
+  const paymentVerification = await verifyCompletedCallPayment({ body, manifest, feedbackEvent });
+  if (!paymentVerification.ok) {
+    return {
+      ok: false,
+      status: "payment_verification_failed",
+      request_id: requestId,
+      service_id: serviceId,
+      verification,
+      payment_verification: paymentVerification,
+      error: {
+        code: paymentVerification.error || "PAYMENT_VERIFICATION_FAILED",
+        message: "Completed invocation was not recorded because the Arc payment could not be verified."
+      }
+    };
+  }
+  feedbackEvent.payment_verification = paymentVerification;
+  upsertOperationalFeedback(record, feedbackEvent);
+  if (!store.feedbackEvents.some((event) => event.request_id === requestId && event.payment_tx === feedbackEvent.payment_tx)) {
+    store.feedbackEvents.push(feedbackEvent);
+  }
+  await writePersistentServiceEvent({
+    eventType: "operational_feedback",
+    serviceId,
+    requestId,
+    event: feedbackEvent
+  });
+
+  const selectedService = publicServiceRecord(record);
+  const quote = body.quote || {
+    quote_version: "agent_router_payment_quote_v1",
+    service_id: serviceId,
+    amount: manifest.pricing?.amount,
+    currency: manifest.pricing?.currency,
+    payment_backend: body.feedback?.payment_backend || body.local_payment?.backend || manifest.pricing?.protocol || "x402"
+  };
+  const evidence = createEvidenceEnvelope({
+    routeType: "completed_paid_invocation",
+    request,
+    input,
+    selectedService,
+    manifest,
+    quote,
+    result,
+    feedback: feedbackEvent,
+    verification
+  });
+  evidence.arc_anchor = await anchorEvidenceOnArc(evidence);
+  const existingEvidence = store.evidenceEvents.find((event) =>
+    (event.request_id && event.request_id === requestId) ||
+    (event.payment_tx && feedbackEvent.payment_tx && event.payment_tx === feedbackEvent.payment_tx) ||
+    event.trace_hash === evidence.trace_hash
+  );
+  const savedEvidence = existingEvidence || evidence;
+  if (!existingEvidence) {
+    store.evidenceEvents.push(evidence);
+    await writePersistentServiceEvent({
+      eventType: "evidence",
+      serviceId,
+      requestId,
+      event: evidence
+    });
+  }
+
+  const qualityEvent = createCompletedCallQualityEvent({
+    serviceId,
+    providerId: manifest.provider.provider_id,
+    requestId,
+    feedbackEvent,
+    verification,
+    evidence: savedEvidence
+  });
+  record.quality_events = record.quality_events || [];
+  if (!record.quality_events.some((event) => event.quality_event_id === qualityEvent.quality_event_id)) {
+    record.quality_events.push(qualityEvent);
+  }
+  if (!store.qualityEvents.some((event) => event.quality_event_id === qualityEvent.quality_event_id)) {
+    store.qualityEvents.push(qualityEvent);
+  }
+  await writePersistentServiceEvent({
+    eventType: "quality_event",
+    serviceId,
+    requestId,
+    event: qualityEvent
+  });
+
+  const consumerFeedbackRequest = createConsumerFeedbackRequest({
+    request,
+    selectedService,
+    result,
+    verification
+  });
+
+  return {
+    ok: true,
+    status: "completed_invocation_recorded",
+    request_id: requestId,
+    service_id: serviceId,
+    verification,
+    evidence: savedEvidence,
+    feedback: feedbackEvent,
+    payment_verification: paymentVerification,
+    quality_event: qualityEvent,
+    consumer_feedback_request: consumerFeedbackRequest
+  };
+}
+
+async function verifyCompletedCallPayment({ body, manifest, feedbackEvent }) {
+  const receipt = feedbackEvent.settlement_receipt || {};
+  const localPayment = body.local_payment || {};
+  const network = receipt.network || localPayment.network || manifest.pricing?.network;
+  if (!isArcNetwork(network)) {
+    return {
+      ok: true,
+      status: "not_checked_non_arc_payment",
+      network: network || null
+    };
+  }
+  if (!feedbackEvent.payment_tx) {
+    return {
+      ok: false,
+      error: "MISSING_PAYMENT_TX"
+    };
+  }
+  const expected = {
+    amount: receipt.amount || localPayment.amount || manifest.pricing?.amount,
+    payTo: receipt.pay_to || localPayment.pay_to || manifest.pricing?.pay_to,
+    payer: localPayment.payer || null
+  };
+  if (!expected.amount || !expected.payTo) {
+    return {
+      ok: false,
+      error: "MISSING_PAYMENT_EXPECTATION",
+      expected
+    };
+  }
+  const verified = await verifyArcUsdcTransfer({
+    txHash: feedbackEvent.payment_tx,
+    expected
+  });
+  return {
+    ...verified,
+    status: verified.ok ? "verified_arc_usdc_transfer" : "arc_usdc_transfer_invalid",
+    expected
+  };
+}
+
+function normalizeOperationalFeedback({ body, manifest, requestId, verification }) {
+  const source = body.feedback || {};
+  const localPayment = body.local_payment || {};
+  const status = source.status || localPayment.status || (body.result?.status === "success" ? "success" : "error");
+  const event = {
+    event_version: "agent_service_feedback_v1",
+    request_id: requestId,
+    service_id: manifest.service_id,
+    provider_id: manifest.provider.provider_id,
+    consumer_id: source.consumer_id || localPayment.payer || "local_agent_wallet",
+    payment_tx: source.payment_tx || localPayment.payment_tx || null,
+    settlement_receipt: source.settlement_receipt || null,
+    status,
+    schema_valid: verification.schema_valid,
+    freshness_valid: verification.freshness_valid,
+    coverage_valid: verification.coverage_valid,
+    data_non_empty: verification.data_non_empty,
+    latency_ms: source.latency_ms ?? null,
+    consumer_rating: typeof source.consumer_rating === "number" ? source.consumer_rating : null,
+    payment_backend: source.payment_backend || localPayment.backend || null,
+    verification,
+    created_at: source.created_at || new Date().toISOString()
+  };
+  event.feedback_hash = source.feedback_hash || hashJson(event);
+  return event;
+}
+
+function upsertOperationalFeedback(record, event) {
+  record.feedback_events = record.feedback_events || [];
+  const existing = record.feedback_events.find((item) =>
+    item.request_id === event.request_id &&
+    ((item.payment_tx && event.payment_tx && item.payment_tx === event.payment_tx) || !item.payment_tx || !event.payment_tx)
+  );
+  if (existing) {
+    Object.assign(existing, event, {
+      consumer_feedback: existing.consumer_feedback,
+      consumer_rating: existing.consumer_rating ?? event.consumer_rating,
+      updated_at: new Date().toISOString()
+    });
+    return existing;
+  }
+  record.feedback_events.push(event);
+  return event;
+}
+
+function createCompletedCallQualityEvent({ serviceId, providerId, requestId, feedbackEvent, verification, evidence }) {
+  const qualityEvent = {
+    event_version: "agent_service_quality_event_v1",
+    quality_event_id: hashJson({
+      service_id: serviceId,
+      request_id: requestId,
+      payment_tx: feedbackEvent.payment_tx,
+      trace_hash: evidence.trace_hash,
+      type: "completed_paid_invocation"
+    }),
+    service_id: serviceId,
+    provider_id: providerId,
+    request_id: requestId,
+    payment_tx: feedbackEvent.payment_tx,
+    trace_hash: evidence.trace_hash,
+    event_type: "completed_paid_invocation",
+    deterministic_verification: verification,
+    status: verification.schema_valid && verification.data_non_empty ? "verified_result_recorded" : "needs_review",
+    blocking_issues: (verification.issues || []).filter((issue) =>
+      ["SCHEMA_ERROR", "ENVELOPE_ERROR", "STATUS_NOT_SUCCESS", "EMPTY_RESULT"].includes(issue.code)
+    ),
+    consumer_feedback_expected: true,
+    created_at: new Date().toISOString()
+  };
+  qualityEvent.event_hash = hashJson(qualityEvent);
+  return qualityEvent;
+}
+
+function listFeedbackEvents(store, { requestId, serviceId } = {}) {
+  const events = serviceId
+    ? (store.services.get(serviceId)?.feedback_events || [])
+    : [...store.services.values()].flatMap((record) => record.feedback_events || []);
+  return events.filter((event) => !requestId || event.request_id === requestId);
+}
+
+function resolveFeedbackServiceId(store, requestId) {
+  if (!requestId) return null;
+  const matches = listFeedbackEvents(store, { requestId })
+    .map((event) => event.service_id)
+    .filter(Boolean);
+  const unique = [...new Set(matches)];
+  if (unique.length === 1) return unique[0];
+  if (unique.length > 1) {
+    const error = new Error("request_id matches multiple services; service_id is required");
+    error.statusCode = 409;
+    error.code = "AMBIGUOUS_FEEDBACK_REQUEST";
+    throw error;
+  }
+  return null;
+}
+
+async function recordConsumerFeedbackAnchor(store, feedbackResult, baseUrl = "", { deferErc8004ToConsumer = false } = {}) {
+  const record = store.services.get(feedbackResult.service_id);
+  const providerId = record?.manifest?.provider?.provider_id || feedbackResult.provider_id || "";
+  const anchor = await anchorConsumerFeedbackOnArc({
+    requestId: feedbackResult.request_id,
+    serviceId: feedbackResult.service_id,
+    providerId,
+    feedback: feedbackResult.consumer_feedback
+  });
+  const erc8004 = deferErc8004ToConsumer
+    ? createConsumerRequiredErc8004Feedback({ feedbackResult, record, providerId, baseUrl })
+    : await submitErc8004Feedback({
+        requestId: feedbackResult.request_id,
+        serviceId: feedbackResult.service_id,
+        providerId,
+        manifest: record?.manifest,
+        feedback: feedbackResult.consumer_feedback,
+        baseUrl
+      });
+  const trustAnchor = {
+    trust_anchor_version: "agent_router_trust_anchor_v1",
+    primary_standard: erc8004.status === "submitted" ? "ERC-8004" : "custom_arc_anchor",
+    arc_anchor: anchor,
+    erc8004
+  };
+  const target = [...(record?.feedback_events || [])].reverse().find((event) => event.request_id === feedbackResult.request_id);
+  if (target) {
+    target.consumer_feedback_arc_anchor = anchor;
+    target.consumer_feedback_erc8004 = erc8004;
+    target.consumer_feedback_trust_anchor = trustAnchor;
+  }
+  const globalTarget = [...(store.feedbackEvents || [])].reverse().find((event) =>
+    event.request_id === feedbackResult.request_id &&
+    event.service_id === feedbackResult.service_id &&
+    event.event_version === "agent_consumer_feedback_v1"
+  );
+  if (globalTarget) {
+    globalTarget.arc_anchor = anchor;
+    globalTarget.erc8004 = erc8004;
+    globalTarget.trust_anchor = trustAnchor;
+  }
+  await writePersistentServiceEvent({
+    eventType: "consumer_feedback_anchor",
+    serviceId: feedbackResult.service_id,
+    requestId: feedbackResult.request_id,
+    event: {
+      event_version: "agent_consumer_feedback_anchor_v1",
+      service_id: feedbackResult.service_id,
+      provider_id: providerId,
+      request_id: feedbackResult.request_id,
+      arc_anchor: anchor,
+      erc8004,
+      trust_anchor: trustAnchor,
+      created_at: new Date().toISOString()
+    }
+  });
+  return trustAnchor;
+}
+
+function createConsumerRequiredErc8004Feedback({ feedbackResult, record, providerId, baseUrl = "" }) {
+  const agentId =
+    record?.manifest?.registration?.erc8004?.agent_id ||
+    record?.manifest?.provider?.erc8004_agent_id ||
+    record?.manifest?.provider?.agent_id ||
+    null;
+  return {
+    standard: "ERC-8004",
+    registry_type: "reputation",
+    event_type: "AgentRouterConsumerFeedback",
+    network: "arc-testnet",
+    caip2: "eip155:5042002",
+    chain_id: 5042002,
+    agent_id: agentId ? String(agentId) : null,
+    service_id: feedbackResult.service_id,
+    provider_id: providerId,
+    request_id: feedbackResult.request_id,
+    status: "consumer_submission_required",
+    submitter: "consumer_wallet",
+    reason: "ERC-8004 Reputation feedback must be submitted by the consumer wallet, not the provider/operator wallet.",
+    submit_endpoint: "/agent-router/feedback/erc8004",
+    feedback_uri: `${String(baseUrl || "").replace(/\/$/, "")}/agent-router/feedback?request_id=${encodeURIComponent(feedbackResult.request_id)}`
+  };
+}
+
+function recordClientSubmittedErc8004Feedback(store, body = {}) {
+  const serviceId = body.service_id || resolveFeedbackServiceId(store, body.request_id);
+  const requestId = body.request_id;
+  const erc8004 = body.erc8004;
+  if (!serviceId || !requestId || !erc8004 || typeof erc8004 !== "object") {
+    return {
+      ok: false,
+      status: "invalid_request",
+      error: "service_id, request_id, and erc8004 object are required."
+    };
+  }
+  if (erc8004.standard !== "ERC-8004" || erc8004.registry_type !== "reputation") {
+    return {
+      ok: false,
+      status: "invalid_erc8004_feedback",
+      error: "erc8004 must describe an ERC-8004 reputation submission."
+    };
+  }
+  if (erc8004.status !== "submitted" || !/^0x[0-9a-fA-F]{64}$/.test(String(erc8004.tx_hash || ""))) {
+    return {
+      ok: false,
+      status: "erc8004_feedback_not_submitted",
+      error: "erc8004.status must be submitted and tx_hash must be present."
+    };
+  }
+  const record = store.services.get(serviceId);
+  const event = [...(record?.feedback_events || [])].reverse().find((item) => item.request_id === requestId);
+  if (!event) {
+    return {
+      ok: false,
+      status: "feedback_event_not_found",
+      error: "No feedback event exists for this request_id."
+    };
+  }
+  event.consumer_feedback_erc8004 = erc8004;
+  event.consumer_feedback_trust_anchor = {
+    ...(event.consumer_feedback_trust_anchor || {}),
+    primary_standard: "ERC-8004",
+    erc8004,
+    updated_at: new Date().toISOString()
+  };
+  const globalConsumer = [...(store.feedbackEvents || [])].reverse().find((item) =>
+    item.request_id === requestId &&
+    item.service_id === serviceId &&
+    item.event_version === "agent_consumer_feedback_v1"
+  );
+  if (globalConsumer) {
+    globalConsumer.erc8004 = erc8004;
+    globalConsumer.trust_anchor = event.consumer_feedback_trust_anchor;
+  }
+  writePersistentServiceEvent({
+    eventType: "consumer_feedback_erc8004_client",
+    serviceId,
+    requestId,
+    event: {
+      event_version: "agent_consumer_feedback_erc8004_client_v1",
+      service_id: serviceId,
+      provider_id: record?.manifest?.provider?.provider_id || erc8004.provider_id || null,
+      request_id: requestId,
+      erc8004,
+      created_at: new Date().toISOString()
+    }
+  }).catch(() => {});
+  return {
+    ok: true,
+    status: "erc8004_feedback_attached",
+    service_id: serviceId,
+    request_id: requestId,
+    erc8004,
+    trust_anchor: event.consumer_feedback_trust_anchor
+  };
+}
+
 export async function seedDemoService(serverUrl, store) {
   const record = registerService(store, baseFundFlowManifest, serverUrl);
   await validateService(store, record.manifest.service_id);
@@ -904,9 +1653,30 @@ export async function seedDemoService(serverUrl, store) {
   return record;
 }
 
+function attachOwnerToManifest(manifest, user) {
+  const ownerKey = authUserKey(user);
+  if (!ownerKey) return;
+  manifest.registration = {
+    ...(manifest.registration || {}),
+    owner: {
+      user_key: ownerKey,
+      provider: user?.provider || "",
+      user_id: user?.id || "",
+      handle: user?.handle || "",
+      email: user?.email || "",
+      name: user?.name || "",
+      created_at: new Date().toISOString()
+    }
+  };
+}
+
 export async function bootstrapServer(server, baseUrl) {
-  await seedDemoService(baseUrl, server.store);
-  await loadProviderConfigs(server.store, baseUrl, { validate: true });
+  if (process.env.ADN_SEED_EXAMPLE_SERVICES === "1") {
+    await seedDemoService(baseUrl, server.store);
+  }
+  await loadProviderConfigs(server.store, baseUrl, {
+    validate: process.env.ADN_VALIDATE_PROVIDER_CONFIGS_ON_BOOT === "1"
+  });
   await hydratePersistentServiceEvents(server.store);
 }
 

@@ -98,9 +98,9 @@ export function createConsumerFeedbackRequest({
     },
     schema: {
       type: "object",
-      required: ["service_id", "request_id", "feedback"],
+      required: ["request_id", "feedback"],
       properties: {
-        service_id: { type: "string" },
+        service_id: { type: "string", description: "Optional when request_id uniquely identifies the completed call." },
         request_id: { type: "string" },
         consumer_id: { type: "string" },
         feedback: {
@@ -204,7 +204,7 @@ function checkCoverage(result, intent) {
   const issues = [];
   const queryText = JSON.stringify(result?.query || {}).toLowerCase();
   const dataText = JSON.stringify(result?.data || {}).toLowerCase();
-  if (intent.asset && !queryText.includes(String(intent.asset).toLowerCase()) && !dataText.includes(String(intent.asset).toLowerCase())) {
+  if (intent.asset && !assetCovered(intent.asset, `${queryText} ${dataText}`)) {
     issues.push({ code: "ASSET_NOT_COVERED", message: `Result does not clearly cover ${intent.asset}.` });
   }
   if (intent.capability === "perp_liquidation_max_pain") {
@@ -232,6 +232,20 @@ function checkCoverage(result, intent) {
     }
   }
   return issues;
+}
+
+function assetCovered(asset, text) {
+  const normalized = String(asset || "").toUpperCase();
+  const aliases = {
+    BTC: ["btc", "bitcoin", "xbt"],
+    ETH: ["eth", "ethereum"],
+    SOL: ["sol", "solana"],
+    BNB: ["bnb", "binancecoin", "binance coin"],
+    XRP: ["xrp", "ripple"],
+    DOGE: ["doge", "dogecoin"]
+  };
+  return (aliases[normalized] || [String(asset || "").toLowerCase()])
+    .some((alias) => text.includes(alias));
 }
 
 function computeAgentFriendlyScore(result, issues) {

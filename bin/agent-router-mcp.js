@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { getArcUsdcBalance } from "../src/arc-payment.js";
+import { submitErc8004Feedback } from "../src/erc8004.js";
 import { invokePaidServiceWithLocalWallet } from "../src/local-invoke.js";
 import { routeTaskWithLocalWallet } from "../src/local-route.js";
 import { currentPaymentBackend } from "../src/payment-adapter.js";
@@ -12,7 +13,7 @@ const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL ||
 const tools = [
   {
     name: "agentrouter_request",
-    description: "Use this first for AgentRouter data/API calls. The main agent parses the user request into a structured capability request; AgentRouter then validates, routes, invokes, verifies, and returns evidence. Do not use agentrouter_ask when you can fill this schema.",
+    description: "Use this first for AgentRouter data/API calls. The main agent parses the user request into a structured capability request; AgentRouter validates, routes, pays, invokes, records payment verification/evidence, and returns a feedback request. After using the result in the final answer, call agentrouter_feedback with the returned request_id. Do not use agentrouter_ask when you can fill this schema.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -48,8 +49,33 @@ const tools = [
     }
   },
   {
+    name: "agentrouter_feedback",
+    description: "Submit post-call consumer feedback after the main agent has judged whether an AgentRouter result helped answer the user's task. Use request_id from the prior AgentRouter response; service_id is not required when request_id is unique.",
+    inputSchema: {
+      type: "object",
+      required: ["request_id", "feedback"],
+      properties: {
+        request_id: { type: "string", description: "The request_id returned by the completed AgentRouter call." },
+        consumer_id: { type: "string", description: "Optional caller identifier.", default: "main_agent" },
+        feedback: {
+          type: "object",
+          required: ["intent_fit", "answer_useful", "reason"],
+          properties: {
+            intent_fit: { enum: ["yes", "partial", "no", "unknown"] },
+            answer_useful: { enum: ["yes", "partial", "no", "unknown"] },
+            data_quality_score: { type: "number", minimum: 0, maximum: 1 },
+            used_in_final_answer: { type: "boolean" },
+            reason: { type: "string" },
+            missing_fields: { type: "array", items: { type: "string" } },
+            confidence: { type: "number", minimum: 0, maximum: 1 }
+          }
+        }
+      }
+    }
+  },
+  {
     name: "agentrouter_ask",
-    description: "Last-resort fallback/demo only: send the user's natural-language task to AgentRouter for lightweight parsing. Prefer agentrouter_capabilities plus agentrouter_request whenever the main agent can produce a structured request.",
+    description: "Last-resort natural-language helper: send the user's task to AgentRouter for lightweight parsing. Prefer agentrouter_capabilities plus agentrouter_request whenever the main agent can produce a structured request. If this returns a successful paid result with a request_id, call agentrouter_feedback after answering.",
     inputSchema: {
       type: "object",
       required: ["task"],
@@ -235,6 +261,17 @@ async function callTool(name, args) {
     return get("/capabilities");
   }
 
+  if (name === "agentrouter_feedback") {
+    if (["x402", "circle_arc"].includes(currentPaymentBackend())) {
+      return submitFeedbackWithLocalWallet(args);
+    }
+    return post("/agent-router/feedback", {
+      request_id: args.request_id,
+      consumer_id: args.consumer_id || "main_agent",
+      feedback: args.feedback || {}
+    });
+  }
+
   if (name === "agentrouter_wallet_status") {
     const status = await walletStatus();
     const paymentBackend = currentPaymentBackend();
@@ -296,6 +333,59 @@ async function callTool(name, args) {
     tool: name,
     available_tools: tools.map((tool) => tool.name)
   };
+}
+
+async function submitFeedbackWithLocalWallet(args) {
+  const feedbackResult = await post("/agent-router/feedback", {
+    request_id: args.request_id,
+    consumer_id: args.consumer_id || "main_agent",
+    feedback: args.feedback || {},
+    defer_erc8004_to_consumer: true
+  });
+  if (!feedbackResult.ok || !feedbackResult.service_id) return feedbackResult;
+  const erc8004Request = feedbackResult.erc8004 || {};
+  if (erc8004Request.status !== "consumer_submission_required" || !erc8004Request.agent_id) {
+    return feedbackResult;
+  }
+  try {
+    const wallet = await readWallet();
+    const detail = await get(`/agent-router/service?service_id=${encodeURIComponent(feedbackResult.service_id)}`);
+    const erc8004 = await submitErc8004Feedback({
+      requestId: feedbackResult.request_id,
+      serviceId: feedbackResult.service_id,
+      providerId: detail?.manifest?.provider?.provider_id || feedbackResult.provider_id,
+      manifest: detail?.manifest,
+      feedback: feedbackResult.consumer_feedback,
+      baseUrl,
+      privateKey: wallet.private_key_hex,
+      submitter: "consumer_wallet"
+    });
+    feedbackResult.erc8004 = erc8004;
+    feedbackResult.trust_anchor = {
+      ...(feedbackResult.trust_anchor || {}),
+      primary_standard: erc8004.status === "submitted" ? "ERC-8004" : feedbackResult.trust_anchor?.primary_standard,
+      erc8004
+    };
+    if (erc8004.status === "submitted") {
+      const attached = await post("/agent-router/feedback/erc8004", {
+        service_id: feedbackResult.service_id,
+        request_id: feedbackResult.request_id,
+        erc8004
+      });
+      feedbackResult.erc8004_attachment = attached;
+    }
+    return feedbackResult;
+  } catch (error) {
+    return {
+      ...feedbackResult,
+      erc8004: {
+        ...(feedbackResult.erc8004 || {}),
+        status: "consumer_submission_failed",
+        submitter: "consumer_wallet",
+        error: error.message
+      }
+    };
+  }
 }
 
 async function requestWithLocalWallet(args) {
@@ -360,7 +450,9 @@ async function requestWithLocalWallet(args) {
     quote: quote.quote,
     result: invocation.result,
     feedback: invocation.feedback,
-    local_payment: invocation.local_payment
+    local_payment: invocation.local_payment,
+    evidence_recording: invocation.evidence_recording,
+    consumer_feedback_request: invocation.evidence_recording?.consumer_feedback_request || null
   };
 }
 

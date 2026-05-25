@@ -22,7 +22,8 @@ export function describePaymentBackend() {
 
 export function createPaymentQuote({ manifest, constraints = {}, selectedService }) {
   const maxPrice = constraints.max_price_usdc || constraints.max_price || constraints.max_amount;
-  const price = Number(manifest.pricing.amount);
+  const pricing = effectivePricing(manifest);
+  const price = Number(pricing.amount);
   const max = maxPrice == null || maxPrice === "" ? null : Number(maxPrice);
   const allowed = max == null || price <= max;
   return {
@@ -31,7 +32,7 @@ export function createPaymentQuote({ manifest, constraints = {}, selectedService
     service_id: manifest.service_id,
     provider_id: manifest.provider.provider_id,
     selected_service: selectedService || null,
-    pricing: manifest.pricing,
+    pricing,
     budget: {
       max_price_usdc: maxPrice || null,
       allowed
@@ -39,8 +40,22 @@ export function createPaymentQuote({ manifest, constraints = {}, selectedService
     guard_result: allowed ? "pass" : "budget_too_low",
     would_pay: allowed,
     reason: allowed
-      ? `Service price ${manifest.pricing.amount} ${manifest.pricing.currency} is within budget.`
-      : `Service price ${manifest.pricing.amount} ${manifest.pricing.currency} exceeds budget ${maxPrice} USDC.`
+      ? `Service price ${pricing.amount} ${pricing.currency} is within budget.`
+      : `Service price ${pricing.amount} ${pricing.currency} exceeds budget ${maxPrice} USDC.`
+  };
+}
+
+export function effectivePricing(manifest = {}) {
+  const pricing = manifest.pricing || {};
+  if (currentPaymentBackend() !== "circle_arc") return pricing;
+  return {
+    ...pricing,
+    network: "arc-testnet",
+    caip2: "eip155:5042002",
+    chain_id: 5042002,
+    protocol: pricing.protocol || "x402",
+    settlement_model: pricing.settlement_model || "direct_provider_wallet",
+    pay_to: pricing.pay_to || manifest.provider?.payout_address || process.env.ADN_PROVIDER_RECEIVE_ADDRESS || null
   };
 }
 
@@ -57,7 +72,7 @@ export function createSettlementReceipt({ manifest, challenge, txHash }) {
     asset: challenge.asset || manifest.pricing.currency,
     token_address: challenge.token_address || manifest.pricing.token_address || undefined,
     amount: challenge.amount || manifest.pricing.amount,
-    payer: "consumer_demo_agent",
+    payer: challenge.payer || "agentrouter_consumer",
     pay_to: challenge.pay_to,
     tx_hash: txHash,
     settlement_model: challenge.settlement_model || manifest.pricing.settlement_model || null,

@@ -189,10 +189,12 @@ export async function verifyArcUsdcTransfer({ txHash, expected }) {
     chain: ARC_TESTNET,
     transport: http(ARC_TESTNET.rpcUrls.default.http[0])
   });
-  const [tx, receipt] = await Promise.all([
-    client.getTransaction({ hash: txHash }),
-    client.getTransactionReceipt({ hash: txHash })
-  ]);
+  const receipt = await client.waitForTransactionReceipt({
+    hash: txHash,
+    confirmations: 1,
+    timeout: Number(process.env.ADN_ARC_RECEIPT_TIMEOUT_MS || 30000)
+  });
+  const tx = await client.getTransaction({ hash: txHash });
   if (receipt.status !== "success") {
     return { ok: false, error: "ARC_TX_NOT_SUCCESS", receipt_status: receipt.status };
   }

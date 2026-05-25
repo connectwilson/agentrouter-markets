@@ -118,7 +118,7 @@ export function createStaticProviderConfig({
       serviceId,
       input: sampleRequest,
       data: sampleData,
-      sampleType: "mock",
+      sampleType: "preview",
       isEstimated: true,
       confidence: 0.7,
       summary: `${summary} (sample response)`
@@ -226,7 +226,7 @@ export function createHostedHttpProviderConfig({
       input: sampleRequest,
       data: sampleData,
       sourceType: "hosted_http",
-      sampleType: "mock",
+      sampleType: "preview",
       isEstimated: true,
       confidence: 0.7,
       summary: `${summary} (sample response)`
@@ -441,7 +441,7 @@ export function createEnvelope({ serviceId, input, data, sampleType, isEstimated
       freshness_seconds: sampleType ? 86400 : 60,
       is_estimated: isEstimated,
       confidence,
-      limitations: sampleType ? ["Sample response is mock/static and not a live paid response."] : [`${sourceType} provider for MVP onboarding.`]
+      limitations: sampleType ? ["Preview response is static and not a live paid response."] : [`${sourceType} provider for MVP onboarding.`]
     },
     agent_hints: {
       good_for: ["MVP validation", "Agent response parsing"],

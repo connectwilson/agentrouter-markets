@@ -2,6 +2,7 @@ import { invokePaidService, searchServices } from "./registry.js";
 import { createConsumerFeedbackRequest, verifyServiceResult } from "./verifier.js";
 import { createPaymentQuote } from "./payment-adapter.js";
 import { createEvidenceEnvelope } from "./evidence.js";
+import { anchorEvidenceOnArc } from "./arc-anchor.js";
 import { summarizeHealth, summarizeProvenance, summarizeTrust } from "./store.js";
 import { writePersistentServiceEvent } from "./persistence.js";
 
@@ -13,6 +14,34 @@ export const ROUTER_STATUSES = {
 };
 
 const CAPABILITY_ALIASES = [
+  {
+    capability: "token_price",
+    capabilities: ["token_price", "crypto_price", "market_data", "token_data", "data_service"],
+    keywords: ["price", "价格", "行情", "usd", "market data", "token price", "crypto price"],
+    agent_description: "Use this when the user asks for a token or crypto asset price.",
+    not_for: ["wallet holdings", "smart-money flows"],
+    input_schema: {
+      type: "object",
+      required: ["ids", "vs_currencies"],
+      properties: {
+        ids: { type: "string" },
+        vs_currencies: { type: "string" }
+      }
+    },
+    examples: [
+      {
+        user_query: "用 AgentRouter 查询 BTC 当前美元价格",
+        request: {
+          capability: "token_price",
+          params: { ids: "bitcoin", vs_currencies: "usd" }
+        }
+      }
+    ],
+    defaultInput: (intent) => ({
+      ids: coinGeckoIdForAsset(intent.asset) || "bitcoin",
+      vs_currencies: "usd"
+    })
+  },
   {
     capability: "perp_liquidation_max_pain",
     capabilities: ["perp_liquidation_max_pain", "liquidation_heatmap", "perp_liquidation", "crypto_derivatives"],
@@ -403,6 +432,7 @@ export async function routeCapabilityRequest(store, {
     feedback: invocation.body.feedback,
     verification
   });
+  evidence.arc_anchor = await anchorEvidenceOnArc(evidence);
   store.evidenceEvents.push(evidence);
   writePersistentServiceEvent({
     eventType: "evidence",
@@ -684,6 +714,7 @@ function capabilityRequirements(capability) {
 }
 
 function buildSearchQuery(intent) {
+  if (intent.capability === "token_price") return `${intent.asset || "bitcoin"} price usd market data`;
   if (intent.capability === "perp_liquidation_max_pain") return `${intent.asset || "BTC"} liquidation max pain`;
   if (intent.capability === "options_max_pain") return `${intent.asset || "BTC"} options max pain`;
   if (intent.capability === "onchain_fund_flow") return `${intent.chain || ""} fund flow`;
@@ -1234,8 +1265,23 @@ function ambiguityNotesFor(capability) {
 }
 
 function detectAsset(text) {
+  if (/\bbitcoin\b/i.test(text)) return "BTC";
+  if (/\bethereum\b/i.test(text)) return "ETH";
   const match = text.match(/\b(btc|eth|sol|bnb|xrp|doge)\b/i);
   return match ? match[1].toUpperCase() : undefined;
+}
+
+function coinGeckoIdForAsset(asset) {
+  const normalized = String(asset || "").toUpperCase();
+  const ids = {
+    BTC: "bitcoin",
+    ETH: "ethereum",
+    SOL: "solana",
+    BNB: "binancecoin",
+    XRP: "ripple",
+    DOGE: "dogecoin"
+  };
+  return ids[normalized] || null;
 }
 
 function detectChain(text) {

@@ -4,7 +4,7 @@ import { createHostedHttpProviderConfig, createStaticProviderConfig, deleteProvi
 import { findDuplicateService, registerService, unregisterService, validateService } from "./registry.js";
 import { publicServiceRecord } from "./store.js";
 
-export async function createProviderFromStudio(body, store, baseUrl) {
+export async function createProviderFromStudio(body, store, baseUrl, { user = null, ownerKey = "" } = {}) {
   const serviceId = normalizeId(body.service_id, body.title, "service");
   const providerId = normalizeId(body.provider_id, body.provider_name || body.title, "provider");
   const normalizedBody = {
@@ -40,6 +40,7 @@ export async function createProviderFromStudio(body, store, baseUrl) {
       ...common,
       liveData: parseMaybeJson(normalizedBody.live_data, "live_data")
     });
+  applyOwnerMetadata(config.manifest, { user, ownerKey });
 
   const duplicate = findDuplicateService(store, config.manifest);
   if (duplicate) {
@@ -82,6 +83,22 @@ export async function createProviderFromStudio(body, store, baseUrl) {
   };
 }
 
+function applyOwnerMetadata(manifest, { user = null, ownerKey = "" } = {}) {
+  if (!ownerKey) return;
+  manifest.registration = {
+    ...(manifest.registration || {}),
+    owner: {
+      user_key: ownerKey,
+      provider: user?.provider || "",
+      user_id: user?.id || "",
+      handle: user?.handle || "",
+      email: user?.email || "",
+      name: user?.name || "",
+      created_at: new Date().toISOString()
+    }
+  };
+}
+
 function validateStudioInput(body, store) {
   const errors = [];
   const required = ["title", "description_for_agent", "price", "sample_request", "sample_data", "summary"];
@@ -108,8 +125,9 @@ function validateStudioInput(body, store) {
   }
 }
 
-export function studioHtml({ draft, loadedService } = {}) {
+export function studioHtml({ draft, loadedService, auth = {} } = {}) {
   const formDefaults = defaultsFromDraft(draft);
+  const user = auth.user || null;
   const loadedNotice = loadedService ? `<div class="notice success">Loaded published service <strong>${html(loadedService.service_id)}</strong>. Edit the Arc payout wallet below, then use <strong>Update payout wallet</strong>. Publishing is only for new services.</div>` : "";
   return `<!doctype html>
 <html lang="en">
@@ -145,11 +163,17 @@ export function studioHtml({ draft, loadedService } = {}) {
     html, body { overflow-x: clip; }
     body { margin: 0; font-family: var(--font-body); background: var(--color-bg); color: var(--color-ink); }
     a { color: inherit; text-decoration: none; }
-    header { border-bottom: 1px solid var(--color-line); background: #fff; }
-    .topbar { height: 68px; max-width: 1520px; margin: 0 auto; display: grid; grid-template-columns: 240px minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 0 24px; border-top: 4px solid var(--color-accent-cool); }
-    .brand { display: flex; align-items: center; gap: 10px; font-weight: 820; line-height: 1.05; }
-    .mark { width: 35px; height: 35px; border: 1px solid var(--color-line); border-radius: 0; display: grid; place-items: center; background: #fff; color: var(--color-ink); font-family: var(--font-mono); font-size: 13px; }
-    .nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 22px; color: #5f5f5f; font-size: 12px; font-weight: 720; text-transform: uppercase; }
+    header { border-bottom: 1px solid var(--color-line); border-top: 3px solid var(--color-accent-cool); background: rgba(255,255,255,.98); }
+    .topbar { height: 76px; max-width: none; margin: 0; display: grid; grid-template-columns: minmax(190px, 1fr) auto minmax(190px, 1fr); align-items: center; gap: 28px; padding: 0 32px; }
+    .brand { display: flex; align-items: center; justify-self: start; gap: 12px; color: var(--color-ink); font-weight: 840; line-height: 1.05; font-size: 20px; }
+    .brand-icon { width: 48px; height: 42px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
+    .brand-icon img { width: 44px; height: 38px; object-fit: contain; display: block; }
+    .brand-word { font-size: 24px; font-weight: 850; line-height: 1; letter-spacing: 0; }
+    .nav-links { display: flex; align-items: center; justify-content: center; gap: 32px; color: #636867; font-size: 16px; font-weight: 620; text-transform: none; }
+    .nav-links a:hover, .nav-links a:focus-visible { color: var(--color-ink); outline: 0; }
+    .auth-link { justify-self: end; min-height: 42px; border: 1px solid var(--color-line); border-radius: 14px; padding: 0 22px; display: inline-flex; align-items: center; justify-content: center; color: var(--color-ink); background: #fff; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 800; text-transform: uppercase; }
+    .auth-link:hover, .auth-link:focus-visible { border-color: var(--color-strong-line); background: #fbfbfb; outline: 0; }
+    .auth-link.signed-in { text-transform: none; }
     .hero-copy { max-width: 1520px; margin: 0 auto; padding: 54px 24px 34px; display: grid; grid-template-columns: minmax(420px, 0.9fr) minmax(360px, 1.1fr); gap: 34px; align-items: end; position: relative; }
     .hero-copy::before { content:""; position:absolute; top:0; left:0; right:0; height:54px; border-bottom:1px solid #ededed; background-image:radial-gradient(#9c9c9c .8px, transparent .8px); background-size:12px 12px; }
     h1 { margin: 0 0 10px; font-size: 42px; letter-spacing: 0; line-height: 1.05; }
@@ -248,7 +272,12 @@ export function studioHtml({ draft, loadedService } = {}) {
     .step span { color: var(--color-muted); font-size: 12px; line-height: 1.35; display: block; }
     @media (max-width: 980px) {
       main, .hero-copy { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
-      .topbar { grid-template-columns: 1fr; height: auto; min-height: 68px; padding: 10px 16px; }
+      .topbar { grid-template-columns: 1fr auto; height: auto; min-height: 64px; padding: 0 18px; gap: 14px; }
+      .brand { gap: 9px; }
+      .brand-icon { width: 40px; height: 36px; border-radius: 10px; }
+      .brand-icon img { width: 37px; height: 32px; }
+      .brand-word { font-size: 20px; }
+      .auth-link { min-height: 38px; border-radius: 12px; padding: 0 14px; font-size: 12px; max-width: 118px; }
       .output { position: static; }
       .grid, .quick-grid, .hero-points, .step-strip { grid-template-columns: 1fr; }
       .draft-row { grid-template-columns: 28px minmax(0, 1fr); }
@@ -262,13 +291,13 @@ export function studioHtml({ draft, loadedService } = {}) {
 <body>
   <header>
     <div class="topbar">
-      <a class="brand" href="/"><span class="mark">AR</span><span>AgentRouter<br/>Markets</span></a>
+      <a class="brand" href="/" aria-label="AgentRouter home">${brandLogo()}</a>
       <nav class="nav-links" aria-label="Studio navigation">
         <a href="/">Home</a>
         <a href="/agent">Services</a>
-        <a href="/human">Providers</a>
-        <a href="/agent-router/stats">Stats</a>
+        <a href="/human">Provider Studio</a>
       </nav>
+      ${user ? `<a class="auth-link signed-in" href="/auth/login">${html(user.name || user.email || "Account")}</a>` : '<a class="auth-link" href="/auth/login">Login</a>'}
     </div>
     <div class="hero-copy">
       <div>
@@ -295,7 +324,7 @@ export function studioHtml({ draft, loadedService } = {}) {
         ${loadedNotice}
         <div class="quick-grid">
         <label>API / OpenAPI / Skill URL
-          <input name="import_api_url" value="/mock/api" />
+          <input name="import_api_url" value="" />
         </label>
         <label>Method
           <select name="import_method">
@@ -438,10 +467,6 @@ export function studioHtml({ draft, loadedService } = {}) {
           </details>
           <p class="hint">Tokens are encrypted into the local Provider Secret store; manifests only keep a secret reference. Use "auto" to try common auth headers during validation.</p>
         </fieldset>
-      </details>
-      <details>
-        <summary>Demo helper</summary>
-        <button type="button" class="secondary" id="fill-hosted">Load hosted demo</button>
       </details>
     </form>
     <section class="output">
@@ -1290,23 +1315,25 @@ export function studioHtml({ draft, loadedService } = {}) {
     mode.addEventListener("change", syncMode);
     syncMode();
 
-    fillHosted.addEventListener("click", () => {
-      serviceEditor.open = true;
-      setSingleServiceReady(true);
-      mode.value = "hosted-http";
-      serviceIdTouched = false;
-      providerIdTouched = false;
-      titleInput.value = "Studio Hosted Sentiment Demo";
-      providerNameInput.value = "Provider Studio Hosted";
-      descriptionInput.value = "Use this service to fetch sentiment data through a hosted Provider Runtime with a private Provider Secret.";
-      upstreamUrlInput.value = "/mock/upstream/sentiment";
-      secretValueInput.value = "demo-provider-secret";
-      liveDataInput.value = ${JSON.stringify("{\"asset\":\"ETH\",\"sentiment_score\":0.79,\"mentions\":24120,\"source\":\"mock_upstream_sentiment\"}")};
-      syncGeneratedIds();
-      capabilitiesInput.dataset.touched = "true";
-      capabilitiesInput.value = "sentiment_data,hosted_http,demo_data";
-      syncMode();
-    });
+    if (fillHosted) {
+      fillHosted.addEventListener("click", () => {
+        serviceEditor.open = true;
+        setSingleServiceReady(true);
+        mode.value = "hosted-http";
+        serviceIdTouched = false;
+        providerIdTouched = false;
+        titleInput.value = "Hosted Sentiment API";
+        providerNameInput.value = "Provider Studio Hosted";
+        descriptionInput.value = "Use this service to fetch sentiment data through a hosted Provider Runtime with a private Provider Secret.";
+        upstreamUrlInput.value = "";
+        secretValueInput.value = "";
+        liveDataInput.value = ${JSON.stringify("{\"asset\":\"ETH\",\"sentiment_score\":0.79,\"mentions\":24120}")};
+        syncGeneratedIds();
+        capabilitiesInput.dataset.touched = "true";
+        capabilitiesInput.value = "sentiment_data,hosted_http";
+        syncMode();
+      });
+    }
 
     function fillDraftIntoForm(draft) {
       if (!draft) return;
@@ -1630,22 +1657,22 @@ function defaultsFromDraft(draft) {
   return {
     mode: "static-json",
     price: "0.01",
-    title: "Studio Sentiment Demo",
-    providerName: "Provider Studio Demo",
-    description: "Use this service to fetch a demo sentiment dataset through Provider Studio.",
-    capabilities: "sentiment_data,demo_data",
-    serviceId: "studio_sentiment_demo",
-    providerId: "provider_studio_demo",
+    title: "",
+    providerName: "",
+    description: "",
+    capabilities: "",
+    serviceId: "",
+    providerId: "",
     sampleRequest: prettyJson({ asset: "ETH", window: "7d" }),
     sampleData: prettyJson(defaultLiveData),
     liveData: prettyJson(defaultLiveData),
     summary: "ETH community sentiment is positive over the selected window.",
     payoutAddress: "",
-    upstreamUrl: "/mock/upstream/sentiment",
+    upstreamUrl: "",
     upstreamMethod: "POST",
     authHeader: "authorization",
     secretName: "PROVIDER_SECRET",
-    secretValue: "demo-provider-secret"
+    secretValue: ""
   };
 }
 
@@ -1706,6 +1733,13 @@ function shapeForDraft(value) {
 
 function prettyJson(value) {
   return JSON.stringify(value, null, 2);
+}
+
+function brandLogo() {
+  return `
+    <span class="brand-icon" aria-hidden="true"><img src="/assets/brand/logo.png" alt=""></span>
+    <span class="brand-word">AgentRouter</span>
+  `;
 }
 
 function html(value) {

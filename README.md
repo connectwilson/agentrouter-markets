@@ -154,7 +154,7 @@ curl -fsSL -X POST http://127.0.0.1:8787/agent-router/request \
   -d '{"capability":"perp_liquidation_max_pain","params":{"asset":"BTC","market_type":"perpetual_futures","window":"current"},"constraints":{"max_price_usdc":"0.05","freshness_seconds":300}}'
 ```
 
-The returned `evidence` object includes `trace_hash`, `result_hash`, `verification_hash`, payment receipt metadata, and an Arc anchor placeholder. Trust scores are computed offchain from feedback events; evidence and feedback hashes are the audit surface that can be anchored on Arc.
+The returned `evidence` object includes `trace_hash`, `result_hash`, `verification_hash`, payment receipt metadata, and an Arc hash anchor. Full evidence remains offchain; Arc stores the integrity/timestamp trail through `contracts/AgentRouterEvidenceAnchor.sol` when `ADN_ARC_ANCHOR_CONTRACT` and `ADN_ARC_ANCHOR_PRIVATE_KEY` are configured.
 
 ## Alice Wallet
 
@@ -211,6 +211,44 @@ Implemented guardrails:
 - `adn wallet lock` disables automatic signing
 - wallet payment log records challenge nonce and payment target
 
+### Arc Evidence and ERC-8004 Trust
+
+After a paid call, AgentRouter records:
+
+- evidence trace hash, result hash, verification hash, and payment tx hash
+- deterministic verification metadata
+- consumer-agent feedback
+- ERC-8004 Reputation Registry feedback when configured
+
+The custom Arc evidence anchor keeps the full call trace auditable without putting raw API data onchain. ERC-8004 provides the standard reputation surface for provider/service trust.
+
+Each published service can expose an ERC-8004 Agent Registration File and register an onchain identity:
+
+```bash
+curl -fsSL -X POST http://127.0.0.1:8800/services/chain_fund_flow_7d_base/erc8004/register \
+  -H "content-type: application/json" \
+  -d '{}'
+```
+
+Agent metadata is served at:
+
+```text
+/.well-known/erc8004/agents/:service_id.json
+```
+
+Useful server config:
+
+```bash
+ADN_ARC_ANCHOR_CONTRACT=0x...
+ADN_ARC_ANCHOR_PRIVATE_KEY=0x...
+ADN_ERC8004_OWNER_PRIVATE_KEY=0x...
+ADN_ERC8004_PRIVATE_KEY=0x...
+ADN_ERC8004_AGENT_ID=1001
+ADN_ERC8004_METADATA_BASE_URL=https://agentrouter-markets.onrender.com
+ADN_ERC8004_IDENTITY_REGISTRY=0x8004A818BFB912233c491871b3d84c89A494BD9e
+ADN_ERC8004_REPUTATION_REGISTRY=0x8004B663056A597Dffe9eCcC1965A193B7388713
+```
+
 Useful commands:
 
 ```bash
@@ -265,13 +303,79 @@ Quote a route before paying:
 node bin/agent-router.js quote '{"capability":"perp_liquidation_max_pain","params":{"asset":"BTC","market_type":"perpetual_futures","window":"current"},"constraints":{"max_price_usdc":"0.05"}}'
 ```
 
-## Claude MCP Integration
+## Login / OAuth
 
-Hosted Claude environments may block outbound access to temporary tunnels or some platform domains. The preferred integration is a local MCP server: Claude calls the MCP tool locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
+The website header includes a `Login` entry. GitHub and Google OAuth are enabled when the matching environment variables are present:
 
-### No-Command Claude Desktop Install
+```bash
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
 
-Claude Desktop users should install the packaged extension:
+Register these callback URLs with the providers:
+
+```text
+http://127.0.0.1:8800/auth/github/callback
+http://127.0.0.1:8800/auth/google/callback
+https://agentrouter-markets.onrender.com/auth/github/callback
+https://agentrouter-markets.onrender.com/auth/google/callback
+```
+
+OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
+
+## Universal MCP Integration
+
+The preferred integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
+
+Run the server with npx:
+
+```bash
+npx -y @agentrouter/mcp
+```
+
+Most AI clients configure MCP like this:
+
+```json
+{
+  "mcpServers": {
+    "AgentRouter": {
+      "command": "npx",
+      "args": ["-y", "@agentrouter/mcp"],
+      "env": {
+        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
+        "AGENT_ROUTER_MAX_PRICE": "0.05"
+      }
+    }
+  }
+}
+```
+
+For a local AgentRouter server:
+
+```bash
+PORT=8800 npm start
+```
+
+```json
+{
+  "mcpServers": {
+    "AgentRouter": {
+      "command": "npx",
+      "args": ["-y", "@agentrouter/mcp"],
+      "env": {
+        "AGENT_ROUTER_URL": "http://127.0.0.1:8800",
+        "AGENT_ROUTER_MAX_PRICE": "0.05"
+      }
+    }
+  }
+}
+```
+
+### Optional Claude Desktop Extension
+
+Claude Desktop users can also install the packaged extension:
 
 ```text
 /Users/huazhenghao/Downloads/Arc/agentrouter.mcpb
@@ -300,23 +404,6 @@ Validate the extension manifest:
 
 ```bash
 mcpb validate mcpb/agentrouter
-```
-
-Register the MCP server with Claude:
-
-```bash
-claude mcp add AgentRouter \
-  -e AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com \
-  -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js
-```
-
-If you are using a local AgentRouter server instead:
-
-```bash
-PORT=8800 npm start
-claude mcp add AgentRouter \
-  -e AGENT_ROUTER_URL=http://127.0.0.1:8800 \
-  -- node /Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js
 ```
 
 The MCP server exposes:
@@ -412,7 +499,7 @@ Production x402 integration should replace:
 - buyer-side `createWalletPaymentProof` with an official x402 exact EVM client payment authorization where a facilitator supports the target chain
 - seller-side `verifyDevPaymentProof` with facilitator `/verify` and `/settle`
 - demo payment requirements with official x402 payment requirements
-- fake tx hashes with real settlement hashes; `circle_arc` already supports a direct Arc Testnet USDC transfer proof path for local-wallet calls
+- local mock anchors with real `EvidenceAnchored` and `FeedbackAnchored` events on Arc Testnet; `circle_arc` already supports a direct Arc Testnet USDC transfer proof path for local-wallet calls
 
 Relevant runtime configuration:
 
@@ -421,6 +508,8 @@ ADN_PAYMENT_BACKEND=dev
 ADN_PAYMENT_BACKEND=circle_arc
 ADN_ARC_RPC_URL=https://rpc.testnet.arc.network
 ADN_PROVIDER_RECEIVE_ADDRESS=0x...
+ADN_ARC_ANCHOR_CONTRACT=0x...
+ADN_ARC_ANCHOR_PRIVATE_KEY=0x...
 ADN_X402_FACILITATOR_URL=https://x402.org/facilitator
 ```
 
