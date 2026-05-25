@@ -28,7 +28,21 @@ export function normalizeEndpoint(endpoint, baseUrl) {
 }
 
 export function getRequestBaseUrl(req) {
-  return `http://${req.headers.host || "127.0.0.1"}`;
+  const configured = process.env.AGENT_ROUTER_PUBLIC_URL || process.env.ADN_PUBLIC_BASE_URL;
+  if (configured) return String(configured).replace(/\/$/, "");
+  const host = firstHeader(req, "x-forwarded-host")
+    || firstHeader(req, "host")
+    || process.env.RENDER_EXTERNAL_HOSTNAME
+    || "127.0.0.1";
+  const protocol = firstHeader(req, "x-forwarded-proto")
+    || (process.env.RENDER_EXTERNAL_HOSTNAME ? "https" : "http");
+  return `${protocol}://${host}`;
+}
+
+function firstHeader(req, name) {
+  const value = req.headers?.[name];
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw || "").split(",")[0].trim();
 }
 
 export function parseCapabilities(value) {

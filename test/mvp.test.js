@@ -28,7 +28,7 @@ const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js")
 const { initSessionWallet, readWallet } = await import("../src/wallet.js");
 const { createArcPaymentProof } = await import("../src/payment.js");
 const { sendArcUsdcTransfer } = await import("../src/arc-payment.js");
-const { normalizeEndpoint } = await import("../src/http-utils.js");
+const { getRequestBaseUrl, normalizeEndpoint } = await import("../src/http-utils.js");
 const { createMemoryStore } = await import("../src/store.js");
 const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
@@ -396,6 +396,17 @@ test("custom provider manifests rebind to the current public runtime URL", () =>
   };
   const rebound = withCurrentRuntimeEndpoint(manifest, "https://agentrouter-markets.onrender.com");
   assert.equal(rebound.endpoint.url, "https://agentrouter-markets.onrender.com/provider/custom/example_custom");
+});
+
+test("request base URL honors forwarded HTTPS headers for OAuth redirects", () => {
+  const baseUrl = getRequestBaseUrl({
+    headers: {
+      host: "internal-render-host",
+      "x-forwarded-host": "agentrouter-markets.onrender.com",
+      "x-forwarded-proto": "https"
+    }
+  });
+  assert.equal(baseUrl, "https://agentrouter-markets.onrender.com");
 });
 
 test("AgentRouter HTTP endpoint routes and invokes BTC liquidation task", async () => {
