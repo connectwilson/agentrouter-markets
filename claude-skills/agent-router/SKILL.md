@@ -66,8 +66,9 @@ When the user asks to install AgentRouter or gives this GitHub skill link:
 1. Check whether `agentrouter_ask`, `agentrouter_quote`, or `agentrouter_capabilities` tools are already available. If yes, say AgentRouter is ready and run the user's request.
 2. Detect the current client if possible: Claude Desktop, Claude Code, Cursor, Windsurf, Cline, Continue, VS Code, ChatGPT, Codex, or unknown.
 3. Pick the least-friction install path:
+   - Claude Code with skill installer support: use `npx skills add connectwilson/agentrouter-skill --skill AgentRouter`.
    - Claude Desktop: prefer installing the packaged extension `agentrouter.mcpb` if the user has it.
-   - npm/npx-capable MCP client: use `npx -y @agentrouter/mcp` once the package is published.
+   - npm/npx-capable MCP client: use the GitHub package fallback `npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp` until `@agentrouter/mcp` is published.
    - Remote MCP-capable client: add `https://agentrouter-markets.onrender.com/mcp` if remote MCP is supported by that client.
    - Local MCP-capable desktop client: install the local MCP bridge command below.
    - Claude Desktop extension-capable client: install the AgentRouter `.mcpb` package if provided by the user or release page.
@@ -110,7 +111,8 @@ After MCP is installed, the local AgentRouter bridge automatically creates a loc
 
 Use this guidance only when installation is needed.
 
-- Claude Desktop / Claude Code: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`. For Arc settlement, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
+- Claude Code: if the user is installing the skill, run `npx skills add connectwilson/agentrouter-skill --skill AgentRouter`. After the skill is installed, connect MCP only if the user wants live tool calls from the local client.
+- Claude Desktop / Claude Code MCP: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`. For Arc settlement, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
 - Claude Desktop no-command path: ask the user to install `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` through Settings -> Extensions -> Install Extension, then use `agentrouter_request`.
 - Cursor / Windsurf / Cline / Continue / VS Code: add an MCP server named `AgentRouter` with command `node`, args `["/Users/huazhenghao/Downloads/Arc/bin/agent-router-mcp.js"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.
 - Cross-client npm path after package publication: add an MCP server named `AgentRouter` with command `npx`, args `["-y", "@agentrouter/mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com`.

@@ -321,15 +321,27 @@ https://agentrouter-markets.onrender.com/auth/github/callback
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
 
+## Claude Code Skill Install
+
+The easiest Claude Code entrypoint is the AgentRouter Skill. Paste this into Claude Code chat or run it in a terminal:
+
+```bash
+npx skills add connectwilson/agentrouter-skill --skill AgentRouter
+```
+
+The skill teaches Claude when to use AgentRouter, how to route data requests, and how to connect the MCP router when the current client supports MCP.
+
 ## Universal MCP Integration
 
-The preferred integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
+The runtime integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
 
-Run the server with npx:
+Run the MCP server with npx:
 
 ```bash
 npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp
 ```
+
+Run this MCP command in a terminal or put the command/args into an MCP client config. For Claude Code chat-style installation, use the Skill install command above.
 
 Most AI clients configure MCP like this:
 

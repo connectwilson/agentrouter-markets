@@ -1,4 +1,4 @@
-const installCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
+const installCommand = "npx skills add connectwilson/agentrouter-skill --skill AgentRouter";
 const localInstallConfig = `{
   "mcpServers": {
     "AgentRouter": {
@@ -38,14 +38,14 @@ export function homeHtml({ auth = {} } = {}) {
           <div class="install-strip" aria-label="AgentRouter install command">
             <div class="install-top">
               <span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="install-label">install</span>
+              <span class="install-label">paste into claude code</span>
             </div>
             <div class="install-command">
               <code id="home-install-command"><span class="prompt">$</span> ${html(installCommand)}</code>
               <button type="button" id="home-copy-install">Copy</button>
             </div>
           </div>
-          <p class="install-note">No API key. No sign-up. Works immediately.</p>
+          <p class="install-note">Installs the AgentRouter Skill first, then Claude can connect the MCP router when the client supports it.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">
