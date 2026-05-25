@@ -326,7 +326,7 @@ OAuth is for user identity only. Provider-owned API credentials still belong in 
 The easiest Claude Code entrypoint is the AgentRouter Skill. Paste this into Claude Code chat or run it in a terminal:
 
 ```bash
-npx skills add connectwilson/agentrouter-skill --skill AgentRouter
+npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy
 ```
 
 The skill teaches Claude when to use AgentRouter, how to route data requests, and how to connect the MCP router when the current client supports MCP.

@@ -1,4 +1,4 @@
-const installCommand = "npx skills add connectwilson/agentrouter-skill --skill AgentRouter";
+const installCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy";
 const localInstallConfig = `{
   "mcpServers": {
     "AgentRouter": {
