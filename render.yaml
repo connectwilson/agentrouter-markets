@@ -17,3 +17,9 @@ services:
         sync: false
       - key: ADN_PROVIDER_SECRET_PASSPHRASE
         sync: false
+      - key: ADN_ARC_RPC_URL
+        value: https://rpc.testnet.arc.network
+      - key: ADN_ARC_ANCHOR_CONTRACT
+        value: 0x65274c73f39bf1654f9aaf261ea16d0b08fdb8d0
+      - key: ADN_ARC_ANCHOR_PRIVATE_KEY
+        sync: false
