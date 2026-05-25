@@ -1,9 +1,9 @@
-const installCommand = "npx -y @agentrouter/mcp";
+const installCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{
   "mcpServers": {
     "AgentRouter": {
       "command": "npx",
-      "args": ["-y", "@agentrouter/mcp"],
+      "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
         "AGENT_ROUTER_URL": "http://127.0.0.1:8800",
         "AGENT_ROUTER_MAX_PRICE": "0.05"

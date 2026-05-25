@@ -12,6 +12,12 @@ Run with npx:
 npx -y @agentrouter/mcp
 ```
 
+Before the npm package is published, use the GitHub package form:
+
+```bash
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp
+```
+
 Most AI clients configure MCP like this:
 
 ```json

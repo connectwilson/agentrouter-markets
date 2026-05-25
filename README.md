@@ -328,7 +328,7 @@ The preferred integration is a universal MCP server: any MCP-capable AI client c
 Run the server with npx:
 
 ```bash
-npx -y @agentrouter/mcp
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp
 ```
 
 Most AI clients configure MCP like this:
@@ -338,7 +338,7 @@ Most AI clients configure MCP like this:
   "mcpServers": {
     "AgentRouter": {
       "command": "npx",
-      "args": ["-y", "@agentrouter/mcp"],
+      "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
         "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
@@ -359,7 +359,7 @@ PORT=8800 npm start
   "mcpServers": {
     "AgentRouter": {
       "command": "npx",
-      "args": ["-y", "@agentrouter/mcp"],
+      "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
         "AGENT_ROUTER_URL": "http://127.0.0.1:8800",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
@@ -425,6 +425,12 @@ Target package name:
 @agentrouter/mcp
 ```
 
+Until `@agentrouter/mcp` is published to npm, use the GitHub npx package form:
+
+```bash
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp
+```
+
 MCP config:
 
 ```json
@@ -432,7 +438,7 @@ MCP config:
   "mcpServers": {
     "AgentRouter": {
       "command": "npx",
-      "args": ["-y", "@agentrouter/mcp"],
+      "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
         "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
