@@ -551,8 +551,7 @@ export function agentHtml({ auth = {} } = {}) {
             sort: document.getElementById("sort-services").value,
             category: activeCategory,
             limit: String(pageSize),
-            offset: String(currentPage * pageSize),
-            verified_only: "true"
+            offset: String(currentPage * pageSize)
           });
           document.getElementById("agent-result-count").textContent = "Loading services...";
           try {
