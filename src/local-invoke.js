@@ -5,13 +5,13 @@ import { createSettlementReceipt, currentPaymentBackend } from "./payment-adapte
 import { invokeWithRealX402, isRealX402Enabled } from "./real-x402-client.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
 
-export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, input = {}, budget = { max_amount: "0.05", currency: "USDC" } }) {
+export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, input = {}, budget = { max_amount: "0.05", currency: "USDC" }, request = null }) {
   const manifest = await postJson(baseUrl, "/connector/get_manifest", { service_id: serviceId });
   if (budget.max_amount != null && Number(manifest.pricing.amount) > Number(budget.max_amount)) {
     throw new Error(`Service costs ${manifest.pricing.amount} ${manifest.pricing.currency}, above budget ${budget.max_amount} ${budget.currency}.`);
   }
   if (isRealX402Enabled()) {
-    return invokeOfficialX402Service({ baseUrl, manifest, serviceId, input });
+    return invokeOfficialX402Service({ baseUrl, manifest, serviceId, input, request });
   }
   if (currentPaymentBackend() !== "circle_arc") {
     throw new Error("Local paid invocation requires ADN_PAYMENT_BACKEND=circle_arc or official x402 configuration.");
@@ -124,7 +124,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     feedback,
     localPayment: event,
     budget,
-    request: {
+    request: request || {
       capability: "direct_service_invocation",
       params: input,
       constraints: {
@@ -136,6 +136,9 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
       }
     }
   });
+  if (!result?.request_id && evidenceRecording?.request_id) {
+    result.request_id = evidenceRecording.request_id;
+  }
 
   return {
     result,
@@ -145,7 +148,7 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
   };
 }
 
-async function invokeOfficialX402Service({ baseUrl, manifest, serviceId, input }) {
+async function invokeOfficialX402Service({ baseUrl, manifest, serviceId, input, request = null }) {
   const wallet = await readWallet();
   const started = Date.now();
   const body = methodAllowsBody(manifest.endpoint.method) ? JSON.stringify(input) : undefined;
@@ -204,7 +207,7 @@ async function invokeOfficialX402Service({ baseUrl, manifest, serviceId, input }
     feedback,
     localPayment: event,
     budget: { max_amount: manifest.pricing.amount, currency: manifest.pricing.currency },
-    request: {
+    request: request || {
       capability: "direct_service_invocation",
       params: input,
       constraints: {
@@ -217,6 +220,9 @@ async function invokeOfficialX402Service({ baseUrl, manifest, serviceId, input }
       }
     }
   });
+  if (!result?.request_id && evidenceRecording?.request_id) {
+    result.request_id = evidenceRecording.request_id;
+  }
   return {
     result,
     local_payment: event,

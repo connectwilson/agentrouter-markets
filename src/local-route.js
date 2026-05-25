@@ -16,6 +16,15 @@ export async function routeTaskWithLocalWallet({ baseUrl, task, constraints = {}
     budget: {
       max_amount: constraints.max_price_usdc || budget.max_amount || "0.05",
       currency: budget.currency || "USDC"
+    },
+    request: {
+      capability: resolved.intent?.capability || "natural_language_route",
+      params: resolved.intent || { task },
+      constraints,
+      consumer_context: {
+        source: "agentrouter_mcp_local_wallet",
+        task
+      }
     }
   });
   const manifest = await connector.getManifest(resolved.selected_service.service_id);

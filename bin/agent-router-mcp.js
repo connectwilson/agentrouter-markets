@@ -389,9 +389,32 @@ async function submitFeedbackWithLocalWallet(args) {
 }
 
 async function requestWithLocalWallet(args) {
+  const originalParams = args.params || {};
+  let params = originalParams;
+  let tokenResolution = null;
+  try {
+    tokenResolution = await resolveTokenForLocalWalletRequest({
+      capability: args.capability,
+      params,
+      constraints: args.constraints || {},
+      budget: args.budget || {},
+      consumerContext: args.consumer_context || {}
+    });
+    if (tokenResolution?.ok && tokenResolution.intent) {
+      params = tokenResolution.intent;
+    } else if (tokenResolution && tokenResolution.ok === false) {
+      return tokenResolution;
+    }
+  } catch (error) {
+    if (error.code === "WALLET_INSUFFICIENT_ARC_USDC") {
+      return fundingRequiredResponse({ error, selectedService: tokenResolution?.resolver_service || null, quote: null });
+    }
+    throw error;
+  }
+
   const quote = await post("/agent-router/quote", {
     capability: args.capability,
-    params: args.params || {},
+    params,
     constraints: args.constraints || {},
     budget: args.budget || {},
     consumer_context: args.consumer_context || {}
@@ -406,38 +429,26 @@ async function requestWithLocalWallet(args) {
       budget: {
         max_amount: args.constraints?.max_price_usdc || args.budget?.max_amount || "0.05",
         currency: args.budget?.currency || "USDC"
+      },
+      request: {
+        capability: args.capability,
+        params,
+        constraints: quote.request?.constraints || args.constraints || {},
+        consumer_context: {
+          ...(args.consumer_context || {}),
+          source: "agentrouter_mcp_local_wallet",
+          token_resolution: tokenResolution ? {
+            status: tokenResolution.status,
+            token_symbol: tokenResolution.token_symbol,
+            token_address: tokenResolution.token_address,
+            chain: tokenResolution.chain
+          } : null
+        }
       }
     });
   } catch (error) {
     if (error.code === "WALLET_INSUFFICIENT_ARC_USDC") {
-      return {
-        ok: false,
-        status: error.status || "wallet_needs_funding",
-        action_required: "fund_local_agentrouter_wallet",
-        final_answer_available: false,
-        data_returned: false,
-        do_not_use_cached_or_previous_results: true,
-        stop_reason: "The selected paid provider requires Arc Testnet USDC before returning fresh data. AgentRouter did not receive the requested paid result.",
-        message: error.message,
-        selected_service: quote.selected_service,
-        quote: quote.quote,
-        wallet: error.wallet,
-        funding_instruction: {
-          instruction_version: "agentrouter_funding_instruction_v1",
-          network: "Arc Testnet",
-          chain_id: error.wallet?.chain_id,
-          token: error.wallet?.asset || "USDC",
-          token_address: error.wallet?.token_address,
-          wallet_address: error.wallet?.address,
-          current_balance: error.wallet?.balance,
-          required_amount: error.wallet?.required,
-          minimum_top_up: error.wallet?.required,
-          rpc_url: "https://rpc.testnet.arc.network",
-          after_funding: "Retry the same agentrouter_request. Do not answer this data question from cached data."
-        },
-        user_message: `AgentRouter needs funding before it can fetch fresh paid data. Send at least ${error.wallet?.required || "0.01"} Arc Testnet USDC to ${error.wallet?.address} on Arc Testnet, then retry the same request.`,
-        next_step: "Show the funding_instruction to the user and stop. Do not answer with old validation samples, cached provider results, web search, or unrelated data."
-      };
+      return fundingRequiredResponse({ error, selectedService: quote.selected_service, quote: quote.quote });
     }
     throw error;
   }
@@ -446,14 +457,218 @@ async function requestWithLocalWallet(args) {
     status: "paid_with_local_wallet",
     request: quote.request,
     selected_service: quote.selected_service,
+    token_resolution: publicTokenResolution(tokenResolution),
     input: quote.input,
     quote: quote.quote,
     result: invocation.result,
     feedback: invocation.feedback,
     local_payment: invocation.local_payment,
     evidence_recording: invocation.evidence_recording,
-    consumer_feedback_request: invocation.evidence_recording?.consumer_feedback_request || null
+    consumer_feedback_request: invocation.evidence_recording?.consumer_feedback_request || null,
+    feedback_required: Boolean(invocation.evidence_recording?.consumer_feedback_request),
+    next_required_action: invocation.evidence_recording?.consumer_feedback_request
+      ? "After using this result in the final answer, call agentrouter_feedback with this request_id."
+      : null
   };
+}
+
+async function resolveTokenForLocalWalletRequest({ capability, params, constraints, budget, consumerContext }) {
+  if (capability !== "token_smart_money_activity") return null;
+  if (params.token_address) return null;
+  const tokenSymbol = params.token_symbol || params.asset;
+  if (!tokenSymbol) {
+    return {
+      ok: false,
+      status: "token_symbol_required",
+      message: "token_smart_money_activity requires token_symbol or token_address."
+    };
+  }
+
+  const maxPrice = constraints.max_price_usdc || budget.max_amount || "0.05";
+  const services = await post("/connector/search_services", {
+    query: "token search",
+    verified_only: true,
+    max_price: maxPrice
+  });
+  if (!Array.isArray(services)) {
+    return {
+      ok: false,
+      status: "token_resolver_search_failed",
+      token_symbol: tokenSymbol,
+      search_response: services
+    };
+  }
+
+  const resolver = services
+    .map((service) => ({ service, score: tokenResolverScore(service) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.service;
+  if (!resolver) {
+    return {
+      ok: false,
+      status: "token_resolver_not_found",
+      token_symbol: tokenSymbol,
+      message: "No verified token resolver service is registered."
+    };
+  }
+
+  const chain = normalizeProviderChain(params.chain || "ethereum");
+  const resolverInput = {
+    search_query: tokenSymbol,
+    result_type: "token",
+    chain,
+    limit: 5
+  };
+  const invocation = await invokePaidServiceWithLocalWallet({
+    baseUrl,
+    serviceId: resolver.service_id,
+    input: resolverInput,
+    budget: {
+      max_amount: maxPrice,
+      currency: budget.currency || "USDC"
+    },
+    request: {
+      capability: "token_resolution",
+      params: resolverInput,
+      constraints: {
+        max_price_usdc: maxPrice,
+        currency: budget.currency || "USDC"
+      },
+      consumer_context: {
+        ...consumerContext,
+        source: "agentrouter_mcp_local_wallet",
+        parent_capability: capability
+      }
+    }
+  });
+  const match = findTokenMatch(invocation.result?.data, { tokenSymbol, chain });
+  if (!match?.address) {
+    return {
+      ok: false,
+      status: "token_not_found",
+      token_symbol: tokenSymbol,
+      resolver_service_id: resolver.service_id,
+      resolver_input: resolverInput,
+      message: "Token resolver did not return a matching contract address."
+    };
+  }
+
+  return {
+    ok: true,
+    status: "resolved",
+    token_symbol: tokenSymbol,
+    token_address: match.address,
+    chain: match.chain || chain,
+    matched_name: match.name || null,
+    matched_symbol: match.symbol || null,
+    resolver_service_id: resolver.service_id,
+    resolver_input: resolverInput,
+    resolver_evidence_recording: invocation.evidence_recording,
+    resolver_service: resolver,
+    intent: {
+      ...params,
+      token_symbol: tokenSymbol,
+      token_address: match.address,
+      chain: match.chain || chain
+    }
+  };
+}
+
+function fundingRequiredResponse({ error, selectedService, quote }) {
+  return {
+    ok: false,
+    status: error.status || "wallet_needs_funding",
+    action_required: "fund_local_agentrouter_wallet",
+    final_answer_available: false,
+    data_returned: false,
+    do_not_use_cached_or_previous_results: true,
+    stop_reason: "The selected paid provider requires Arc Testnet USDC before returning fresh data. AgentRouter did not receive the requested paid result.",
+    message: error.message,
+    selected_service: selectedService,
+    quote,
+    wallet: error.wallet,
+    funding_instruction: {
+      instruction_version: "agentrouter_funding_instruction_v1",
+      network: "Arc Testnet",
+      chain_id: error.wallet?.chain_id,
+      token: error.wallet?.asset || "USDC",
+      token_address: error.wallet?.token_address,
+      wallet_address: error.wallet?.address,
+      current_balance: error.wallet?.balance,
+      required_amount: error.wallet?.required,
+      minimum_top_up: error.wallet?.required,
+      rpc_url: "https://rpc.testnet.arc.network",
+      after_funding: "Retry the same agentrouter_request. Do not answer this data question from cached data."
+    },
+    user_message: `AgentRouter needs funding before it can fetch fresh paid data. Send at least ${error.wallet?.required || "0.01"} Arc Testnet USDC to ${error.wallet?.address} on Arc Testnet, then retry the same request.`,
+    next_step: "Show the funding_instruction to the user and stop. Do not answer with old validation samples, cached provider results, web search, or unrelated data."
+  };
+}
+
+function publicTokenResolution(tokenResolution) {
+  if (!tokenResolution) return null;
+  return {
+    ok: tokenResolution.ok,
+    status: tokenResolution.status,
+    token_symbol: tokenResolution.token_symbol,
+    token_address: tokenResolution.token_address,
+    chain: tokenResolution.chain,
+    matched_name: tokenResolution.matched_name || null,
+    matched_symbol: tokenResolution.matched_symbol || null,
+    resolver_request_id: tokenResolution.resolver_evidence_recording?.request_id || null,
+    resolver_input: tokenResolution.resolver_input || null
+  };
+}
+
+function tokenResolverScore(service) {
+  const text = [
+    service.service_id,
+    service.title,
+    service.description_for_agent,
+    ...(service.capabilities || [])
+  ].join(" ").toLowerCase();
+  let score = 0;
+  if (/token[_\s-]?search|entity[_\s-]?search|token[_\s-]?resolver|resolve.*token/.test(text)) score += 8;
+  if (/token[_\s-]?metadata|contract[_\s-]?address|token[_\s-]?address/.test(text)) score += 4;
+  if ((service.capabilities || []).some((capability) => /token_search|entity_search|token_metadata/.test(capability))) score += 8;
+  if ((service.capabilities || []).some((capability) => /news|article|rss|macro|etf/.test(capability))) score -= 8;
+  if (/news|article|rss|search articles/.test(text)) score -= 8;
+  return score;
+}
+
+function findTokenMatch(data, { tokenSymbol, chain }) {
+  const rows = flattenObjects(data);
+  const normalized = String(tokenSymbol || "").toLowerCase();
+  const chainNormalized = String(chain || "").toLowerCase();
+  const candidates = rows.map((row) => ({
+    address: row.token_address || row.contract_address || row.contractAddress || row.address,
+    symbol: row.symbol || row.token_symbol || row.ticker,
+    name: row.name || row.token_name,
+    chain: row.chain || row.network || row.blockchain
+  })).filter((row) => /^0x[a-fA-F0-9]{40}$/.test(String(row.address || "")));
+  return candidates.find((row) =>
+    String(row.symbol || "").toLowerCase() === normalized &&
+    (!row.chain || !chainNormalized || String(row.chain).toLowerCase() === chainNormalized)
+  ) || candidates.find((row) => String(row.symbol || "").toLowerCase() === normalized)
+    || candidates.find((row) => String(row.name || "").toLowerCase() === normalized)
+    || candidates[0] || null;
+}
+
+function flattenObjects(value, out = []) {
+  if (!value || typeof value !== "object") return out;
+  if (Array.isArray(value)) {
+    for (const item of value) flattenObjects(item, out);
+    return out;
+  }
+  out.push(value);
+  for (const child of Object.values(value)) flattenObjects(child, out);
+  return out;
+}
+
+function normalizeProviderChain(chain) {
+  const normalized = String(chain || "").toLowerCase();
+  if (normalized === "bsc") return "bnb";
+  return normalized || "ethereum";
 }
 
 function sanitizeAgentToolResult(result) {

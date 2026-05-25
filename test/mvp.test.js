@@ -1571,6 +1571,45 @@ test("AgentRouter resolves token symbols before invoking token-address services"
     assert.equal(structured.token_resolution.resolver_service_id, "token_search_resolver");
     assert.equal(structured.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
     assert.equal(structured.result.data.smart_money_netflow_usd, 220000);
+
+    const client = createMcpClient({ AGENT_ROUTER_URL: baseUrl });
+    try {
+      await client.request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "token-resolution-test", version: "0.1.0" }
+      });
+      const called = await client.request("tools/call", {
+        name: "agentrouter_request",
+        arguments: {
+          capability: "token_smart_money_activity",
+          params: {
+            token_symbol: "AZTEC",
+            chain: "ethereum",
+            window: "24h",
+            pagination: { page: 1, per_page: 24 }
+          },
+          constraints: { max_price_usdc: "0.05" }
+        }
+      });
+      const mcpRouted = JSON.parse(called.content[0].text);
+      assert.equal(mcpRouted.ok, true);
+      assert.equal(mcpRouted.token_resolution.status, "resolved");
+      assert.equal(mcpRouted.token_resolution.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+      assert.equal(mcpRouted.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+      assert.equal(mcpRouted.result.data.smart_money_netflow_usd, 220000);
+      assert.equal(mcpRouted.feedback_required, true);
+      assert.match(mcpRouted.next_required_action, /agentrouter_feedback/);
+
+      const mcpEvidenceResponse = await fetch(`${baseUrl}/agent-router/evidence?request_id=${mcpRouted.result.request_id}`);
+      assert.equal(mcpEvidenceResponse.status, 200);
+      const mcpEvidence = await mcpEvidenceResponse.json();
+      assert.equal(mcpEvidence.count, 1);
+      assert.equal(mcpEvidence.events[0].request.capability, "token_smart_money_activity");
+      assert.equal(mcpEvidence.events[0].request.params.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+    } finally {
+      client.close();
+    }
   });
 });
 

@@ -103,7 +103,7 @@ const CAPABILITY_ALIASES = [
       type: "object",
       required: ["chain", "days"],
       properties: {
-        chain: { type: "string", enum: ["base", "ethereum", "arbitrum", "optimism", "solana", "bsc"] },
+        chain: { type: "string", enum: ["base", "ethereum", "arbitrum", "optimism", "solana", "bsc", "bnb", "hyperevm"] },
         days: { type: "number" }
       }
     },
@@ -189,7 +189,7 @@ const CAPABILITY_ALIASES = [
       properties: {
         token_symbol: { type: "string", description: "Token ticker or symbol, for example AZTEC." },
         token_address: { type: "string", description: "Optional contract address. AgentRouter may resolve it from token_symbol when omitted." },
-        chain: { type: "string", enum: ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc"] },
+        chain: { type: "string", enum: ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc", "bnb", "hyperevm"] },
         window: { type: "string", description: "Requested time window, for example 24h, 1d, 7d." },
         pagination: { type: "object" }
       }
@@ -940,7 +940,7 @@ function filterInputToManifestShape(input, manifest) {
 function tokenSmartMoneyInput(intent) {
   const window = intent.window || "24h";
   const input = {
-    chain: intent.chain || "ethereum",
+    chain: normalizeProviderChain(intent.chain || "ethereum"),
     pagination: intent.pagination || { page: 1, per_page: 24 }
   };
   if (intent.token_address) input.token_address = intent.token_address;
@@ -981,7 +981,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
   const resolverInput = {
     search_query: tokenSymbol,
     result_type: "token",
-    chain: intent.chain || "ethereum",
+    chain: normalizeProviderChain(intent.chain || "ethereum"),
     limit: 5
   };
   const invocation = await invokePaidService(store, resolver.service_id, resolverInput, {
@@ -1001,7 +1001,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
 
   const match = findTokenMatch(invocation.body.result?.data, {
     tokenSymbol,
-    chain: intent.chain || "ethereum"
+    chain: normalizeProviderChain(intent.chain || "ethereum")
   });
   if (!match?.address) return {
     ok: false,
@@ -1017,7 +1017,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     status: "resolved",
     token_symbol: tokenSymbol,
     token_address: match.address,
-    chain: match.chain || intent.chain || "ethereum",
+    chain: match.chain || normalizeProviderChain(intent.chain || "ethereum"),
     matched_name: match.name || null,
     matched_symbol: match.symbol || null,
     resolver_service_id: resolver.service_id,
@@ -1026,7 +1026,7 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
       ...intent,
       token_symbol: tokenSymbol,
       token_address: match.address,
-      chain: match.chain || intent.chain || "ethereum"
+      chain: match.chain || normalizeProviderChain(intent.chain || "ethereum")
     }
   };
 }
@@ -1087,6 +1087,12 @@ function recentDateRange(days) {
     from: from.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10)
   };
+}
+
+function normalizeProviderChain(chain) {
+  const normalized = String(chain || "").toLowerCase();
+  if (normalized === "bsc") return "bnb";
+  return normalized || "ethereum";
 }
 
 function validateCapabilityRequest({ capability, params }) {
