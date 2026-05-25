@@ -137,13 +137,13 @@ test("home page and Provider Studio render separately", async () => {
   });
 });
 
-test("GitHub and Google login entrypoints render and GitHub OAuth callback creates a session", async () => {
+test("GitHub login entrypoint renders and OAuth callback creates a session", async () => {
   await withServer(async ({ server, baseUrl }) => {
     const login = await fetch(`${baseUrl}/auth/login`);
     assert.equal(login.status, 200);
     const loginHtml = await login.text();
     assert.match(loginHtml, /Continue with GitHub|Set GITHUB_CLIENT_ID/);
-    assert.match(loginHtml, /Set GOOGLE_CLIENT_ID/);
+    assert.doesNotMatch(loginHtml, /Google|GOOGLE_CLIENT_ID/);
 
     const previousEnv = {
       GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,

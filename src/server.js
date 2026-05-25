@@ -102,7 +102,7 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
-  if (req.method === "GET" && /^\/auth\/(github|google)\/start$/.test(url.pathname)) {
+  if (req.method === "GET" && /^\/auth\/github\/start$/.test(url.pathname)) {
     const providerId = url.pathname.split("/")[2];
     redirect(res, beginOAuth({
       providerId,
@@ -113,7 +113,7 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
-  if (req.method === "GET" && /^\/auth\/(github|google)\/callback$/.test(url.pathname)) {
+  if (req.method === "GET" && /^\/auth\/github\/callback$/.test(url.pathname)) {
     const providerId = url.pathname.split("/")[2];
     try {
       const result = await completeOAuth({
@@ -962,7 +962,7 @@ function loginHtml({ auth, error = "", returnTo = "/" }) {
     <section class="login-panel">
       <span class="eyebrow">Account</span>
       <h1>Login</h1>
-      <p>Sign in to AgentRouter with GitHub or Google. Provider onboarding credentials stay in Provider Studio; OAuth is only for user identity.</p>
+      <p>Sign in to AgentRouter with GitHub. Provider onboarding credentials stay in Provider Studio; OAuth is only for user identity.</p>
       ${error ? `<div class="login-error">${escapeHtml(error)}</div>` : ""}
       ${signedIn}
       <div class="login-options">${providerCards}</div>

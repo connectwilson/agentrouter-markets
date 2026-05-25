@@ -13,15 +13,6 @@ const PROVIDERS = {
     authUrl: "https://github.com/login/oauth/authorize",
     tokenUrl: "https://github.com/login/oauth/access_token",
     scope: "read:user user:email"
-  },
-  google: {
-    id: "google",
-    label: "Google",
-    clientIdEnv: "GOOGLE_CLIENT_ID",
-    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
-    authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-    tokenUrl: "https://oauth2.googleapis.com/token",
-    scope: "openid email profile"
   }
 };
 
@@ -71,9 +62,6 @@ export function beginOAuth({ providerId, store, baseUrl, returnTo = "/" }) {
   url.searchParams.set("scope", provider.scope);
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
-  if (provider.id === "google") {
-    url.searchParams.set("prompt", "select_account");
-  }
   return url.toString();
 }
 
@@ -146,7 +134,6 @@ async function exchangeCode({ provider, code, redirectUri }) {
     code,
     redirect_uri: redirectUri
   });
-  if (provider.id === "google") body.set("grant_type", "authorization_code");
   const response = await fetch(provider.tokenUrl, {
     method: "POST",
     headers: {
@@ -166,8 +153,7 @@ async function exchangeCode({ provider, code, redirectUri }) {
 }
 
 async function fetchUser({ provider, accessToken }) {
-  if (provider.id === "github") return fetchGitHubUser(accessToken);
-  return fetchGoogleUser(accessToken);
+  return fetchGitHubUser(accessToken);
 }
 
 async function fetchGitHubUser(accessToken) {
@@ -201,22 +187,6 @@ async function fetchGitHubUser(accessToken) {
     email,
     avatar_url: user.avatar_url,
     handle: user.login
-  });
-}
-
-async function fetchGoogleUser(accessToken) {
-  const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
-    headers: { authorization: `Bearer ${accessToken}` }
-  });
-  const user = await response.json().catch(() => ({}));
-  if (!response.ok) throwOAuthProfileError(user);
-  return normalizeUser({
-    provider: "google",
-    id: user.sub,
-    name: user.name,
-    email: user.email,
-    avatar_url: user.picture,
-    handle: user.email
   });
 }
 

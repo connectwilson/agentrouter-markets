@@ -1310,13 +1310,27 @@ function parseApiDocsLinks(html, overviewUrl) {
     if (isNonEndpointDocsPath(url.pathname)) continue;
     links.add(url.toString().replace(/\/$/, ""));
   }
-  return [...links].sort();
+  const markdownLinkRe = /\[[^\]]+\]\(([^)\s#?]+)(?:[#?][^)]*)?\)/g;
+  while ((match = markdownLinkRe.exec(String(html || "")))) {
+    const href = match[1];
+    let url;
+    try {
+      url = new URL(href, overviewUrl);
+    } catch {
+      continue;
+    }
+    if (url.hostname !== overviewHost) continue;
+    if (isNonEndpointDocsPath(url.pathname)) continue;
+    links.add(url.toString().replace(/\/$/, ""));
+  }
+  return [...links];
 }
 
 function isNonEndpointDocsPath(pathname) {
   const path = pathname.replace(/\/$/, "");
   if (!path || path === "/") return true;
-  if (/\/(changelog|release-notes|terms|privacy|status)(\/|$)/i.test(path)) return true;
+  if (/\/(authentication|changelog|change-log|endpoint-overview|enterprise-customization|getting-started|mcp-service|responses-error-codes|release-notes|terms|privacy|status)(\/|$)/i.test(path)) return true;
+  if (/\/(?:coinglass-agent-skill|websocket|ws-|websocket_)/i.test(path)) return true;
   if (/\.(png|jpe?g|gif|svg|css|js|ico|xml|rss|atom|pdf|zip)$/i.test(path)) return true;
   return false;
 }

@@ -305,22 +305,18 @@ node bin/agent-router.js quote '{"capability":"perp_liquidation_max_pain","param
 
 ## Login / OAuth
 
-The website header includes a `Login` entry. GitHub and Google OAuth are enabled when the matching environment variables are present:
+The website header includes a `Login` entry. This MVP supports GitHub OAuth when the matching environment variables are present:
 
 ```bash
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
 ```
 
-Register these callback URLs with the providers:
+Register these callback URLs with GitHub:
 
 ```text
 http://127.0.0.1:8800/auth/github/callback
-http://127.0.0.1:8800/auth/google/callback
 https://agentrouter-markets.onrender.com/auth/github/callback
-https://agentrouter-markets.onrender.com/auth/google/callback
 ```
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.

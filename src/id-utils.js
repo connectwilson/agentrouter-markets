@@ -30,12 +30,38 @@ export function suggestCapabilities(text) {
     tags.add("funding_rate");
     tags.add("market_data");
   }
+  if (/futures?|perpetual|derivatives?|合约|永续/.test(value)) tags.add("crypto_derivatives");
+  if (/spot|现货/.test(value)) {
+    tags.add("spot_market");
+    tags.add("market_data");
+  }
+  if (/option|max pain|期权/.test(value)) {
+    tags.add("options_data");
+    tags.add("market_data");
+  }
+  if (/open[\s_-]?interest|\boi\b|持仓量/.test(value)) {
+    tags.add("crypto_derivatives");
+    tags.add("open_interest");
+  }
+  if (/long[\s/_-]?short|longshort|多空/.test(value)) {
+    tags.add("crypto_derivatives");
+    tags.add("long_short_ratio");
+  }
   if (/liquidation|max[\s_-]?pain|爆仓|清算|永续|合约/.test(value)) {
     tags.add("crypto_derivatives");
     tags.add("perp_liquidation");
     tags.add("liquidation_heatmap");
     tags.add("perp_liquidation_max_pain");
   }
+  if (/order[\s_-]?book|orderbook|depth|bid|ask|liquidity|订单簿|深度/.test(value)) tags.add("orderbook_data");
+  if (/taker|buy[\s_-]?sell|cvd|volume delta|footprint|成交|主动买|主动卖/.test(value)) tags.add("order_flow");
+  if (/basis|基差/.test(value)) {
+    tags.add("crypto_derivatives");
+    tags.add("basis_data");
+  }
+  if (/whale|large order|large transfer|巨鲸|大额/.test(value)) tags.add("whale_data");
+  if (/exchange balance|reserve|assets transparency|储备|交易所余额/.test(value)) tags.add("exchange_reserve");
+  if (/rsi|macd|boll|moving average|\bma\b|\bema\b|atr|td sequential|technical indicator|技术指标/.test(value)) tags.add("technical_indicator");
   if (/price|价格|ticker|行情/.test(value)) tags.add("market_data");
   if (/\betf\b|exchange traded fund|bitcoin etf|btc etf/.test(value)) {
     tags.add("market_data");
