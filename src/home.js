@@ -1,7 +1,6 @@
 const remoteMcpUrl = "https://agentrouter.network/mcp";
 const skillInstallCommand = `mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"`;
 const skillsCliInstallCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy";
-const localScriptInstallCommand = "curl -fsSL https://agentrouter.network/install.sh | bash";
 const localMcpCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{
   "mcpServers": {
@@ -54,7 +53,6 @@ export function homeHtml({ auth = {} } = {}) {
             <button type="button" data-install-key="skillscli">Skills CLI</button>
             <button type="button" data-install-key="remote">Remote MCP</button>
             <button type="button" data-install-key="local">Local MCP</button>
-            <button type="button" data-install-key="script">Local Script</button>
           </div>
           <p class="install-note" id="home-install-note">Downloads the AgentRouter Skill markdown only. It does not execute a remote shell script.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
@@ -193,12 +191,6 @@ export function homeHtml({ auth = {} } = {}) {
             prompt: "$",
             value: ${JSON.stringify(localMcpCommand)},
             note: "Use this as the MCP server command in Codex, Cursor, Windsurf, OpenClaw, Hermes, or other local MCP clients."
-          },
-          script: {
-            label: "local script install",
-            prompt: "$",
-            value: ${JSON.stringify(localScriptInstallCommand)},
-            note: "Advanced local-only installer. Use only in your own terminal after you trust/audit the script."
           }
         };
         let activeInstallKey = "skill";
