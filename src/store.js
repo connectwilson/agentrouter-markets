@@ -320,6 +320,8 @@ export function summarizeHealth(record) {
   const latestOperational = operationalEvents.at(-1) || null;
   const recent = operationalEvents.slice(-10);
   const recentFailures = recent.filter((event) => event.status !== "success").length;
+  const latestIsFailure = Boolean(latestOperational && latestOperational.status !== "success");
+  const circuitActive = latestIsFailure && recentFailures >= 3;
   return {
     health_version: "agent_service_health_v1",
     status: latestValidation?.ok === false || recentFailures >= 3 ? "degraded" : record.verification_status === "verified" ? "healthy" : "unknown",
@@ -328,7 +330,13 @@ export function summarizeHealth(record) {
     last_success_at: [...operationalEvents].reverse().find((event) => event.status === "success")?.created_at || null,
     last_failure_at: [...operationalEvents].reverse().find((event) => event.status !== "success")?.created_at || null,
     latest_http_status: latestOperational?.http_status || null,
-    recent_failure_rate: recent.length ? Number((recentFailures / recent.length).toFixed(2)) : null
+    recent_failure_rate: recent.length ? Number((recentFailures / recent.length).toFixed(2)) : null,
+    circuit_breaker: {
+      active: circuitActive,
+      reason: circuitActive ? "recent_runtime_failures" : null,
+      recent_window: recent.length,
+      recent_failures: recentFailures
+    }
   };
 }
 

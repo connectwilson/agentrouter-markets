@@ -1919,7 +1919,12 @@ test("AgentRouter discloses wrapped-token substitutions during token resolution"
     assert.equal(cliRouted.token_resolution.token_symbol, "HYPE");
     assert.equal(cliRouted.token_resolution.chain, "hyperevm");
     assert.equal(cliRouted.token_resolution.resolution_type, "wrapped_token_substitution");
+    assert.ok(cliRouted.token_resolution.confidence >= 0.9);
+    assert.equal(cliRouted.token_resolution.match_strategy, "wrapped_symbol");
+    assert.equal(cliRouted.token_resolution.candidate_count, 1);
     assert.equal(cliRouted.input.token_address, "0x5555555555555555555555555555555555555555");
+    assert.match(cliRouted.timing.trace_id, /^trace_/);
+    assert.ok(cliRouted.timing.phases.token_resolver_search.duration_ms >= 0);
     assert.ok(cliRouted.timing.resolve_route_ms == null);
     assert.ok(cliRouted.timing.token_resolver_search_ms >= 0);
     assert.ok(cliRouted.timing.quote_route_attempt_1_ms >= 0);
@@ -2013,6 +2018,92 @@ test("AgentRouter retries the next token smart-money service when a provider fai
   });
 });
 
+test("AgentRouter excludes circuit-broken services during candidate ranking", async () => {
+  await withServer(async ({ server, baseUrl }) => {
+    try {
+      const resolverResponse = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: "circuit_token_search_resolver",
+          title: "Token Search Resolver",
+          provider_name: "Token Directory Lab Circuit",
+          description_for_agent: "Use this service to search token symbols and resolve contract addresses by chain.",
+          capabilities: "data_service,token_search,entity_search,token_metadata",
+          price: "0.01",
+          sample_request: "{\"search_query\":\"HYPE\",\"result_type\":\"token\",\"chain\":\"hyperevm\",\"limit\":5}",
+          sample_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+          live_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+          summary: "Resolve HYPE token symbols to token contract addresses."
+        })
+      });
+      assert.equal(resolverResponse.status, 201);
+
+      for (const serviceId of ["circuit_broken_hype_flow", "circuit_healthy_hype_flow"]) {
+        const isHealthy = serviceId === "circuit_healthy_hype_flow";
+        const response = await fetch(`${baseUrl}/studio/providers`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "static-json",
+            service_id: serviceId,
+            title: isHealthy ? "HyperEVM Token Flow Healthy" : "HyperEVM Token Flow Broken",
+            provider_name: isHealthy ? "Token Flow Lab Healthy Circuit" : "Token Flow Lab Broken Circuit",
+            description_for_agent: "Use this service for token-level smart money activity on HyperEVM token contracts.",
+            capabilities: "data_service,token_god_mode,token_data,flow_intelligence,token_flow,buyer_seller_flow,smart_money",
+            price: "0.01",
+            sample_request: "{\"chain\":\"hyperevm\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"24h\"}",
+            sample_data: JSON.stringify({ token_symbol: "WHYPE", sample_source: serviceId, smart_money_netflow_usd: isHealthy ? 42 : 7 }),
+            live_data: JSON.stringify({ token_symbol: "WHYPE", service_id: serviceId, smart_money_netflow_usd: isHealthy ? 42 : 7 }),
+            summary: isHealthy ? "Healthy token-level smart money flow intelligence." : "Broken token-level smart money flow intelligence."
+          })
+        });
+        assert.equal(response.status, 201);
+      }
+
+      const broken = server.store.services.get("circuit_broken_hype_flow");
+      broken.feedback_events.push(
+        ...[1, 2, 3].map((index) => ({
+          event_version: "agent_service_feedback_v1",
+          request_id: `circuit_fail_${index}`,
+          service_id: "circuit_broken_hype_flow",
+          provider_id: broken.manifest.provider.provider_id,
+          status: "error",
+          http_status: 503,
+          schema_valid: false,
+          latency_ms: 25,
+          created_at: new Date(Date.now() - (4 - index) * 1000).toISOString()
+        }))
+      );
+
+      const response = await fetch(`${baseUrl}/agent-router/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          capability: "token_smart_money_activity",
+          params: {
+            token_symbol: "HYPE",
+            chain: "hyperevm",
+            window: "24h"
+          },
+          constraints: { max_price_usdc: "0.05" }
+        })
+      });
+      assert.equal(response.status, 200);
+      const routed = await response.json();
+      assert.equal(routed.ok, true);
+      assert.equal(routed.selected_service.service_id, "circuit_healthy_hype_flow");
+      assert.equal(routed.result.data.service_id, "circuit_healthy_hype_flow");
+      assert.equal(routed.selected_service.selection_badges?.includes("circuit_breaker_active"), false);
+    } finally {
+      await Promise.all(["circuit_token_search_resolver", "circuit_broken_hype_flow", "circuit_healthy_hype_flow"].map((serviceId) =>
+        fs.rm(path.join(process.env.ADN_PROVIDER_DIR, `${serviceId}.json`), { force: true })
+      ));
+    }
+  });
+});
+
 test("AgentRouter blocks ambiguous token symbol substitutions before target payment", async () => {
   await withServer(async ({ baseUrl }) => {
     try {
@@ -2045,8 +2136,12 @@ test("AgentRouter blocks ambiguous token symbol substitutions before target paym
       assert.equal(payload.data_returned, false);
       assert.equal(payload.token_resolution.resolution_type, "symbol_substitution");
       assert.equal(payload.token_resolution.matched_symbol, "GNUS");
+      assert.ok(payload.token_resolution.confidence < 0.5);
+      assert.equal(payload.token_resolution.match_strategy, "name_contains_symbol");
+      assert.equal(payload.token_resolution.candidate_count, 1);
       assert.match(payload.token_resolution.blocking_reason, /will not auto-pay/);
       assert.equal(payload.local_payment, undefined);
+      assert.match(payload.timing.trace_id, /^trace_/);
       assert.equal(payload.timing.quote_route_attempt_1_ms, undefined);
     } finally {
       await fs.rm(path.join(process.env.ADN_PROVIDER_DIR, "ambiguous_token_search_resolver.json"), { force: true });

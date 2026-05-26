@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { DiscoveryConnector } from "./connector.js";
 import { inferIntent } from "./agent-router.js";
 import { invokePaidServiceWithLocalWallet } from "./local-invoke.js";
@@ -332,6 +333,9 @@ async function resolveTokenWithLocalWallet({ connector, baseUrl, task, intent, m
       requested_symbol: resolution.requested_symbol,
       resolved_symbol: resolution.resolved_symbol,
       resolution_type: resolution.resolution_type,
+      confidence: resolution.confidence,
+      match_strategy: match.match_strategy || null,
+      candidate_count: match.candidate_count ?? null,
       auto_pay_allowed: resolution.auto_pay_allowed,
       blocking_reason: resolution.blocking_reason,
       requires_disclosure: resolution.requires_disclosure,
@@ -353,6 +357,9 @@ async function resolveTokenWithLocalWallet({ connector, baseUrl, task, intent, m
     requested_symbol: resolution.requested_symbol,
     resolved_symbol: resolution.resolved_symbol,
     resolution_type: resolution.resolution_type,
+    confidence: resolution.confidence,
+    match_strategy: match.match_strategy || null,
+    candidate_count: match.candidate_count ?? null,
     requires_disclosure: resolution.requires_disclosure,
     disclosure: resolution.disclosure,
     resolver_service_id: resolver.service_id,
@@ -398,12 +405,14 @@ function findTokenMatch(data, { tokenSymbol, chain }) {
   const normalized = String(tokenSymbol || "").toLowerCase();
   const targetChain = normalizeProviderChain(chain);
   const sameChain = candidates.filter((item) => !item.chain || item.chain === targetChain);
-  return sameChain.find((item) => String(item.symbol || "").toLowerCase() === normalized)
-    || sameChain.find((item) => String(item.symbol || "").toLowerCase() === `w${normalized}`)
-    || sameChain.find((item) => String(item.name || "").toLowerCase().includes(normalized))
-    || sameChain[0]
-    || candidates[0]
-    || null;
+  const exact = sameChain.find((item) => String(item.symbol || "").toLowerCase() === normalized);
+  if (exact) return { ...exact, match_strategy: "exact_symbol", candidate_count: candidates.length };
+  const wrapped = sameChain.find((item) => String(item.symbol || "").toLowerCase() === `w${normalized}`);
+  if (wrapped) return { ...wrapped, match_strategy: "wrapped_symbol", candidate_count: candidates.length };
+  const name = sameChain.find((item) => String(item.name || "").toLowerCase().includes(normalized));
+  if (name) return { ...name, match_strategy: "name_contains_symbol", candidate_count: candidates.length };
+  const fallback = sameChain[0] || candidates[0] || null;
+  return fallback ? { ...fallback, match_strategy: "first_candidate", candidate_count: candidates.length } : null;
 }
 
 function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, chain }) {
@@ -435,6 +444,7 @@ function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, 
     matched_name: name || null,
     chain: chain || null,
     resolution_type: resolutionType,
+    confidence: exact ? 1 : wrappedLike ? 0.92 : 0.45,
     auto_pay_allowed: exact || wrappedLike,
     blocking_reason: exact || wrappedLike
       ? null
@@ -460,6 +470,9 @@ function publicTokenResolution(tokenResolution) {
     requested_symbol: tokenResolution.requested_symbol || tokenResolution.token_symbol || null,
     resolved_symbol: tokenResolution.resolved_symbol || tokenResolution.matched_symbol || null,
     resolution_type: tokenResolution.resolution_type || null,
+    confidence: tokenResolution.asset_resolution?.confidence ?? null,
+    match_strategy: tokenResolution.match_strategy || null,
+    candidate_count: tokenResolution.candidate_count ?? null,
     auto_pay_allowed: tokenResolution.asset_resolution?.auto_pay_allowed ?? null,
     blocking_reason: tokenResolution.asset_resolution?.blocking_reason || null,
     requires_disclosure: Boolean(tokenResolution.requires_disclosure),
@@ -510,6 +523,7 @@ async function postJson(baseUrl, path, body) {
 
 function createRouteTiming() {
   const started = Date.now();
+  const traceId = `trace_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const spans = {};
   return {
     async measure(name, fn) {
@@ -529,8 +543,13 @@ function createRouteTiming() {
       }
     },
     snapshot() {
+      const phases = Object.fromEntries(
+        Object.entries(spans).map(([name, durationMs]) => [name.replace(/_ms$/, ""), { duration_ms: durationMs }])
+      );
       return {
+        trace_id: traceId,
         ...spans,
+        phases,
         total_ms: Date.now() - started
       };
     }

@@ -756,10 +756,21 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
   if (!serviceCoversRequestedAsset(manifest, intent)) {
     return { service_id: manifest.service_id, routing_score: 0 };
   }
-  const assetFit = intent.asset ? Number(sampleText.includes(String(intent.asset).toLowerCase())) : 1;
   const trust = summarizeTrust(record);
   const trustScore = trust.trust_score;
   const health = summarizeHealth(record);
+  if (health.circuit_breaker?.active && !constraints.include_circuit_broken_services) {
+    return {
+      service_id: manifest.service_id,
+      title: manifest.title,
+      provider_id: manifest.provider.provider_id,
+      health_status: health.status,
+      circuit_breaker: health.circuit_breaker,
+      routing_score: 0,
+      selection_reason: `Excluded by circuit breaker: ${health.circuit_breaker.reason}.`
+    };
+  }
+  const assetFit = intent.asset ? Number(sampleText.includes(String(intent.asset).toLowerCase())) : 1;
   const provenance = summarizeProvenance(record);
   const freshnessLimit = Number(constraints.freshness_seconds || 0);
   const serviceFreshness = Number(manifest.freshness?.max_data_lag_seconds || 0);
@@ -792,6 +803,7 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
     consumer_feedback_count: trust.consumer_feedback_count,
     recent_failure_rate: trust.recent_failure_rate,
     health_status: health.status,
+    circuit_breaker: health.circuit_breaker,
     source_provenance_level: provenance.source_provenance_level,
     selection_badges: selectionBadges({ trust, health, provenance, record }),
     routing_score: Number(Math.max(0, score).toFixed(4)),
@@ -812,6 +824,7 @@ function selectionBadges({ trust, health, provenance, record }) {
   const badges = [];
   if (record.verification_status === "verified") badges.push("verified_live_endpoint");
   if (health.status === "healthy") badges.push("healthy");
+  if (health.circuit_breaker?.active) badges.push("circuit_breaker_active");
   if (provenance.source_provenance_level && provenance.source_provenance_level !== "unknown") badges.push(`source_${provenance.source_provenance_level}`);
   if (trust.consumer_feedback_count > 0) badges.push("has_agent_feedback");
   if ((trust.average_consumer_score ?? trust.usefulness_rate ?? 0) >= 0.8) badges.push("agent_useful");
@@ -864,13 +877,14 @@ function serviceCoversRequestedAsset(manifest, intent) {
 }
 
 function summarizeCandidates(candidates) {
-  return candidates.map(({ service_id, title, provider_id, pricing, trust_score, routing_score, selection_reason, health_status, source_provenance_level, recent_failure_rate, consumer_feedback_count, selection_badges }) => ({
+  return candidates.map(({ service_id, title, provider_id, pricing, trust_score, routing_score, selection_reason, health_status, circuit_breaker, source_provenance_level, recent_failure_rate, consumer_feedback_count, selection_badges }) => ({
     service_id,
     title,
     provider_id,
     pricing,
     trust_score,
     health_status,
+    circuit_breaker,
     source_provenance_level,
     recent_failure_rate,
     consumer_feedback_count,
