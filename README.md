@@ -321,15 +321,15 @@ https://agentrouter.network/auth/github/callback
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
 
-## Safe Skill Install
+## Skill Install
 
-The default shell-capable agent entrypoint downloads the AgentRouter Skill markdown directly. It does not execute a remote shell script and does not clone GitHub:
+The default AI-agent entrypoint uses the standard Skills CLI, the same install pattern used by Surf:
 
 ```bash
-mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"
+npx skills add connectwilson/agentrouter-skill --skill AgentRouter
 ```
 
-For agents that already support the `skills` CLI and GitHub cloning, this also works:
+If your environment needs explicit non-interactive flags:
 
 ```bash
 npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy
@@ -343,13 +343,19 @@ AGENT_ROUTER_MAX_PRICE=0.05 \
 npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "BTC liquidation max pain"
 ```
 
-For local terminals where you are comfortable auditing and running the installer script, the advanced installer remains available:
+Manual fallback if the Skills CLI is unavailable:
+
+```bash
+mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"
+```
+
+For local terminals where you are comfortable auditing and running the installer script, the advanced local installer remains available:
 
 ```bash
 curl -fsSL https://agentrouter.network/install.sh | bash
 ```
 
-This mirrors the Surf-style split: one safe command installs the skill, and the skill tells the agent which HTTP, CLI, or MCP path to use for live data.
+This mirrors the Surf-style split: one skill command teaches the agent when to route data/API needs, and the skill tells the agent which HTTP, CLI, or MCP path to use for live data.
 
 ## Remote MCP Connector
 

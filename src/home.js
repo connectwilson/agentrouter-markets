@@ -1,6 +1,5 @@
 const remoteMcpUrl = "https://agentrouter.network/mcp";
-const skillInstallCommand = `mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"`;
-const skillsCliInstallCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy";
+const skillInstallCommand = "npx skills add connectwilson/agentrouter-skill --skill AgentRouter";
 const localMcpCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{
   "mcpServers": {
@@ -50,11 +49,10 @@ export function homeHtml({ auth = {} } = {}) {
           </div>
           <div class="install-picker" aria-label="AgentRouter connection options">
             <button type="button" data-install-key="skill" class="active">Skill Install</button>
-            <button type="button" data-install-key="skillscli">Skills CLI</button>
             <button type="button" data-install-key="remote">Remote MCP</button>
             <button type="button" data-install-key="local">Local MCP</button>
           </div>
-          <p class="install-note" id="home-install-note">Downloads the AgentRouter Skill markdown only. It does not execute a remote shell script.</p>
+          <p class="install-note" id="home-install-note">Installs the AgentRouter Skill with the standard skills CLI.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">
@@ -178,13 +176,7 @@ export function homeHtml({ auth = {} } = {}) {
             label: "install skill",
             prompt: "$",
             value: ${JSON.stringify(skillInstallCommand)},
-            note: "Downloads the AgentRouter Skill markdown only. It does not execute a remote shell script."
-          },
-          skillscli: {
-            label: "skills cli install",
-            prompt: "$",
-            value: ${JSON.stringify(skillsCliInstallCommand)},
-            note: "Use this when your agent environment supports the skills CLI and GitHub cloning."
+            note: "Installs the AgentRouter Skill with the standard skills CLI."
           },
           local: {
             label: "local mcp command",
