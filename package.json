@@ -1,10 +1,10 @@
 {
-  "name": "agent-native-data-network-mvp",
+  "name": "agentrouter",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
   "bin": {
     "adn": "./bin/adn.js",
+    "agentrouter": "./bin/agentrouter.js",
     "agent-router": "./bin/agent-router.js",
     "agent-router-mcp": "./bin/agent-router-mcp.js"
   },

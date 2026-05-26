@@ -1,4 +1,4 @@
-const skillInstallCommand = "npx skills add connectwilson/agentrouter-skill --skill AgentRouter";
+const skillInstallCommand = "npx -y github:connectwilson/agentrouter-markets#main";
 const localInstallConfig = `{
   "mcpServers": {
     "AgentRouter": {
@@ -38,14 +38,14 @@ export function homeHtml({ auth = {} } = {}) {
           <div class="install-strip" aria-label="AgentRouter install command">
             <div class="install-top">
               <span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="install-label" id="home-install-label">install skill</span>
+              <span class="install-label" id="home-install-label">install agentrouter</span>
             </div>
             <div class="install-command">
               <code id="home-install-command"><span class="prompt">$</span> ${html(skillInstallCommand)}</code>
               <button type="button" id="home-copy-install">Copy</button>
             </div>
           </div>
-          <p class="install-note" id="home-install-note">Installs the AgentRouter Skill with the standard skills CLI.</p>
+          <p class="install-note" id="home-install-note">Installs the Skill, configures supported MCP clients, creates a local payment wallet, and prints the funding address.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">

@@ -33,6 +33,7 @@ const { createMemoryStore } = await import("../src/store.js");
 const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
 const { invokePaidServiceWithLocalWallet } = await import("../src/local-invoke.js");
+const { formatInstallResult, installAgentRouter, parseInstallArgs } = await import("../src/agentrouter-installer.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -100,8 +101,8 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(homeHtml, /Network snapshot/);
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
-    assert.match(homeHtml, /npx skills add connectwilson\/agentrouter-skill --skill AgentRouter/);
-    assert.match(homeHtml, /standard skills CLI/);
+    assert.match(homeHtml, /npx -y github:connectwilson\/agentrouter-markets#main/);
+    assert.match(homeHtml, /configures supported MCP clients/);
     assert.doesNotMatch(homeHtml, /Remote MCP/);
     assert.doesNotMatch(homeHtml, /Local MCP/);
 
@@ -179,6 +180,43 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(scriptText, /Restart or reload the configured AI client/);
     assert.match(scriptText, /Then ask a normal data\/API question/);
     assert.doesNotMatch(scriptText, /github\.com/);
+  });
+});
+
+test("agentrouter CLI installer installs skill and configures local MCP clients", async () => {
+  const home = await fs.mkdtemp(path.join(runtimeRoot, "agentrouter-install-"));
+  const cursorDir = path.join(home, ".cursor");
+  await fs.mkdir(cursorDir, { recursive: true });
+  const claudeConfig = path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  const cursorConfig = path.join(cursorDir, "mcp.json");
+  const result = await installAgentRouter({
+    home,
+    clients: ["claude-desktop"],
+    claudeConfig,
+    cursorConfig,
+    skillText: "---\nname: AgentRouter\n---\n# AgentRouter\n",
+    createWallet: false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.configured_clients.length, 2);
+  assert.deepEqual(result.configured_clients.map((client) => client.name).sort(), ["Claude Desktop", "Cursor"]);
+  assert.equal(await fs.readFile(path.join(home, ".agents", "skills", "agentrouter", "SKILL.md"), "utf8"), "---\nname: AgentRouter\n---\n# AgentRouter\n");
+
+  const claudeJson = JSON.parse(await fs.readFile(claudeConfig, "utf8"));
+  const cursorJson = JSON.parse(await fs.readFile(cursorConfig, "utf8"));
+  for (const config of [claudeJson, cursorJson]) {
+    assert.equal(config.mcpServers.AgentRouter.command, "npx");
+    assert.deepEqual(config.mcpServers.AgentRouter.args, ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"]);
+    assert.equal(config.mcpServers.AgentRouter.env.AGENT_ROUTER_URL, "https://agentrouter.network");
+    assert.equal(config.mcpServers.AgentRouter.env.ADN_PAYMENT_BACKEND, "circle_arc");
+    assert.match(config.mcpServers.AgentRouter.env.ADN_DIR, /\.agentrouter\/adn$/);
+  }
+
+  assert.match(formatInstallResult(result), /AgentRouter installed/);
+  assert.deepEqual(parseInstallArgs(["install", "--client", "cursor", "--no-wallet"]), {
+    clients: ["cursor"],
+    createWallet: false
   });
 });
 

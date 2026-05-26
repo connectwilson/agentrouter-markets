@@ -323,43 +323,40 @@ OAuth is for user identity only. Provider-owned API credentials still belong in 
 
 ## Skill Install
 
-The default AI-agent entrypoint uses the standard Skills CLI, the same install pattern used by Surf:
+The default AI-agent entrypoint is the AgentRouter installer. It installs the Skill, configures supported local MCP clients when their config directories are present, creates a local encrypted AgentRouter wallet, and prints the Arc Testnet USDC funding address:
+
+```bash
+npx -y agentrouter
+```
+
+Before the npm package is published, the same installer can run from GitHub:
+
+```bash
+npx -y github:connectwilson/agentrouter-markets#main
+```
+
+After install, restart or reload the AI client. For the first paid data request, AgentRouter checks the quote/payment path first and shows wallet funding instructions if the local Arc wallet needs USDC. The agent should not bypass that prompt with web search or a provider-specific MCP tool.
+
+For a specific local client:
+
+```bash
+npx -y agentrouter --client cursor
+npx -y agentrouter --client claude-desktop
+```
+
+The installer is the paid-call path. The Skills CLI alone only installs the agent instructions; it cannot safely edit MCP config or create a local payment wallet inside hosted agent sandboxes. If you only need quote-only Skill behavior, the standard Skills CLI still works:
 
 ```bash
 npx skills add connectwilson/agentrouter-skill --skill AgentRouter
 ```
 
-If your environment needs explicit non-interactive flags:
+This mirrors the Surf-style split: one short command teaches the agent when to route data/API needs, and the installed CLI/MCP bridge performs live routing, payment, and invocation.
 
-```bash
-npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy
-```
-
-After install, restart or reload the AI client. For the first paid data request, AgentRouter checks the quote/payment path first and shows wallet funding instructions if the local Arc wallet needs USDC. The agent should not bypass that prompt with web search or a provider-specific MCP tool.
-
-The skill teaches Claude, Codex, OpenClaw, Hermes, Cursor, Windsurf, and similar agents when to use AgentRouter. If MCP tools are not attached, the skill can still call the hosted AgentRouter network through the GitHub npx CLI fallback:
-
-```bash
-AGENT_ROUTER_URL=https://agentrouter.network \
-AGENT_ROUTER_MAX_PRICE=0.05 \
-npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "BTC liquidation max pain"
-```
-
-Manual fallback if the Skills CLI is unavailable:
-
-```bash
-mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"
-```
-
-For local terminals where you are comfortable auditing and running the installer script, the advanced local installer remains available:
+Manual fallback if npm/npx is unavailable:
 
 ```bash
 curl -fsSL https://agentrouter.network/install.sh | bash
 ```
-
-The installer is the paid-call path: it installs the skill, configures supported local MCP clients such as Claude Desktop and Cursor when their config directories are present, enables `circle_arc` settlement, creates a local encrypted AgentRouter session wallet under `~/.agentrouter/adn`, and prints the Arc Testnet USDC funding address. The Skills CLI alone only installs the agent instructions; it cannot safely edit MCP config or create a local payment wallet inside hosted agent sandboxes.
-
-This mirrors the Surf-style split: one skill command teaches the agent when to route data/API needs, and the skill tells the agent which HTTP, CLI, or MCP path to use for live data.
 
 ## Remote MCP Connector
 
