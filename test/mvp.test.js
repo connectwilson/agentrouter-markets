@@ -3055,6 +3055,32 @@ test("agent-router ask uses local wallet instead of quote-only path when wallet 
   });
 });
 
+test("agent-router ask does not silently fall back to quote-only when local payment is not ready", async () => {
+  await resetWalletForTests();
+  const emptyAdnDir = await fs.mkdtemp(path.join(runtimeRoot, "agentrouter-empty-adn-"));
+  await withServer(async ({ baseUrl }) => {
+    const routed = await runAgentRouterCli(["ask", "BTC 当前最大爆仓痛点是多少"], {
+      ADN_REGISTRY_URL: baseUrl,
+      ADN_DIR: emptyAdnDir
+    });
+    assert.equal(routed.code, 0, routed.stderr);
+    const payload = JSON.parse(routed.stdout);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.status, "local_payment_not_ready");
+    assert.equal(payload.data_returned, false);
+    assert.match(payload.repair_command, /agentrouter-markets#main --client all/);
+
+    const quoteOnly = await runAgentRouterCli(["ask", "--quote-only", "BTC 当前最大爆仓痛点是多少"], {
+      ADN_REGISTRY_URL: baseUrl,
+      ADN_DIR: emptyAdnDir
+    });
+    assert.equal(quoteOnly.code, 0, quoteOnly.stderr);
+    const quoteOnlyPayload = JSON.parse(quoteOnly.stdout);
+    assert.notEqual(quoteOnlyPayload.status, "local_payment_not_ready");
+    assert.equal(quoteOnlyPayload.local_payment, undefined);
+  });
+});
+
 test("CLI route returns clarification before payment for unclear max pain task", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {

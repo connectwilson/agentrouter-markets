@@ -8,16 +8,49 @@ const [command = "ask", ...args] = process.argv.slice(2);
 const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter.network").replace(/\/$/, "");
 const defaultAdnDir = path.join(os.homedir(), ".agentrouter", "adn");
 if (!process.env.ADN_DIR) process.env.ADN_DIR = defaultAdnDir;
-const { args: commandArgs, localWalletRequested } = parseRuntimeFlags(args);
+const { args: commandArgs, localWalletRequested, quoteOnlyRequested } = parseRuntimeFlags(args);
 
 try {
   if (command === "ask" || command === "find") {
     const task = commandArgs.join(" ");
-    if (shouldUseLocalWallet({ localWalletRequested })) {
+    if (!quoteOnlyRequested) {
+      const readiness = localPaymentReadiness();
+      if (!readiness.ready && !localWalletRequested) {
+        print(localPaymentNotReadyResponse(readiness));
+      } else {
+        const { routeTaskWithLocalWallet } = await import("../src/local-route.js");
+        print(await routeTaskWithLocalWallet({
+          baseUrl,
+          task,
+          constraints: {
+            max_price_usdc: process.env.AGENT_ROUTER_MAX_PRICE || "0.05"
+          },
+          budget: {
+            max_amount: process.env.AGENT_ROUTER_MAX_PRICE || "0.05",
+            currency: "USDC"
+          }
+        }));
+      }
+    } else {
+      print(await askAgentRouterRemote({
+        baseUrl,
+        task,
+        max_price: process.env.AGENT_ROUTER_MAX_PRICE || "0.05"
+      }));
+    }
+  } else if (command === "quote-only" || command === "ask-quote") {
+    print(await askAgentRouterRemote({
+      baseUrl,
+      task: commandArgs.join(" "),
+      max_price: process.env.AGENT_ROUTER_MAX_PRICE || "0.05"
+    }));
+  } else if (command === "diagnose" || command === "doctor") {
+    print(localDiagnostics());
+  } else if (command === "pay-ask") {
       const { routeTaskWithLocalWallet } = await import("../src/local-route.js");
       print(await routeTaskWithLocalWallet({
         baseUrl,
-        task,
+        task: commandArgs.join(" "),
         constraints: {
           max_price_usdc: process.env.AGENT_ROUTER_MAX_PRICE || "0.05"
         },
@@ -26,13 +59,6 @@ try {
           currency: "USDC"
         }
       }));
-    } else {
-      print(await askAgentRouterRemote({
-        baseUrl,
-        task,
-        max_price: process.env.AGENT_ROUTER_MAX_PRICE || "0.05"
-      }));
-    }
   } else if (command === "capabilities") {
     print(await get("/capabilities"));
   } else if (command === "request") {
@@ -61,6 +87,8 @@ try {
       usage: [
         'agent-router ask "查询标记为 Matrixport 的地址"',
         'agent-router ask --local-wallet "BTC 当前最大爆仓痛点是多少"',
+        'agent-router ask --quote-only "BTC 当前最大爆仓痛点是多少"',
+        "agent-router doctor",
         "agent-router capabilities",
         'agent-router request \'{"capability":"perp_liquidation_max_pain","params":{"asset":"BTC","market_type":"perpetual_futures","window":"current"},"constraints":{"max_price_usdc":"0.05"}}\'',
         'agent-router quote \'{"capability":"perp_liquidation_max_pain","params":{"asset":"BTC","market_type":"perpetual_futures","window":"current"},"constraints":{"max_price_usdc":"0.05"}}\'',
@@ -69,7 +97,7 @@ try {
         'agent-router invoke listlookonchainaddresses \'{"tag":"Matrixport","limit":1}\''
       ],
       base_url: baseUrl,
-      local_wallet: localWalletStatus()
+      local_payment: localDiagnostics()
     });
   }
 } catch (error) {
@@ -84,11 +112,14 @@ try {
 function parseRuntimeFlags(values) {
   const parsed = {
     args: [],
-    localWalletRequested: false
+    localWalletRequested: false,
+    quoteOnlyRequested: false
   };
   for (const value of values) {
     if (value === "--local-wallet" || value === "--pay") {
       parsed.localWalletRequested = true;
+    } else if (value === "--quote-only" || value === "--dry-run") {
+      parsed.quoteOnlyRequested = true;
     } else {
       parsed.args.push(value);
     }
@@ -96,19 +127,43 @@ function parseRuntimeFlags(values) {
   return parsed;
 }
 
-function shouldUseLocalWallet({ localWalletRequested }) {
-  if (localWalletRequested) return true;
-  if (["circle_arc", "x402"].includes(String(process.env.ADN_PAYMENT_BACKEND || "").toLowerCase())) return true;
-  return fsSync.existsSync(path.join(process.env.ADN_DIR || defaultAdnDir, "wallet.json"));
+function localPaymentReadiness() {
+  const walletPath = path.join(process.env.ADN_DIR || defaultAdnDir, "wallet.json");
+  const walletFound = fsSync.existsSync(walletPath);
+  return {
+    ready: walletFound,
+    wallet_path: walletPath,
+    wallet_found: walletFound,
+    payment_backend: process.env.ADN_PAYMENT_BACKEND || "circle_arc",
+    agent_router_url: baseUrl
+  };
 }
 
-function localWalletStatus() {
-  const walletPath = path.join(process.env.ADN_DIR || defaultAdnDir, "wallet.json");
+function localDiagnostics() {
+  const readiness = localPaymentReadiness();
   return {
-    enabled_for_ask: shouldUseLocalWallet({ localWalletRequested }),
-    wallet_path: walletPath,
-    wallet_found: fsSync.existsSync(walletPath),
-    payment_backend: process.env.ADN_PAYMENT_BACKEND || null
+    ok: readiness.ready,
+    status: readiness.ready ? "local_payment_ready" : "local_payment_not_ready",
+    local_payment: readiness,
+    mcp_hint: {
+      server_command: "npx",
+      server_args: ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"]
+    },
+    repair_command: "npx -y github:connectwilson/agentrouter-markets#main --client all"
+  };
+}
+
+function localPaymentNotReadyResponse(readiness) {
+  return {
+    ok: false,
+    status: "local_payment_not_ready",
+    final_answer_available: false,
+    data_returned: false,
+    stop_reason: "AgentRouter paid data calls require the local payment wallet/MCP bridge. The CLI did not fall back to quote-only mode.",
+    local_payment: readiness,
+    repair_command: "npx -y github:connectwilson/agentrouter-markets#main --client all",
+    quote_only_command: 'agent-router ask --quote-only "<task>"',
+    next_step: "Run the repair command once, restart or reload the AI client, then retry the same data question."
   };
 }
 
