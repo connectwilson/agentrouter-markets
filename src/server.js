@@ -1038,7 +1038,12 @@ AGENT_ROUTER_URL="\${AGENT_ROUTER_URL:-${origin}}"
 SKILL_URL="\${AGENT_ROUTER_URL%/}/skills/AgentRouter/SKILL.md"
 TARGETS="\${AGENTROUTER_SKILL_DIRS:-$HOME/.agents/skills/agentrouter:$HOME/.claude/skills/agentrouter:$HOME/.codex/skills/agentrouter}"
 CLAUDE_CONFIG="\${CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
+CURSOR_CONFIG="\${CURSOR_MCP_CONFIG:-$HOME/.cursor/mcp.json}"
 CONFIGURE_CLAUDE_DESKTOP="\${AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP:-auto}"
+CONFIGURE_CURSOR="\${AGENTROUTER_CONFIGURE_CURSOR:-auto}"
+AGENTROUTER_ADN_DIR="\${AGENTROUTER_ADN_DIR:-$HOME/.agentrouter/adn}"
+AGENT_ROUTER_MAX_PRICE="\${AGENT_ROUTER_MAX_PRICE:-0.05}"
+ADN_ARC_RPC_URL="\${ADN_ARC_RPC_URL:-https://rpc.testnet.arc.network}"
 
 tmp_file="$(mktemp)"
 config_tmp="$(mktemp)"
@@ -1058,6 +1063,7 @@ for target_dir in "\${target_dirs[@]}"; do
 done
 
 configured_claude="no"
+configured_cursor="no"
 should_configure_claude="no"
 if [ "$CONFIGURE_CLAUDE_DESKTOP" = "1" ]; then
   should_configure_claude="yes"
@@ -1073,7 +1079,7 @@ if [ "$should_configure_claude" = "yes" ]; then
     printf '{}\n' > "$CLAUDE_CONFIG"
   fi
 
-  AGENT_ROUTER_URL="$AGENT_ROUTER_URL" CONFIG_PATH="$CLAUDE_CONFIG" OUT_PATH="$config_tmp" node <<'NODE'
+  AGENT_ROUTER_URL="$AGENT_ROUTER_URL" AGENT_ROUTER_MAX_PRICE="$AGENT_ROUTER_MAX_PRICE" ADN_ARC_RPC_URL="$ADN_ARC_RPC_URL" AGENTROUTER_ADN_DIR="$AGENTROUTER_ADN_DIR" CONFIG_PATH="$CLAUDE_CONFIG" OUT_PATH="$config_tmp" node <<'NODE'
 const fs = require("fs");
 const path = process.env.CONFIG_PATH;
 const out = process.env.OUT_PATH;
@@ -1092,7 +1098,10 @@ config.mcpServers.AgentRouter = {
   args: ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
   env: {
     AGENT_ROUTER_URL: agentRouterUrl,
-    AGENT_ROUTER_MAX_PRICE: "0.05"
+    AGENT_ROUTER_MAX_PRICE: process.env.AGENT_ROUTER_MAX_PRICE || "0.05",
+    ADN_PAYMENT_BACKEND: "circle_arc",
+    ADN_ARC_RPC_URL: process.env.ADN_ARC_RPC_URL || "https://rpc.testnet.arc.network",
+    ADN_DIR: process.env.AGENTROUTER_ADN_DIR
   }
 };
 fs.writeFileSync(out, JSON.stringify(config, null, 2) + "\\n");
@@ -1101,15 +1110,83 @@ NODE
   configured_claude="yes"
 fi
 
+should_configure_cursor="no"
+if [ "$CONFIGURE_CURSOR" = "1" ]; then
+  should_configure_cursor="yes"
+elif [ "$CONFIGURE_CURSOR" = "auto" ] && [ -d "$(dirname "$CURSOR_CONFIG")" ]; then
+  should_configure_cursor="yes"
+fi
+
+if [ "$should_configure_cursor" = "yes" ]; then
+  mkdir -p "$(dirname "$CURSOR_CONFIG")"
+  if [ -f "$CURSOR_CONFIG" ]; then
+    cp "$CURSOR_CONFIG" "$CURSOR_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
+  else
+    printf '{}\n' > "$CURSOR_CONFIG"
+  fi
+
+  AGENT_ROUTER_URL="$AGENT_ROUTER_URL" AGENT_ROUTER_MAX_PRICE="$AGENT_ROUTER_MAX_PRICE" ADN_ARC_RPC_URL="$ADN_ARC_RPC_URL" AGENTROUTER_ADN_DIR="$AGENTROUTER_ADN_DIR" CONFIG_PATH="$CURSOR_CONFIG" OUT_PATH="$config_tmp" node <<'NODE'
+const fs = require("fs");
+const path = process.env.CONFIG_PATH;
+const out = process.env.OUT_PATH;
+const agentRouterUrl = (process.env.AGENT_ROUTER_URL || "https://agentrouter.network").replace(/\\/$/, "");
+let config = {};
+try {
+  config = JSON.parse(fs.readFileSync(path, "utf8") || "{}");
+} catch (error) {
+  const backup = path + ".invalid." + Date.now();
+  fs.copyFileSync(path, backup);
+  config = {};
+}
+config.mcpServers = config.mcpServers && typeof config.mcpServers === "object" ? config.mcpServers : {};
+config.mcpServers.AgentRouter = {
+  command: "npx",
+  args: ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
+  env: {
+    AGENT_ROUTER_URL: agentRouterUrl,
+    AGENT_ROUTER_MAX_PRICE: process.env.AGENT_ROUTER_MAX_PRICE || "0.05",
+    ADN_PAYMENT_BACKEND: "circle_arc",
+    ADN_ARC_RPC_URL: process.env.ADN_ARC_RPC_URL || "https://rpc.testnet.arc.network",
+    ADN_DIR: process.env.AGENTROUTER_ADN_DIR
+  }
+};
+fs.writeFileSync(out, JSON.stringify(config, null, 2) + "\\n");
+NODE
+  mv "$config_tmp" "$CURSOR_CONFIG"
+  configured_cursor="yes"
+fi
+
+wallet_json="$(ADN_DIR="$AGENTROUTER_ADN_DIR" npx -y --package github:connectwilson/agentrouter-markets#main adn wallet create-session 2>/dev/null || true)"
+wallet_address="$(WALLET_JSON="$wallet_json" node <<'NODE'
+try {
+  const payload = JSON.parse(process.env.WALLET_JSON || "{}");
+  process.stdout.write(payload.address || "");
+} catch {}
+NODE
+)"
+
 echo "AgentRouter skill installed."
 if [ "$configured_claude" = "yes" ]; then
   echo "Claude Desktop MCP server configured."
-  echo "Restart Claude Desktop to activate AgentRouter tools."
+fi
+if [ "$configured_cursor" = "yes" ]; then
+  echo "Cursor MCP server configured."
+fi
+if [ -n "$wallet_address" ]; then
+  echo "AgentRouter local payment wallet ready."
+  echo "Fund address: $wallet_address"
+  echo "Network: Arc Testnet"
+  echo "Token: USDC"
+  echo "Suggested first top-up: 0.05 USDC"
+else
+  echo "Wallet was not created automatically. After MCP starts, call agentrouter_wallet_status to see the funding address."
+fi
+if [ "$configured_claude" = "yes" ] || [ "$configured_cursor" = "yes" ]; then
+  echo "Restart or reload the configured AI client to activate AgentRouter MCP tools."
 else
   echo "No desktop MCP config was changed."
-  echo "For web or hosted agents, add the Remote MCP URL below if the client supports Remote MCP."
-  echo "For Claude Desktop, rerun with AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1 if you want this script to write the MCP config."
-  echo "Restart or reload your AI client if it caches skills before asking data/API questions."
+  echo "For Claude Desktop, rerun with AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1."
+  echo "For Cursor, rerun with AGENTROUTER_CONFIGURE_CURSOR=1."
 fi
 echo "Then ask a normal data/API question; AgentRouter is available as the routing tool."
 echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"

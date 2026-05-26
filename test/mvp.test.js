@@ -167,11 +167,16 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(scriptText, /\$HOME\/\.agents\/skills\/agentrouter/);
     assert.match(scriptText, /claude_desktop_config\.json/);
     assert.match(scriptText, /config\.mcpServers\.AgentRouter/);
+    assert.match(scriptText, /CURSOR_MCP_CONFIG/);
+    assert.match(scriptText, /ADN_PAYMENT_BACKEND: "circle_arc"/);
+    assert.match(scriptText, /ADN_DIR: process\.env\.AGENTROUTER_ADN_DIR/);
+    assert.match(scriptText, /adn wallet create-session/);
+    assert.match(scriptText, /Fund address:/);
     assert.match(scriptText, /github:connectwilson\/agentrouter-markets#main/);
-    assert.match(scriptText, /Restart Claude Desktop/);
     assert.match(scriptText, /No desktop MCP config was changed/);
     assert.match(scriptText, /AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1/);
-    assert.match(scriptText, /Restart or reload your AI client/);
+    assert.match(scriptText, /AGENTROUTER_CONFIGURE_CURSOR=1/);
+    assert.match(scriptText, /Restart or reload the configured AI client/);
     assert.match(scriptText, /Then ask a normal data\/API question/);
     assert.doesNotMatch(scriptText, /github\.com/);
   });

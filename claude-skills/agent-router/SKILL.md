@@ -2,7 +2,7 @@
 name: AgentRouter
 description: Use this skill when an AI agent needs specialized, real-time, paid, or verifiable external data/API access; when the user asks to install or connect AgentRouter; or when a task needs API capability discovery/routing through an Agent Data Network. This is a generic data-routing skill, not a single fixed provider.
 metadata:
-  version: "0.1.4"
+  version: "0.1.5"
   tools:
     - bash
 ---
@@ -120,6 +120,7 @@ When the user asks to install AgentRouter or gives this GitHub skill link:
 1. Check whether `agentrouter_ask`, `agentrouter_quote`, or `agentrouter_capabilities` tools are already available. If yes, say AgentRouter is ready and run the user's request.
 2. Detect the current client if possible: Claude Desktop, Claude Code, Cursor, Windsurf, Cline, Continue, VS Code, ChatGPT, Codex, or unknown.
 3. Pick the least-friction install path:
+   - Shell-capable local desktop clients that need paid calls: run `curl -fsSL https://agentrouter.network/install.sh | bash`. This installs the skill, configures supported MCP clients when their config directories are present, creates a local AgentRouter payment wallet, and prints the Arc Testnet USDC funding address.
    - Skill-capable agent clients: install the skill with `npx skills add connectwilson/agentrouter-skill --skill AgentRouter`.
    - Claude web / hosted Claude / Managed Agents: add the Remote MCP connector URL `https://agentrouter.network/mcp`.
    - Non-interactive shells can use `npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy`.
@@ -174,7 +175,7 @@ After MCP is installed, the local AgentRouter bridge automatically creates a loc
 Use this guidance only when installation is needed.
 
 - Claude Code: if the user is installing the skill, prefer `npx skills add connectwilson/agentrouter-skill --skill AgentRouter`; for non-interactive shells, use `npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy`. After the skill is installed, connect MCP only if the user wants live tool calls from the local client.
-- Codex / OpenClaw / Hermes / Cursor / Windsurf with shell access: install the skill once, then use the GitHub npx AgentRouter CLI fallback for live calls when native MCP tools are not attached.
+- Codex / OpenClaw / Hermes / Cursor / Windsurf with shell access: for quote-only use, install the skill once; for paid data calls, run the AgentRouter installer so MCP and the local payment wallet are configured automatically.
 - Claude web / hosted Claude / Managed Agents: add `https://agentrouter.network/mcp` as a Remote MCP connector, then use `agentrouter_request`, `agentrouter_quote`, or `agentrouter_ask`.
 - Claude Desktop / Claude Code MCP: prefer the packaged `.mcpb` when available, or add an MCP server named `AgentRouter` with command `npx`, args `["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"]`, and env `AGENT_ROUTER_URL=https://agentrouter.network`. For Arc settlement, also set `AGENT_ROUTER_MAX_PRICE=0.05`, `ADN_PAYMENT_BACKEND=circle_arc`, and `ADN_ARC_RPC_URL=https://rpc.testnet.arc.network`.
 - Claude Desktop no-command path: ask the user to install `/Users/huazhenghao/Downloads/Arc/agentrouter.mcpb` through Settings -> Extensions -> Install Extension, then use `agentrouter_request`.
