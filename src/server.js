@@ -1,5 +1,6 @@
 import http from "node:http";
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
 import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
@@ -115,7 +116,7 @@ export function createServer({ store = createMemoryStore(), baseUrl = "" } = {})
 
 async function routeRequest(req, res, store, baseUrl) {
   const url = new URL(req.url, baseUrl);
-  const auth = { user: currentUser(req, store), providers: authProviders() };
+  const auth = { user: currentUser(req, store) || currentApiTokenUser(req), providers: authProviders() };
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/assets/client-logos/")) {
     await sendClientLogo(req, res, url);
@@ -754,6 +755,33 @@ function requireAuth(req, res, auth, url) {
     }
   });
   return false;
+}
+
+function currentApiTokenUser(req) {
+  const expected = process.env.ADN_STUDIO_API_TOKEN || process.env.ADN_ADMIN_API_TOKEN || "";
+  if (!expected) return null;
+  const supplied = bearerToken(req.headers.authorization || "") || req.headers["x-agentrouter-publish-token"] || "";
+  if (!supplied || !constantTimeEqual(String(supplied), String(expected))) return null;
+  return {
+    provider: "api_token",
+    id: "provider-publish-token",
+    name: "Provider Publish Token",
+    email: "",
+    avatar_url: "",
+    handle: "provider-publish-token"
+  };
+}
+
+function bearerToken(value = "") {
+  const match = String(value).match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+}
+
+function constantTimeEqual(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
 }
 
 function requireServiceOwner(req, res, auth, record) {

@@ -7,7 +7,7 @@ import { loadProviderConfigs } from "../src/registry.js";
 const args = parseArgs(process.argv.slice(2));
 
 if (!args.url) {
-  console.error("Usage: node scripts/import-provider-docs.js --url <docs-url> --provider <name> --secret-env <ENV_NAME> [--auth-header <header>] [--price 0.01]");
+  console.error("Usage: node scripts/import-provider-docs.js --url <docs-url> --provider <name> --secret-env <ENV_NAME> [--auth-header <header>] [--price 0.01] [--remote-url <url> --remote-token-env <ENV_NAME>]");
   process.exit(1);
 }
 
@@ -16,6 +16,13 @@ if (args.secretEnv && !secretValue) {
   console.error(`Missing API key: environment variable ${args.secretEnv} is not set.`);
   process.exit(1);
 }
+const remoteToken = args.remoteTokenEnv ? process.env[args.remoteTokenEnv] || "" : "";
+if (args.remoteUrl && args.remoteTokenEnv && !remoteToken) {
+  console.error(`Missing remote publish token: environment variable ${args.remoteTokenEnv} is not set.`);
+  process.exit(1);
+}
+if (args.remoteUrl) process.env.ADN_REMOTE_REGISTRY_URL = args.remoteUrl;
+if (remoteToken) process.env.ADN_REMOTE_PUBLISH_TOKEN = remoteToken;
 
 const store = createMemoryStore();
 const server = createServer({ store });
@@ -39,13 +46,15 @@ try {
   const drafts = discovered.drafts.map((draft) => ({ ...draft, selected: true }));
   const success = [];
   const failed = [];
-  console.error(`Discovered ${drafts.length} drafts from ${discovered.source}. Publishing with live validation...`);
+  const publishScope = args.remoteUrl ? "remote_and_local" : "local_only";
+  console.error(`Discovered ${drafts.length} drafts from ${discovered.source}. Publishing with live validation to ${args.remoteUrl || "local registry"}...`);
   for (let index = 0; index < drafts.length; index += 1) {
     const draft = drafts[index];
     process.stderr.write(`[${index + 1}/${drafts.length}] ${draft.service_id} ... `);
     const result = await publishApiDrafts({
       drafts: [draft],
-      publish_scope: "local_only"
+      publish_scope: publishScope,
+      remote_registry_url: args.remoteUrl || undefined
     }, store, baseUrl);
     const publishedOne = result.published || [];
     const failedOne = result.failed || [];

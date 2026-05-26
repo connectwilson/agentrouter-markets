@@ -1921,6 +1921,49 @@ test("Provider Studio imports OpenAPI data endpoints into multiple services", as
   });
 });
 
+test("remote Provider Studio publish accepts platform publish token without browser session", async () => {
+  const previousToken = process.env.ADN_STUDIO_API_TOKEN;
+  process.env.ADN_STUDIO_API_TOKEN = "test-remote-publish-token";
+  try {
+    await withServer(async ({ baseUrl, rawFetch }) => {
+      const discoverResponse = await fetch(`${baseUrl}/studio/import/discover`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          api_url: `${baseUrl}/mock/api`,
+          default_price: "0.01"
+        })
+      });
+      assert.equal(discoverResponse.status, 200);
+      const discovered = await discoverResponse.json();
+
+      const unauthenticated = await rawFetch(`${baseUrl}/studio/import/publish`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ drafts: [discovered.drafts[0]], publish_scope: "local_only" })
+      });
+      assert.equal(unauthenticated.status, 401);
+
+      const tokenPublish = await rawFetch(`${baseUrl}/studio/import/publish`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-remote-publish-token"
+        },
+        body: JSON.stringify({ drafts: [discovered.drafts[0]], publish_scope: "local_only" })
+      });
+      assert.equal(tokenPublish.status, 201);
+      const payload = await tokenPublish.json();
+      assert.equal(payload.ok, true);
+      assert.equal(payload.published.length, 1);
+      assert.equal(payload.published[0].service_id, discovered.drafts[0].service_id);
+    });
+  } finally {
+    if (previousToken === undefined) delete process.env.ADN_STUDIO_API_TOKEN;
+    else process.env.ADN_STUDIO_API_TOKEN = previousToken;
+  }
+});
+
 test("Provider Studio imports a direct API endpoint when no OpenAPI document exists", async () => {
   await withServer(async ({ baseUrl }) => {
     const endpointUrl = `${baseUrl}/api/v1/data/market-snapshot`;

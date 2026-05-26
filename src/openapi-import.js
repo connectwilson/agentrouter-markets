@@ -431,12 +431,16 @@ function isLocalBaseUrl(baseUrl) {
 }
 
 async function publishApiDraftsToRemote({ body, remoteUrl }) {
+  const remoteToken = body.remote_publish_token || process.env.ADN_REMOTE_PUBLISH_TOKEN || process.env.ADN_STUDIO_API_TOKEN || "";
+  const headers = { "content-type": "application/json" };
+  if (remoteToken) headers.authorization = `Bearer ${remoteToken}`;
   const response = await fetchWithTimeout(`${remoteUrl}/studio/import/publish`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({
       ...body,
       publish_scope: "local_only",
+      remote_publish_token: undefined,
       remote_registry_url: undefined
     })
   });
