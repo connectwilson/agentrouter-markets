@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { keccak256 } from "./keccak.js";
 
-export const ADN_DIR = path.resolve(process.env.ADN_DIR || ".adn");
+export const ADN_DIR = path.resolve(process.env.ADN_DIR || path.join(os.homedir(), ".agentrouter", "adn"));
 export const WALLET_PATH = path.join(ADN_DIR, "wallet.json");
 export const WALLET_SESSION_SECRET_PATH = path.join(ADN_DIR, "wallet-session.key");
 export const POLICY_PATH = path.join(ADN_DIR, "policy.json");

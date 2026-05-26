@@ -588,6 +588,10 @@ export function normalizeTaskIntent({ task = "", providedIntent, constraints = {
 
 export function rankCandidates(store, intent, constraints = {}) {
   const requiredCapabilities = capabilityRequirements(intent.capability);
+  const excludedServiceIds = new Set([
+    ...(constraints.exclude_service_ids || []),
+    ...(constraints.exclude_services || [])
+  ].filter(Boolean));
   const searchResults = searchServices(store, {
     query: buildSearchQuery(intent),
     capabilities: [],
@@ -596,6 +600,7 @@ export function rankCandidates(store, intent, constraints = {}) {
   });
 
   return searchResults
+    .filter((service) => !excludedServiceIds.has(service.service_id))
     .map((service) => scoreCandidate(store.services.get(service.service_id), intent, requiredCapabilities, constraints, service.match_score))
     .filter((candidate) => candidate.routing_score > 0)
     .sort((a, b) => b.routing_score - a.routing_score);
@@ -605,18 +610,21 @@ function detectIntent(text) {
   const asset = detectAsset(text);
   const chain = detectChain(text);
   const days = detectDays(text);
+  const tokenSmartMoneyActivity = Boolean(asset) && /smart[\s_-]?money|聪明钱/i.test(text) && /动向|动态|activity|movement|flow|flows|买|卖|bought|sold|近|过去|24\s*h|24\s*小时/i.test(text);
   const matches = CAPABILITY_ALIASES.map((entry) => {
     const keywordHits = entry.keywords.filter((keyword) => text.includes(keyword.toLowerCase())).length;
     return { entry, keywordHits };
   }).sort((a, b) => b.keywordHits - a.keywordHits);
 
   const best = matches[0];
-  const capability = best?.keywordHits ? best.entry.capability : null;
+  const capability = tokenSmartMoneyActivity ? "token_smart_money_activity" : best?.keywordHits ? best.entry.capability : null;
   return {
-    score: best?.keywordHits || 0,
+    score: tokenSmartMoneyActivity ? Math.max(3, best?.keywordHits || 0) : best?.keywordHits || 0,
     intent: {
       capability,
       asset,
+      token_symbol: capability === "token_smart_money_activity" ? asset : undefined,
+      window: capability === "token_smart_money_activity" ? "24h" : undefined,
       chain,
       days,
       market_type: capability === "perp_liquidation_max_pain" ? "perpetual_futures" : undefined,
@@ -1018,6 +1026,12 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     message: "Token resolver did not return a matching contract address."
   };
 
+  const resolution = describeTokenResolution({
+    requestedSymbol: tokenSymbol,
+    matchedSymbol: match.symbol,
+    matchedName: match.name,
+    chain: match.chain || normalizeProviderChain(intent.chain || "ethereum")
+  });
   return {
     ok: true,
     status: "resolved",
@@ -1026,6 +1040,12 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     chain: match.chain || normalizeProviderChain(intent.chain || "ethereum"),
     matched_name: match.name || null,
     matched_symbol: match.symbol || null,
+    asset_resolution: resolution,
+    requested_symbol: resolution.requested_symbol,
+    resolved_symbol: resolution.resolved_symbol,
+    resolution_type: resolution.resolution_type,
+    requires_disclosure: resolution.requires_disclosure,
+    disclosure: resolution.disclosure,
     resolver_service_id: resolver.service_id,
     resolver_verification_mode: resolverVerificationMode,
     resolver_input: resolverInput,
@@ -1062,6 +1082,46 @@ function findTokenMatch(data, { tokenSymbol, chain }) {
   ) || candidates.find((row) => String(row.symbol || "").toLowerCase() === normalized)
     || candidates.find((row) => String(row.name || "").toLowerCase() === normalized)
     || candidates[0] || null;
+}
+
+function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, chain }) {
+  const requested = String(requestedSymbol || "").toUpperCase();
+  const resolved = String(matchedSymbol || "").toUpperCase() || null;
+  const name = String(matchedName || "");
+  const exact = Boolean(requested && resolved && requested === resolved);
+  const wrappedLike = Boolean(
+    requested &&
+    !exact &&
+    (
+      resolved === `W${requested}` ||
+      /\bwrapped\b/i.test(name) ||
+      new RegExp(`\\bw${escapeRegExp(requested)}\\b`, "i").test(`${resolved} ${name}`)
+    )
+  );
+  const resolutionType = exact
+    ? "exact_symbol"
+    : wrappedLike
+      ? "wrapped_token_substitution"
+      : "symbol_substitution";
+  const requiresDisclosure = resolutionType !== "exact_symbol";
+  const scope = resolutionType === "wrapped_token_substitution"
+    ? "wrapped-token / EVM contract data, not native asset, CEX, or perpetual-market data"
+    : "a substituted token match, not an exact ticker match";
+  return {
+    requested_symbol: requested || null,
+    resolved_symbol: resolved,
+    matched_name: name || null,
+    chain: chain || null,
+    resolution_type: resolutionType,
+    requires_disclosure: requiresDisclosure,
+    disclosure: requiresDisclosure
+      ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`
+      : null
+  };
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function flattenObjects(value, out = []) {
@@ -1288,7 +1348,7 @@ function ambiguityNotesFor(capability) {
 function detectAsset(text) {
   if (/\bbitcoin\b/i.test(text)) return "BTC";
   if (/\bethereum\b/i.test(text)) return "ETH";
-  const match = text.match(/\b(btc|eth|sol|bnb|xrp|doge)\b/i);
+  const match = text.match(/\b(btc|eth|sol|bnb|xrp|doge|hype)\b/i);
   return match ? match[1].toUpperCase() : undefined;
 }
 
@@ -1307,7 +1367,8 @@ function coinGeckoIdForAsset(asset) {
 
 function detectChain(text) {
   if (/\beth\b/.test(text) || text.includes("以太坊")) return "ethereum";
-  for (const chain of ["base", "ethereum", "arbitrum", "optimism", "solana", "bsc"]) {
+  if (/hyper\s?evm|hyperevm|hyperliquid|hype/i.test(text)) return "hyperevm";
+  for (const chain of ["base", "ethereum", "arbitrum", "optimism", "solana", "bsc", "hyperevm"]) {
     if (text.includes(chain)) return chain;
   }
   if (text.includes("链")) return "base";
@@ -1315,8 +1376,10 @@ function detectChain(text) {
 }
 
 function chainFromAsset(asset) {
-  if (String(asset || "").toUpperCase() === "ETH") return "ethereum";
-  if (String(asset || "").toUpperCase() === "BNB") return "bsc";
+  const normalized = String(asset || "").toUpperCase();
+  if (normalized === "ETH") return "ethereum";
+  if (normalized === "BNB") return "bsc";
+  if (normalized === "HYPE") return "hyperevm";
   return undefined;
 }
 

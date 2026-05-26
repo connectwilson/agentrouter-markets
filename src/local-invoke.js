@@ -23,7 +23,14 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     body: JSON.stringify(input)
   });
   if (firstResponse.status !== 402) {
-    throw new Error(`Expected HTTP 402 payment challenge, got ${firstResponse.status}.`);
+    const error = new Error(`Expected HTTP 402 payment challenge, got ${firstResponse.status}.`);
+    error.code = firstResponse.status >= 500 ? "provider_unavailable_before_payment" : "payment_challenge_unavailable";
+    error.upstreamStatus = firstResponse.status;
+    error.retryable = firstResponse.status >= 500;
+    try {
+      error.payload = await firstResponse.json();
+    } catch {}
+    throw error;
   }
 
   const challenge = await firstResponse.json();

@@ -441,7 +441,12 @@ async function requestWithLocalWallet(args) {
             status: tokenResolution.status,
             token_symbol: tokenResolution.token_symbol,
             token_address: tokenResolution.token_address,
-            chain: tokenResolution.chain
+            chain: tokenResolution.chain,
+            matched_symbol: tokenResolution.matched_symbol || null,
+            matched_name: tokenResolution.matched_name || null,
+            resolution_type: tokenResolution.resolution_type || null,
+            requires_disclosure: Boolean(tokenResolution.requires_disclosure),
+            disclosure: tokenResolution.disclosure || null
           } : null
         }
       }
@@ -569,6 +574,12 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
     };
   }
 
+  const resolution = describeTokenResolution({
+    requestedSymbol: tokenSymbol,
+    matchedSymbol: match.symbol,
+    matchedName: match.name,
+    chain: match.chain || chain
+  });
   return {
     ok: true,
     status: "resolved",
@@ -577,6 +588,12 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
     chain: match.chain || chain,
     matched_name: match.name || null,
     matched_symbol: match.symbol || null,
+    asset_resolution: resolution,
+    requested_symbol: resolution.requested_symbol,
+    resolved_symbol: resolution.resolved_symbol,
+    resolution_type: resolution.resolution_type,
+    requires_disclosure: resolution.requires_disclosure,
+    disclosure: resolution.disclosure,
     resolver_service_id: resolver.service_id,
     resolver_verification_mode: resolverVerificationMode,
     resolver_input: resolverInput,
@@ -639,6 +656,12 @@ function publicTokenResolution(tokenResolution) {
     chain: tokenResolution.chain,
     matched_name: tokenResolution.matched_name || null,
     matched_symbol: tokenResolution.matched_symbol || null,
+    asset_resolution: tokenResolution.asset_resolution || null,
+    requested_symbol: tokenResolution.requested_symbol || tokenResolution.token_symbol || null,
+    resolved_symbol: tokenResolution.resolved_symbol || tokenResolution.matched_symbol || null,
+    resolution_type: tokenResolution.resolution_type || null,
+    requires_disclosure: Boolean(tokenResolution.requires_disclosure),
+    disclosure: tokenResolution.disclosure || null,
     resolver_verification_mode: tokenResolution.resolver_verification_mode || null,
     resolver_request_id: tokenResolution.resolver_evidence_recording?.request_id || null,
     resolver_input: tokenResolution.resolver_input || null
@@ -679,6 +702,46 @@ function findTokenMatch(data, { tokenSymbol, chain }) {
     || candidates[0] || null;
 }
 
+function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, chain }) {
+  const requested = String(requestedSymbol || "").toUpperCase();
+  const resolved = String(matchedSymbol || "").toUpperCase() || null;
+  const name = String(matchedName || "");
+  const exact = Boolean(requested && resolved && requested === resolved);
+  const wrappedLike = Boolean(
+    requested &&
+    !exact &&
+    (
+      resolved === `W${requested}` ||
+      /\bwrapped\b/i.test(name) ||
+      new RegExp(`\\bw${escapeRegExp(requested)}\\b`, "i").test(`${resolved} ${name}`)
+    )
+  );
+  const resolutionType = exact
+    ? "exact_symbol"
+    : wrappedLike
+      ? "wrapped_token_substitution"
+      : "symbol_substitution";
+  const requiresDisclosure = resolutionType !== "exact_symbol";
+  const scope = resolutionType === "wrapped_token_substitution"
+    ? "wrapped-token / EVM contract data, not native asset, CEX, or perpetual-market data"
+    : "a substituted token match, not an exact ticker match";
+  return {
+    requested_symbol: requested || null,
+    resolved_symbol: resolved,
+    matched_name: name || null,
+    chain: chain || null,
+    resolution_type: resolutionType,
+    requires_disclosure: requiresDisclosure,
+    disclosure: requiresDisclosure
+      ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`
+      : null
+  };
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function flattenObjects(value, out = []) {
   if (!value || typeof value !== "object") return out;
   if (Array.isArray(value)) {
@@ -693,6 +756,7 @@ function flattenObjects(value, out = []) {
 function normalizeProviderChain(chain) {
   const normalized = String(chain || "").toLowerCase();
   if (normalized === "bsc") return "bnb";
+  if (["hyperliquid", "hyper-evm", "hyper evm", "hype"].includes(normalized)) return "hyperevm";
   return normalized || "ethereum";
 }
 

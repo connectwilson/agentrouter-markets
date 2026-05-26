@@ -361,7 +361,27 @@ export async function invokePaidService(store, serviceId, input, budget) {
     body: JSON.stringify(input)
   });
   if (firstResponse.status !== 402) {
-    return { statusCode: 502, body: { error: { code: "EXPECTED_402_PAYMENT_REQUIRED" } } };
+    const feedback = await recordOperationalFailure(store, record, {
+      input,
+      statusCode: firstResponse.status,
+      error: {
+        code: "EXPECTED_402_PAYMENT_REQUIRED",
+        message: `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`
+      },
+      started
+    });
+    return {
+      statusCode: firstResponse.status >= 500 ? 503 : 502,
+      body: {
+        error: {
+          code: firstResponse.status >= 500 ? "PROVIDER_UNAVAILABLE_BEFORE_PAYMENT" : "EXPECTED_402_PAYMENT_REQUIRED",
+          message: `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`,
+          upstream_status: firstResponse.status,
+          retryable: firstResponse.status >= 500
+        },
+        feedback
+      }
+    };
   }
   const challenge = await firstResponse.json();
   const proof = await createArcProofForProviderChallenge({
@@ -448,6 +468,39 @@ export async function invokePaidService(store, serviceId, input, budget) {
       feedback
     }
   };
+}
+
+async function recordOperationalFailure(store, record, { input, statusCode, error, started }) {
+  const serviceId = record.manifest.service_id;
+  const feedback = {
+    event_version: "agent_service_feedback_v1",
+    request_id: `prepay_fail_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    service_id: serviceId,
+    provider_id: record.manifest.provider.provider_id,
+    consumer_id: "agentrouter_consumer",
+    payment_tx: null,
+    status: "error",
+    http_status: statusCode,
+    schema_valid: false,
+    verification: null,
+    business_error: error,
+    latency_ms: Date.now() - started,
+    consumer_rating: 0,
+    created_at: new Date().toISOString()
+  };
+  record.feedback_events = record.feedback_events || [];
+  record.feedback_events.push(feedback);
+  store.feedbackEvents = store.feedbackEvents || [];
+  store.invocationLogs = store.invocationLogs || [];
+  store.feedbackEvents.push(feedback);
+  store.invocationLogs.push({ service_id: serviceId, input, feedback });
+  await writePersistentServiceEvent({
+    eventType: "operational_feedback",
+    serviceId,
+    requestId: feedback.request_id,
+    event: feedback
+  });
+  return feedback;
 }
 
 async function createArcProofForProviderChallenge({ serviceId, manifest, payment, consumerId }) {

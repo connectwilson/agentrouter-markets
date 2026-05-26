@@ -509,6 +509,12 @@ function buildTokenResolverInput(intent, manifest = {}) {
 }
 
 function withResolvedToken(intent, resolved, meta) {
+  const resolution = describeTokenResolution({
+    requestedSymbol: intent.token,
+    matchedSymbol: resolved.symbol,
+    matchedName: resolved.name,
+    chain: resolved.chain || intent.chain
+  });
   const nextIntent = {
     ...intent,
     chain: resolved.chain || intent.chain,
@@ -527,6 +533,12 @@ function withResolvedToken(intent, resolved, meta) {
     chain: resolved.chain || intent.chain || null,
     matched_name: resolved.name || null,
     matched_symbol: resolved.symbol || null,
+    asset_resolution: resolution,
+    requested_symbol: resolution.requested_symbol,
+    resolved_symbol: resolution.resolved_symbol,
+    resolution_type: resolution.resolution_type,
+    requires_disclosure: resolution.requires_disclosure,
+    disclosure: resolution.disclosure,
     intent: nextIntent,
     ...meta
   };
@@ -565,6 +577,46 @@ function extractTokenResolution(result, tokenSymbol, preferredChain) {
     });
   });
   return candidates.sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, chain }) {
+  const requested = String(requestedSymbol || "").toUpperCase();
+  const resolved = String(matchedSymbol || "").toUpperCase() || null;
+  const name = String(matchedName || "");
+  const exact = Boolean(requested && resolved && requested === resolved);
+  const wrappedLike = Boolean(
+    requested &&
+    !exact &&
+    (
+      resolved === `W${requested}` ||
+      /\bwrapped\b/i.test(name) ||
+      new RegExp(`\\bw${escapeRegExp(requested)}\\b`, "i").test(`${resolved} ${name}`)
+    )
+  );
+  const resolutionType = exact
+    ? "exact_symbol"
+    : wrappedLike
+      ? "wrapped_token_substitution"
+      : "symbol_substitution";
+  const requiresDisclosure = resolutionType !== "exact_symbol";
+  const scope = resolutionType === "wrapped_token_substitution"
+    ? "wrapped-token / EVM contract data, not native asset, CEX, or perpetual-market data"
+    : "a substituted token match, not an exact ticker match";
+  return {
+    requested_symbol: requested || null,
+    resolved_symbol: resolved,
+    matched_name: name || null,
+    chain: chain || null,
+    resolution_type: resolutionType,
+    requires_disclosure: requiresDisclosure,
+    disclosure: requiresDisclosure
+      ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`
+      : null
+  };
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function walkJson(value, visitor) {
@@ -691,6 +743,16 @@ function detectClarification(task) {
 }
 
 function intentToCapabilityRequest(intent, { max_price: maxPrice } = {}) {
+  if (intent.wants_smart_money_activity) {
+    return {
+      capability: "token_smart_money_activity",
+      params: intent.input,
+      constraints: {
+        max_price_usdc: maxPrice || "0.05",
+        freshness_seconds: 300
+      }
+    };
+  }
   if (intent.wants_smart_money_netflow) {
     return {
       capability: "smart_money_netflow",
@@ -754,16 +816,19 @@ function detectAddress(task) {
 function detectChain(task) {
   const text = String(task || "").toLowerCase();
   if (/\beth\b/.test(text) || text.includes("以太坊")) return "ethereum";
-  for (const chain of ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc"]) {
+  if (/hyper\s?evm|hyperevm|hyperliquid|hype/i.test(text)) return "hyperevm";
+  for (const chain of ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc", "hyperevm"]) {
     if (text.includes(chain)) return chain;
   }
   return null;
 }
 
 function chainForAsset(asset) {
-  if (asset === "ETH") return "ethereum";
-  if (asset === "SOL") return "solana";
-  if (asset === "BNB") return "bsc";
+  const normalized = String(asset || "").toUpperCase();
+  if (normalized === "ETH") return "ethereum";
+  if (normalized === "SOL") return "solana";
+  if (normalized === "BNB") return "bsc";
+  if (normalized === "HYPE") return "hyperevm";
   return null;
 }
 
@@ -792,12 +857,15 @@ function searchCandidates(store, intent, maxPrice) {
 
 async function searchCandidatesRemote(baseUrl, intent, maxPrice) {
   const seen = new Map();
-  for (const query of intent.search_queries) {
-    const items = await post(baseUrl, "/connector/search_services", {
+  const queries = [...new Set(intent.search_queries)]
+    .filter(Boolean)
+    .slice(0, intent.has_known_intent ? 4 : 8);
+  const batches = await Promise.all(queries.map((query) => post(baseUrl, "/connector/search_services", {
       query,
       verified_only: true,
       max_price: maxPrice
-    });
+    }).catch(() => [])));
+  for (const items of batches) {
     for (const item of items) seen.set(item.service_id, item);
   }
   return filterDynamicCandidates([...seen.values()], intent);

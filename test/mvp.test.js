@@ -34,6 +34,7 @@ const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
 const { invokePaidServiceWithLocalWallet } = await import("../src/local-invoke.js");
 const { diagnoseAgentRouter, formatDoctorResult, formatInstallResult, installAgentRouter, parseInstallArgs } = await import("../src/agentrouter-installer.js");
+const { inferIntent } = await import("../src/agent-router.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -181,6 +182,37 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(scriptText, /Then ask a normal data\/API question/);
     assert.doesNotMatch(scriptText, /github\.com/);
   });
+});
+
+test("AgentRouter natural-language parser maps HYPE smart-money requests to HyperEVM", () => {
+  const intent = inferIntent("查 HYPE 近 24 小时聪明钱动向");
+  assert.equal(intent.wants_smart_money_activity, true);
+  assert.equal(intent.token, "HYPE");
+  assert.equal(intent.chain, "hyperevm");
+  assert.equal(intent.input.chain, "hyperevm");
+  assert.equal(intent.input.window, "24h");
+});
+
+test("wallet default path is stable outside temporary working directories", async () => {
+  const env = { ...process.env };
+  delete env.ADN_DIR;
+  env.HOME = path.join(runtimeRoot, "home-default-wallet");
+  const child = spawn(process.execPath, ["--input-type=module", "-e", "import('./src/wallet.js').then((m) => console.log(m.WALLET_PATH))"], {
+    cwd: process.cwd(),
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  const code = await new Promise((resolve) => child.on("close", resolve));
+  assert.equal(code, 0, stderr);
+  assert.equal(stdout.trim(), path.join(env.HOME, ".agentrouter", "adn", "wallet.json"));
 });
 
 test("agentrouter CLI installer installs skill and configures local MCP clients", async () => {
@@ -1738,6 +1770,8 @@ test("AgentRouter resolves token symbols before invoking token-address services"
     assert.equal(routed.selected_service.service_id, "token_flow_intelligence");
     assert.equal(routed.token_resolution.status, "resolved");
     assert.equal(routed.token_resolution.resolver_service_id, "token_search_resolver");
+    assert.equal(routed.token_resolution.resolution_type, "exact_symbol");
+    assert.equal(routed.token_resolution.requires_disclosure, false);
     assert.equal(routed.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
     assert.equal(routed.input.chain, "ethereum");
     assert.equal(routed.input.timeframe, "1d");
@@ -1764,6 +1798,8 @@ test("AgentRouter resolves token symbols before invoking token-address services"
     assert.equal(structured.selected_service.service_id, "token_flow_intelligence");
     assert.equal(structured.token_resolution.status, "resolved");
     assert.equal(structured.token_resolution.resolver_service_id, "token_search_resolver");
+    assert.equal(structured.token_resolution.resolution_type, "exact_symbol");
+    assert.equal(structured.token_resolution.requires_disclosure, false);
     assert.equal(structured.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
     assert.equal(structured.result.data.smart_money_netflow_usd, 220000);
 
@@ -1791,6 +1827,8 @@ test("AgentRouter resolves token symbols before invoking token-address services"
       assert.equal(mcpRouted.ok, true);
       assert.equal(mcpRouted.token_resolution.status, "resolved");
       assert.equal(mcpRouted.token_resolution.token_address, "0x1234567890abcdef1234567890abcdef12345678");
+      assert.equal(mcpRouted.token_resolution.resolution_type, "exact_symbol");
+      assert.equal(mcpRouted.token_resolution.requires_disclosure, false);
       assert.equal(mcpRouted.input.token_address, "0x1234567890abcdef1234567890abcdef12345678");
       assert.equal(mcpRouted.result.data.smart_money_netflow_usd, 220000);
       assert.equal(mcpRouted.feedback_required, true);
@@ -1804,6 +1842,173 @@ test("AgentRouter resolves token symbols before invoking token-address services"
       assert.equal(mcpEvidence.events[0].request.params.token_address, "0x1234567890abcdef1234567890abcdef12345678");
     } finally {
       client.close();
+    }
+  });
+});
+
+test("AgentRouter discloses wrapped-token substitutions during token resolution", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const resolverResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "wrapped_token_search_resolver",
+        title: "Token Search Resolver",
+        provider_name: "Token Directory Lab",
+        description_for_agent: "Use this service to search token symbols and resolve contract addresses by chain.",
+        capabilities: "data_service,token_search,entity_search,token_metadata",
+        price: "0.01",
+        sample_request: "{\"search_query\":\"HYPE\",\"result_type\":\"token\",\"chain\":\"hyperevm\",\"limit\":5}",
+        sample_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+        live_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+        summary: "Resolve token symbols to token contract addresses."
+      })
+    });
+    assert.equal(resolverResponse.status, 201);
+
+    const flowResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "static-json",
+        service_id: "hyperevm_token_flow",
+        title: "HyperEVM Token Flow",
+        provider_name: "Token Flow Lab",
+        description_for_agent: "Use this service for token-level smart money activity on HyperEVM token contracts.",
+        capabilities: "data_service,token_god_mode,token_data,flow_intelligence,token_flow,buyer_seller_flow,smart_money",
+        price: "0.01",
+        sample_request: "{\"chain\":\"hyperevm\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"1d\"}",
+        sample_data: "{\"token_symbol\":\"WHYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"window\":\"24h\",\"smart_money_netflow_usd\":0}",
+        live_data: "{\"token_symbol\":\"WHYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"window\":\"24h\",\"smart_money_netflow_usd\":0}",
+        summary: "Token-level smart money flow intelligence."
+      })
+    });
+    assert.equal(flowResponse.status, 201);
+
+    const response = await fetch(`${baseUrl}/agent-router/request`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        capability: "token_smart_money_activity",
+        params: {
+          token_symbol: "HYPE",
+          chain: "hyperevm",
+          window: "24h"
+        },
+        constraints: { max_price_usdc: "0.05" }
+      })
+    });
+    assert.equal(response.status, 200);
+    const routed = await response.json();
+    assert.equal(routed.ok, true);
+    assert.equal(routed.token_resolution.token_symbol, "HYPE");
+    assert.equal(routed.token_resolution.matched_symbol, "WHYPE");
+    assert.equal(routed.token_resolution.resolution_type, "wrapped_token_substitution");
+    assert.equal(routed.token_resolution.requires_disclosure, true);
+    assert.match(routed.token_resolution.disclosure, /wrapped-token \/ EVM contract data/);
+    assert.equal(routed.input.token_address, "0x5555555555555555555555555555555555555555");
+
+    const cli = await runAgentRouterCli(["ask", "查 HYPE 近 24 小时聪明钱动向"], {
+      ADN_REGISTRY_URL: baseUrl
+    });
+    assert.equal(cli.code, 0, cli.stderr);
+    const cliRouted = JSON.parse(cli.stdout);
+    assert.equal(cliRouted.ok, true);
+    assert.equal(cliRouted.status, "paid_with_local_wallet");
+    assert.equal(cliRouted.token_resolution.token_symbol, "HYPE");
+    assert.equal(cliRouted.token_resolution.chain, "hyperevm");
+    assert.equal(cliRouted.token_resolution.resolution_type, "wrapped_token_substitution");
+    assert.equal(cliRouted.input.token_address, "0x5555555555555555555555555555555555555555");
+    assert.ok(cliRouted.timing.resolve_route_ms == null);
+    assert.ok(cliRouted.timing.token_resolver_search_ms >= 0);
+    assert.ok(cliRouted.timing.quote_route_attempt_1_ms >= 0);
+  });
+});
+
+test("AgentRouter retries the next token smart-money service when a provider fails before payment", async () => {
+  await withServer(async ({ server, baseUrl }) => {
+    const failingUpstream = http.createServer((req, res) => {
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "UPSTREAM_UNAVAILABLE" } }));
+    });
+    await new Promise((resolve) => failingUpstream.listen(0, "127.0.0.1", resolve));
+    const failingUrl = `http://127.0.0.1:${failingUpstream.address().port}/provider`;
+
+    try {
+      const resolverResponse = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: "retry_token_search_resolver",
+          title: "Token Search Resolver",
+          provider_name: "Token Directory Lab",
+          description_for_agent: "Use this service to search token symbols and resolve contract addresses by chain.",
+          capabilities: "data_service,token_search,entity_search,token_metadata",
+          price: "0.01",
+          sample_request: "{\"search_query\":\"HYPE\",\"result_type\":\"token\",\"chain\":\"hyperevm\",\"limit\":5}",
+          sample_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+          live_data: "{\"data\":[{\"symbol\":\"WHYPE\",\"name\":\"Wrapped HYPE\",\"token_address\":\"0x5555555555555555555555555555555555555555\",\"chain\":\"hyperevm\"}]}",
+          summary: "Resolve token symbols to token contract addresses."
+        })
+      });
+      assert.equal(resolverResponse.status, 201);
+
+      const failingFlowResponse = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: "failing_hype_flow",
+          title: "HyperEVM Token Flow A",
+          provider_name: "Token Flow Lab",
+          description_for_agent: "Use this service for token-level smart money activity on HyperEVM token contracts.",
+          capabilities: "data_service,token_god_mode,token_data,flow_intelligence,token_flow,buyer_seller_flow,smart_money",
+          price: "0.01",
+          sample_request: "{\"chain\":\"hyperevm\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"1d\"}",
+          sample_data: "{\"token_symbol\":\"WHYPE\",\"smart_money_netflow_usd\":0}",
+          live_data: "{\"token_symbol\":\"WHYPE\",\"smart_money_netflow_usd\":0}",
+          summary: "Token-level smart money flow intelligence."
+        })
+      });
+      assert.equal(failingFlowResponse.status, 201);
+      server.store.services.get("failing_hype_flow").manifest.endpoint.url = failingUrl;
+
+      const healthyFlowResponse = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: "healthy_hype_flow",
+          title: "HyperEVM Token Flow B",
+          provider_name: "Token Flow Lab B",
+          description_for_agent: "Use this service for token-level smart money activity on HyperEVM token contracts.",
+          capabilities: "data_service,token_god_mode,token_data,flow_intelligence,token_flow,buyer_seller_flow,smart_money",
+          price: "0.01",
+          sample_request: "{\"chain\":\"hyperevm\",\"token_address\":\"0x0000000000000000000000000000000000000000\",\"timeframe\":\"24h\"}",
+          sample_data: "{\"token_symbol\":\"WHYPE\",\"smart_money_netflow_usd\":0}",
+          live_data: "{\"token_symbol\":\"WHYPE\",\"smart_money_netflow_usd\":42}",
+          summary: "Token-level smart money flow intelligence."
+        })
+      });
+      assert.equal(healthyFlowResponse.status, 201);
+
+      const cli = await runAgentRouterCli(["ask", "查 HYPE 近 24 小时聪明钱动向"], {
+        ADN_REGISTRY_URL: baseUrl
+      });
+      assert.equal(cli.code, 0, cli.stderr);
+      const payload = JSON.parse(cli.stdout);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.selected_service.service_id, "healthy_hype_flow");
+      assert.equal(payload.attempted_services[0].service_id, "failing_hype_flow");
+      assert.equal(payload.attempted_services[0].status, "provider_unavailable_before_payment");
+      assert.ok(payload.timing.quote_route_attempt_2_ms >= 0);
+    } finally {
+      await Promise.all(["retry_token_search_resolver", "failing_hype_flow", "healthy_hype_flow"].map((serviceId) =>
+        fs.rm(path.join(process.env.ADN_PROVIDER_DIR, `${serviceId}.json`), { force: true })
+      ));
+      await new Promise((resolve) => failingUpstream.close(resolve));
     }
   });
 });
