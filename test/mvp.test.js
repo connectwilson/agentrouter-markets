@@ -158,6 +158,8 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(scriptText, /config\.mcpServers\.AgentRouter/);
     assert.match(scriptText, /github:connectwilson\/agentrouter-markets#main/);
     assert.match(scriptText, /Restart Claude Desktop/);
+    assert.match(scriptText, /No desktop MCP config was changed/);
+    assert.match(scriptText, /AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1/);
     assert.doesNotMatch(scriptText, /github\.com/);
   });
 });

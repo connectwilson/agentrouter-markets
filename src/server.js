@@ -1038,7 +1038,7 @@ AGENT_ROUTER_URL="\${AGENT_ROUTER_URL:-${origin}}"
 SKILL_URL="\${AGENT_ROUTER_URL%/}/skills/AgentRouter/SKILL.md"
 TARGETS="\${AGENTROUTER_SKILL_DIRS:-$HOME/.agents/skills/agentrouter:$HOME/.claude/skills/agentrouter:$HOME/.codex/skills/agentrouter}"
 CLAUDE_CONFIG="\${CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
-CONFIGURE_CLAUDE_DESKTOP="\${AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP:-1}"
+CONFIGURE_CLAUDE_DESKTOP="\${AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP:-auto}"
 
 tmp_file="$(mktemp)"
 config_tmp="$(mktemp)"
@@ -1058,7 +1058,14 @@ for target_dir in "\${target_dirs[@]}"; do
 done
 
 configured_claude="no"
-if [ "$CONFIGURE_CLAUDE_DESKTOP" != "0" ]; then
+should_configure_claude="no"
+if [ "$CONFIGURE_CLAUDE_DESKTOP" = "1" ]; then
+  should_configure_claude="yes"
+elif [ "$CONFIGURE_CLAUDE_DESKTOP" = "auto" ] && [ -d "$(dirname "$CLAUDE_CONFIG")" ]; then
+  should_configure_claude="yes"
+fi
+
+if [ "$should_configure_claude" = "yes" ]; then
   mkdir -p "$(dirname "$CLAUDE_CONFIG")"
   if [ -f "$CLAUDE_CONFIG" ]; then
     cp "$CLAUDE_CONFIG" "$CLAUDE_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
@@ -1097,9 +1104,11 @@ fi
 echo "AgentRouter skill installed."
 if [ "$configured_claude" = "yes" ]; then
   echo "Claude Desktop MCP server configured."
-  echo "Restart Claude Desktop, then ask: Use AgentRouter to check BTC liquidation max pain."
+  echo "Restart Claude Desktop to activate AgentRouter tools."
 else
-  echo "Claude Desktop MCP configuration skipped."
+  echo "No desktop MCP config was changed."
+  echo "For web or hosted agents, add the Remote MCP URL below if the client supports Remote MCP."
+  echo "For Claude Desktop, rerun with AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1 if you want this script to write the MCP config."
 fi
 echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"
 `;
