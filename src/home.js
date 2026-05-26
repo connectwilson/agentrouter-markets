@@ -40,19 +40,19 @@ export function homeHtml({ auth = {} } = {}) {
           <div class="install-strip" aria-label="AgentRouter install command">
             <div class="install-top">
               <span class="status-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="install-label" id="home-install-label">remote mcp connector</span>
+              <span class="install-label" id="home-install-label">install skill</span>
             </div>
             <div class="install-command">
-              <code id="home-install-command"><span class="prompt">></span> ${html(remoteMcpUrl)}</code>
+              <code id="home-install-command"><span class="prompt">$</span> ${html(skillInstallCommand)}</code>
               <button type="button" id="home-copy-install">Copy</button>
             </div>
           </div>
           <div class="install-picker" aria-label="AgentRouter connection options">
-            <button type="button" data-install-key="remote" class="active">Remote MCP</button>
-            <button type="button" data-install-key="skill">Claude Code Skill</button>
+            <button type="button" data-install-key="skill" class="active">Skill Install</button>
+            <button type="button" data-install-key="remote">Remote MCP</button>
             <button type="button" data-install-key="local">Local MCP</button>
           </div>
-          <p class="install-note" id="home-install-note">For Claude web, hosted agents, and any client that supports URL-based Remote MCP.</p>
+          <p class="install-note" id="home-install-note">Install once, then shell-based agents can route API/data requests through AgentRouter.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">
@@ -173,10 +173,10 @@ export function homeHtml({ auth = {} } = {}) {
             note: "For Claude web, hosted agents, and any client that supports URL-based Remote MCP."
           },
           skill: {
-            label: "paste into claude code",
+            label: "install skill",
             prompt: "$",
             value: ${JSON.stringify(skillInstallCommand)},
-            note: "Installs the AgentRouter Skill so Claude Code knows when to route requests through AgentRouter."
+            note: "Install once, then shell-based agents can route API/data requests through AgentRouter."
           },
           local: {
             label: "local mcp command",
@@ -185,7 +185,7 @@ export function homeHtml({ auth = {} } = {}) {
             note: "Use this as the MCP server command in Codex, Cursor, Windsurf, OpenClaw, Hermes, or other local MCP clients."
           }
         };
-        let activeInstallKey = "remote";
+        let activeInstallKey = "skill";
         const commandEl = document.getElementById("home-install-command");
         const labelEl = document.getElementById("home-install-label");
         const noteEl = document.getElementById("home-install-note");

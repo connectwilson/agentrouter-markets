@@ -323,13 +323,21 @@ OAuth is for user identity only. Provider-owned API credentials still belong in 
 
 ## Claude Code Skill Install
 
-The easiest Claude Code entrypoint is the AgentRouter Skill. Paste this into Claude Code chat or run it in a terminal:
+The easiest shell-capable agent entrypoint is the AgentRouter Skill. Paste this into Claude Code chat or run it in a terminal:
 
 ```bash
 npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy
 ```
 
-The skill teaches Claude when to use AgentRouter, how to route data requests, and how to connect the MCP router when the current client supports MCP.
+The skill teaches Claude, Codex, OpenClaw, Hermes, Cursor, Windsurf, and similar agents when to use AgentRouter. If MCP tools are not attached, the skill can still call the hosted AgentRouter network through the GitHub npx CLI fallback:
+
+```bash
+AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com \
+AGENT_ROUTER_MAX_PRICE=0.05 \
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "BTC liquidation max pain"
+```
+
+This mirrors the Surf-style split: one command installs the skill, and the skill tells the agent which CLI or MCP path to use for live data.
 
 ## Remote MCP Connector
 
