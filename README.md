@@ -321,12 +321,18 @@ https://agentrouter.network/auth/github/callback
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
 
-## Claude Code Skill Install
+## One-Line Skill Install
 
-The easiest shell-capable agent entrypoint is the AgentRouter Skill. Paste this into Claude Code chat or run it in a terminal:
+The fastest shell-capable agent entrypoint installs the AgentRouter Skill directly from `agentrouter.network`, without cloning GitHub:
 
 ```bash
-npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy
+curl -fsSL https://agentrouter.network/install.sh | bash
+```
+
+For agents that already support the `skills` CLI and GitHub cloning, this also works:
+
+```bash
+npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy
 ```
 
 The skill teaches Claude, Codex, OpenClaw, Hermes, Cursor, Windsurf, and similar agents when to use AgentRouter. If MCP tools are not attached, the skill can still call the hosted AgentRouter network through the GitHub npx CLI fallback:

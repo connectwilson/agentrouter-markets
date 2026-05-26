@@ -32,6 +32,7 @@ const clientLogoPaths = {
   "windsurf.svg": new URL("../public/assets/client-logos/windsurf.svg", import.meta.url)
 };
 const brandLogoPath = new URL("../public/assets/brand/logo.png", import.meta.url);
+const agentRouterSkillPath = new URL("../claude-skills/agent-router/SKILL.md", import.meta.url);
 const remoteMcpTools = [
   {
     name: "agentrouter_request",
@@ -125,6 +126,16 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/assets/brand/logo.png") {
     await sendBrandLogo(req, res);
+    return;
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/skills/AgentRouter/SKILL.md") {
+    await sendAgentRouterSkill(req, res);
+    return;
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/install.sh") {
+    sendInstallScript(req, res, baseUrl);
     return;
   }
 
@@ -1002,6 +1013,55 @@ async function sendBrandLogo(req, res) {
   } catch {
     sendNotFound(res, "BRAND_LOGO_NOT_FOUND");
   }
+}
+
+async function sendAgentRouterSkill(req, res) {
+  try {
+    const body = await fs.readFile(agentRouterSkillPath, "utf8");
+    res.writeHead(200, {
+      "content-type": "text/markdown; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      "content-length": Buffer.byteLength(body)
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  } catch {
+    sendNotFound(res, "AGENTROUTER_SKILL_NOT_FOUND");
+  }
+}
+
+function sendInstallScript(req, res, baseUrl) {
+  const origin = String(baseUrl || "https://agentrouter.network").replace(/\/$/, "");
+  const body = `#!/usr/bin/env bash
+set -euo pipefail
+
+AGENT_ROUTER_URL="\${AGENT_ROUTER_URL:-${origin}}"
+SKILL_URL="\${AGENT_ROUTER_URL%/}/skills/AgentRouter/SKILL.md"
+TARGETS="\${AGENTROUTER_SKILL_DIRS:-$HOME/.agents/skills/agentrouter:$HOME/.claude/skills/agentrouter:$HOME/.codex/skills/agentrouter}"
+
+tmp_file="$(mktemp)"
+cleanup() {
+  rm -f "$tmp_file"
+}
+trap cleanup EXIT
+
+curl -fsSL "$SKILL_URL" -o "$tmp_file"
+
+IFS=":" read -r -a target_dirs <<< "$TARGETS"
+for target_dir in "\${target_dirs[@]}"; do
+  [ -n "$target_dir" ] || continue
+  mkdir -p "$target_dir"
+  cp "$tmp_file" "$target_dir/SKILL.md"
+done
+
+echo "AgentRouter skill installed."
+echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"
+`;
+  res.writeHead(200, {
+    "content-type": "text/x-shellscript; charset=utf-8",
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(body)
+  });
+  res.end(req.method === "HEAD" ? undefined : body);
 }
 
 function localServerPaidInvocationsAllowed(baseUrl) {

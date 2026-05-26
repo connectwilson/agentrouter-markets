@@ -100,6 +100,8 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(homeHtml, /Network snapshot/);
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
+    assert.match(homeHtml, /curl -fsSL https:\/\/agentrouter\.network\/install\.sh \| bash/);
+    assert.match(homeHtml, /https:\/\/agentrouter\.network\/mcp/);
 
     const human = await fetch(`${baseUrl}/human`);
     assert.equal(human.status, 200);
@@ -134,6 +136,25 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(studioHtml, /Provider Studio/);
     assert.match(studioHtml, /Verify & Publish Selected/);
     assert.doesNotMatch(studioHtml, /Buyer auth/);
+  });
+});
+
+test("AgentRouter skill can be installed without cloning GitHub", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const skill = await fetch(`${baseUrl}/skills/AgentRouter/SKILL.md`);
+    assert.equal(skill.status, 200);
+    assert.match(skill.headers.get("content-type"), /text\/markdown/);
+    const skillText = await skill.text();
+    assert.match(skillText, /name: AgentRouter/);
+    assert.match(skillText, /https:\/\/agentrouter\.network\/mcp/);
+
+    const installScript = await fetch(`${baseUrl}/install.sh`);
+    assert.equal(installScript.status, 200);
+    assert.match(installScript.headers.get("content-type"), /text\/x-shellscript/);
+    const scriptText = await installScript.text();
+    assert.match(scriptText, /SKILL_URL="\$\{AGENT_ROUTER_URL%\/\}\/skills\/AgentRouter\/SKILL.md"/);
+    assert.match(scriptText, /\$HOME\/\.agents\/skills\/agentrouter/);
+    assert.doesNotMatch(scriptText, /github\.com/);
   });
 });
 

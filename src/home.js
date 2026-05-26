@@ -1,5 +1,6 @@
 const remoteMcpUrl = "https://agentrouter.network/mcp";
-const skillInstallCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy";
+const skillInstallCommand = "curl -fsSL https://agentrouter.network/install.sh | bash";
+const skillsCliInstallCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy";
 const localMcpCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{
   "mcpServers": {
@@ -49,10 +50,11 @@ export function homeHtml({ auth = {} } = {}) {
           </div>
           <div class="install-picker" aria-label="AgentRouter connection options">
             <button type="button" data-install-key="skill" class="active">Skill Install</button>
+            <button type="button" data-install-key="skillscli">Skills CLI</button>
             <button type="button" data-install-key="remote">Remote MCP</button>
             <button type="button" data-install-key="local">Local MCP</button>
           </div>
-          <p class="install-note" id="home-install-note">Install once, then shell-based agents can route API/data requests through AgentRouter.</p>
+          <p class="install-note" id="home-install-note">Installs the AgentRouter Skill from agentrouter.network without cloning GitHub.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">
@@ -176,7 +178,13 @@ export function homeHtml({ auth = {} } = {}) {
             label: "install skill",
             prompt: "$",
             value: ${JSON.stringify(skillInstallCommand)},
-            note: "Install once, then shell-based agents can route API/data requests through AgentRouter."
+            note: "Installs the AgentRouter Skill from agentrouter.network without cloning GitHub."
+          },
+          skillscli: {
+            label: "skills cli install",
+            prompt: "$",
+            value: ${JSON.stringify(skillsCliInstallCommand)},
+            note: "Use this when your agent environment supports the skills CLI and GitHub cloning."
           },
           local: {
             label: "local mcp command",
