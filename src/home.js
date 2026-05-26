@@ -1,6 +1,4 @@
-const remoteMcpUrl = "https://agentrouter.network/mcp";
 const skillInstallCommand = "npx skills add connectwilson/agentrouter-skill --skill AgentRouter";
-const localMcpCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{
   "mcpServers": {
     "AgentRouter": {
@@ -46,11 +44,6 @@ export function homeHtml({ auth = {} } = {}) {
               <code id="home-install-command"><span class="prompt">$</span> ${html(skillInstallCommand)}</code>
               <button type="button" id="home-copy-install">Copy</button>
             </div>
-          </div>
-          <div class="install-picker" aria-label="AgentRouter connection options">
-            <button type="button" data-install-key="skill" class="active">Skill Install</button>
-            <button type="button" data-install-key="remote">Remote MCP</button>
-            <button type="button" data-install-key="local">Local MCP</button>
           </div>
           <p class="install-note" id="home-install-note">Installs the AgentRouter Skill with the standard skills CLI.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
@@ -165,53 +158,10 @@ export function homeHtml({ auth = {} } = {}) {
           renderHomeTables(stats.services || []);
         }
         ${sharedClientHelpers()}
-        const installCommands = {
-          remote: {
-            label: "remote mcp connector",
-            prompt: ">",
-            value: ${JSON.stringify(remoteMcpUrl)},
-            note: "For Claude web, hosted agents, and any client that supports URL-based Remote MCP."
-          },
-          skill: {
-            label: "install skill",
-            prompt: "$",
-            value: ${JSON.stringify(skillInstallCommand)},
-            note: "Installs the AgentRouter Skill with the standard skills CLI."
-          },
-          local: {
-            label: "local mcp command",
-            prompt: "$",
-            value: ${JSON.stringify(localMcpCommand)},
-            note: "Use this as the MCP server command in Codex, Cursor, Windsurf, OpenClaw, Hermes, or other local MCP clients."
-          }
-        };
-        let activeInstallKey = "skill";
-        const commandEl = document.getElementById("home-install-command");
-        const labelEl = document.getElementById("home-install-label");
-        const noteEl = document.getElementById("home-install-note");
-        function escapeHtml(value) {
-          return String(value).replace(/[&<>"']/g, (char) => ({
-            "&": "&amp;",
-            "<": "&lt;",
-            ">": "&gt;",
-            '"': "&quot;",
-            "'": "&#039;"
-          }[char]));
-        }
-        document.querySelectorAll("[data-install-key]").forEach((button) => {
-          button.addEventListener("click", () => {
-            activeInstallKey = button.dataset.installKey;
-            const selected = installCommands[activeInstallKey];
-            labelEl.textContent = selected.label;
-            commandEl.innerHTML = '<span class="prompt">' + selected.prompt + '</span> ' + escapeHtml(selected.value);
-            noteEl.textContent = selected.note;
-            document.querySelectorAll("[data-install-key]").forEach((item) => item.classList.toggle("active", item === button));
-          });
-        });
         document.getElementById("home-copy-install").addEventListener("click", async () => {
           const button = document.getElementById("home-copy-install");
           try {
-            await navigator.clipboard.writeText(installCommands[activeInstallKey].value);
+            await navigator.clipboard.writeText(${JSON.stringify(skillInstallCommand)});
             button.textContent = "Copied";
             setTimeout(() => button.textContent = "Copy", 1200);
           } catch {
@@ -843,10 +793,6 @@ function styles() {
     .install-strip .prompt { color:#ff2da1; margin-right:12px; }
     .install-strip button { min-height:36px; border:1px solid #3d4045; border-radius:8px; background:#15171a; color:#f4f4f5; cursor:pointer; font-weight:800; text-transform:uppercase; font-size:11px; }
     .install-strip button:hover { border-color:#666a70; background:#1f2226; }
-    .install-picker { margin-top:14px; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; }
-    .install-picker button { min-height:34px; border:1px solid #dfdfdf; border-radius:999px; background:#fff; color:#686d72; padding:0 14px; font-size:12px; font-weight:760; cursor:pointer; }
-    .install-picker button:hover, .install-picker button:focus-visible { border-color:#b9bdc2; color:#202226; outline:0; }
-    .install-picker button.active { border-color:#202226; background:#202226; color:#fff; }
     .install-note { margin:16px 0 0; color:#7b7f86; font-size:15px; line-height:1.4; }
     .client-row { width:min(760px, 100%); margin-top:18px; display:flex; align-items:flex-start; justify-content:center; gap:16px; color:#7b7f86; font-size:14px; }
     .client-row > span { min-height:38px; display:inline-flex; align-items:center; white-space:nowrap; }
@@ -1073,8 +1019,6 @@ function styles() {
       .install-command { min-height:104px; grid-template-columns:1fr; gap:12px; padding:22px 18px; }
       .install-strip code { font-size:16px; }
       .install-strip button { width:100%; min-height:44px; }
-      .install-picker { max-width:320px; }
-      .install-picker button { min-height:36px; }
       .install-note { font-size:15px; margin-top:14px; }
       .client-row { display:grid; justify-items:center; gap:12px; font-size:14px; }
       .client-row > span { min-height:auto; }

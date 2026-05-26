@@ -102,7 +102,8 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(homeHtml, /Open agent API hub/);
     assert.match(homeHtml, /npx skills add connectwilson\/agentrouter-skill --skill AgentRouter/);
     assert.match(homeHtml, /standard skills CLI/);
-    assert.match(homeHtml, /https:\/\/agentrouter\.network\/mcp/);
+    assert.doesNotMatch(homeHtml, /Remote MCP/);
+    assert.doesNotMatch(homeHtml, /Local MCP/);
 
     const human = await fetch(`${baseUrl}/human`);
     assert.equal(human.status, 200);
