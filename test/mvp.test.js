@@ -150,7 +150,11 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(skillText, /name: AgentRouter/);
     assert.match(skillText, /https:\/\/agentrouter\.network\/mcp/);
     assert.match(skillText, /Agent Data Routing/);
+    assert.match(skillText, /Payment Gate/);
     assert.match(skillText, /Do not require the user to mention AgentRouter/);
+    assert.match(skillText, /mcp__market-data__\*/);
+    assert.match(skillText, /fund_local_agentrouter_wallet/);
+    assert.match(skillText, /Do not continue with web search/);
 
     const installScript = await fetch(`${baseUrl}/install.sh`);
     assert.equal(installScript.status, 200);

@@ -36,7 +36,7 @@ const agentRouterSkillPath = new URL("../claude-skills/agent-router/SKILL.md", i
 const remoteMcpTools = [
   {
     name: "agentrouter_request",
-    description: "Use when the main agent needs specialized, real-time, paid, or verifiable external data/API access and can fill a structured capability request. AgentRouter routes, invokes, verifies, and returns evidence metadata.",
+    description: "Use when the main agent needs specialized, real-time, paid, or verifiable external data/API access and can fill a structured capability request. AgentRouter is the payment and trust boundary: route paid/provider-specific data through this tool instead of bypassing with provider MCP tools such as mcp__market-data__*. AgentRouter routes, invokes, verifies, and returns evidence metadata.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -51,7 +51,7 @@ const remoteMcpTools = [
   },
   {
     name: "agentrouter_quote",
-    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider.",
+    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider. Use this before paid/provider-specific data calls when the main agent needs to check budget or recharge requirements.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -83,7 +83,7 @@ const remoteMcpTools = [
   },
   {
     name: "agentrouter_ask",
-    description: "Natural-language AgentRouter helper for specialized, real-time, paid, or verifiable external data/API requests. Prefer agentrouter_capabilities plus agentrouter_request when the main agent can produce a structured request.",
+    description: "Natural-language AgentRouter helper for specialized, real-time, paid, or verifiable external data/API requests. Prefer agentrouter_capabilities plus agentrouter_request when the main agent can produce a structured request. Do not use web search or provider MCP tools as a fallback when this returns payment_required, quote_blocked, or wallet funding instructions.",
     inputSchema: {
       type: "object",
       required: ["task"],
