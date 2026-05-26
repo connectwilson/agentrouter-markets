@@ -2,7 +2,7 @@
 name: AgentRouter
 description: Use this skill when an AI agent needs specialized, real-time, paid, or verifiable external data/API access; when the user asks to install or connect AgentRouter; or when a task needs API capability discovery/routing through an Agent Data Network. This is a generic data-routing skill, not a single fixed provider.
 metadata:
-  version: "0.1.2"
+  version: "0.1.3"
   tools:
     - bash
 ---
@@ -10,6 +10,8 @@ metadata:
 # AgentRouter
 
 AgentRouter discovers, routes to, and invokes registered API/data services from an Agent Data Network. It is a tool layer the main agent should use when a task needs specialized, real-time, paid, or verifiable external data. The user should be able to ask a normal data question without saying "use AgentRouter".
+
+Important: this AgentRouter skill is not a software-development workflow router, task classifier, plugin recommender, or coding-methodology assistant. It does not route to BMAD, OpenSpec, Superpowers, or development-process tools. If the user asks for market data, on-chain intelligence, paid data, API data, or provider-specific data, this skill is directly relevant and must try the AgentRouter data path.
 
 ## Agent Data Routing
 

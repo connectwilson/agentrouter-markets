@@ -152,6 +152,8 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(skillText, /Agent Data Routing/);
     assert.match(skillText, /Payment Gate/);
     assert.match(skillText, /Do not require the user to mention AgentRouter/);
+    assert.match(skillText, /not a software-development workflow router/);
+    assert.match(skillText, /BMAD, OpenSpec, Superpowers/);
     assert.match(skillText, /mcp__market-data__\*/);
     assert.match(skillText, /fund_local_agentrouter_wallet/);
     assert.match(skillText, /Do not continue with web search/);
