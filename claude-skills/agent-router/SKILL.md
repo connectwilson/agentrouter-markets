@@ -123,10 +123,10 @@ When the user asks to install AgentRouter or gives this GitHub skill link:
 1. Check whether `agentrouter_ask`, `agentrouter_quote`, or `agentrouter_capabilities` tools are already available. If yes, say AgentRouter is ready and run the user's request.
 2. Detect the current client if possible: Claude Desktop, Claude Code, Cursor, Windsurf, Cline, Continue, VS Code, ChatGPT, Codex, or unknown.
 3. Pick the least-friction install path:
-   - Shell-capable local desktop clients that need paid calls: run `npx -y agentrouter`. This installs the skill, configures supported MCP clients when their config directories are present, creates a local AgentRouter payment wallet, and prints the Arc Testnet USDC funding address. Before npm publication, run `npx -y github:connectwilson/agentrouter-markets#main` for the same installer.
+   - Shell-capable local desktop clients that need paid calls: run `npx -y agentrouter`. This installs the skill, configures supported MCP clients, creates a local AgentRouter payment wallet, runs readiness checks, and prints the Arc Testnet USDC funding address. The installer must print `READY`; if it prints `NOT_READY`, run `npx -y agentrouter doctor` and stop until the readiness issue is fixed. Before npm publication, run `npx -y github:connectwilson/agentrouter-markets#main` for the same installer.
    - Skill-capable quote-only agent clients: install the skill with `npx skills add connectwilson/agentrouter-skill --skill AgentRouter`.
    - Claude web / hosted Claude / Managed Agents: add the Remote MCP connector URL `https://agentrouter.network/mcp`.
-   - Non-interactive shells can use `npx -y agentrouter --client all`.
+   - Non-interactive shells can use `npx -y agentrouter --client all --json` and must require `ok: true` before claiming installation succeeded.
    - Claude Desktop: prefer installing the packaged extension `agentrouter.mcpb` if the user has it.
    - npm/npx-capable MCP client: use the GitHub package fallback `npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp` until `@agentrouter/mcp` is published.
    - Remote MCP-capable client: add `https://agentrouter.network/mcp` if remote MCP is supported by that client.

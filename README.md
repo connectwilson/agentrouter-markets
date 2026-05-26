@@ -323,7 +323,7 @@ OAuth is for user identity only. Provider-owned API credentials still belong in 
 
 ## Skill Install
 
-The default AI-agent entrypoint is the AgentRouter installer. It installs the Skill, configures supported local MCP clients when their config directories are present, creates a local encrypted AgentRouter wallet, and prints the Arc Testnet USDC funding address:
+The default AI-agent entrypoint is the AgentRouter installer. It installs the Skill, configures supported local MCP clients, creates a local encrypted AgentRouter wallet, checks readiness, and prints the Arc Testnet USDC funding address:
 
 ```bash
 npx -y agentrouter
@@ -335,7 +335,13 @@ Before the npm package is published, the same installer can run from GitHub:
 npx -y github:connectwilson/agentrouter-markets#main
 ```
 
-After install, restart or reload the AI client. For the first paid data request, AgentRouter checks the quote/payment path first and shows wallet funding instructions if the local Arc wallet needs USDC. The agent should not bypass that prompt with web search or a provider-specific MCP tool.
+The installer must print `READY`. If it prints `NOT_READY`, run:
+
+```bash
+npx -y agentrouter doctor
+```
+
+After install, restart or reload the AI client. For the first paid data request, AgentRouter checks the local payment path first and shows wallet funding instructions if the local Arc wallet needs USDC. The agent should not bypass that prompt with web search or a provider-specific MCP tool.
 
 For a specific local client:
 

@@ -33,7 +33,7 @@ const { createMemoryStore } = await import("../src/store.js");
 const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
 const { invokePaidServiceWithLocalWallet } = await import("../src/local-invoke.js");
-const { formatInstallResult, installAgentRouter, parseInstallArgs } = await import("../src/agentrouter-installer.js");
+const { diagnoseAgentRouter, formatDoctorResult, formatInstallResult, installAgentRouter, parseInstallArgs } = await import("../src/agentrouter-installer.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -102,7 +102,7 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
     assert.match(homeHtml, /npx -y github:connectwilson\/agentrouter-markets#main/);
-    assert.match(homeHtml, /configures supported MCP clients/);
+    assert.match(homeHtml, /prints READY with the funding address/);
     assert.doesNotMatch(homeHtml, /Remote MCP/);
     assert.doesNotMatch(homeHtml, /Local MCP/);
 
@@ -195,10 +195,12 @@ test("agentrouter CLI installer installs skill and configures local MCP clients"
     claudeConfig,
     cursorConfig,
     skillText: "---\nname: AgentRouter\n---\n# AgentRouter\n",
-    createWallet: false
+    createWallet: false,
+    skipNetworkCheck: true
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.readiness.status, "NOT_READY");
   assert.equal(result.configured_clients.length, 2);
   assert.deepEqual(result.configured_clients.map((client) => client.name).sort(), ["Claude Desktop", "Cursor"]);
   assert.equal(await fs.readFile(path.join(home, ".agents", "skills", "agentrouter", "SKILL.md"), "utf8"), "---\nname: AgentRouter\n---\n# AgentRouter\n");
@@ -213,11 +215,37 @@ test("agentrouter CLI installer installs skill and configures local MCP clients"
     assert.match(config.mcpServers.AgentRouter.env.ADN_DIR, /\.agentrouter\/adn$/);
   }
 
-  assert.match(formatInstallResult(result), /AgentRouter installed/);
+  assert.match(formatInstallResult(result), /AgentRouter installed\. NOT_READY/);
   assert.deepEqual(parseInstallArgs(["install", "--client", "cursor", "--no-wallet"]), {
     clients: ["cursor"],
     createWallet: false
   });
+});
+
+test("agentrouter doctor reports readiness when skill wallet and MCP config are present", async () => {
+  const home = await fs.mkdtemp(path.join(runtimeRoot, "agentrouter-doctor-"));
+  const adnDir = path.join(home, ".agentrouter", "adn");
+  const cursorConfig = path.join(home, ".cursor", "mcp.json");
+  const result = await installAgentRouter({
+    home,
+    clients: ["cursor"],
+    adnDir,
+    cursorConfig,
+    skillText: "---\nname: AgentRouter\n---\n# AgentRouter\n",
+    skipNetworkCheck: true
+  });
+  assert.equal(result.ok, true);
+
+  const doctor = await diagnoseAgentRouter({
+    home,
+    adnDir,
+    cursorConfig,
+    skipNetwork: true
+  });
+  assert.equal(doctor.ready, true);
+  assert.equal(doctor.status, "READY");
+  assert.match(formatDoctorResult(doctor), /AgentRouter doctor: READY/);
+  assert.ok(doctor.checks.some((check) => check.name === "wallet" && check.ok));
 });
 
 test("GitHub login entrypoint renders and OAuth callback creates a session", async () => {

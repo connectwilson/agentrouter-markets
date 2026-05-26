@@ -45,7 +45,7 @@ export function homeHtml({ auth = {} } = {}) {
               <button type="button" id="home-copy-install">Copy</button>
             </div>
           </div>
-          <p class="install-note" id="home-install-note">Installs the Skill, configures supported MCP clients, creates a local payment wallet, and prints the funding address.</p>
+          <p class="install-note" id="home-install-note">Installs the Skill, configures MCP clients, creates a local payment wallet, and prints READY with the funding address.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">

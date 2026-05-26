@@ -21,7 +21,7 @@ export async function installAgentRouter(options = {}) {
   const arcRpcUrl = options.arcRpcUrl || process.env.ADN_ARC_RPC_URL || DEFAULT_ARC_RPC_URL;
   const packageSpec = options.packageSpec || process.env.AGENTROUTER_MCP_PACKAGE || DEFAULT_PACKAGE_SPEC;
   const adnDir = path.resolve(options.adnDir || process.env.AGENTROUTER_ADN_DIR || path.join(home, ".agentrouter", "adn"));
-  const clients = normalizeClients(options.clients || parseClients(process.env.AGENTROUTER_CLIENT));
+  const clients = normalizeClients(options.clients?.length ? options.clients : parseClients(process.env.AGENTROUTER_CLIENT) || ["all"]);
   const result = {
     ok: true,
     agent_router_url: agentRouterUrl,
@@ -29,6 +29,7 @@ export async function installAgentRouter(options = {}) {
     configured_clients: [],
     skipped_clients: [],
     wallet: null,
+    readiness: null,
     next_steps: []
   };
 
@@ -67,11 +68,19 @@ export async function installAgentRouter(options = {}) {
     result.wallet = await createLocalWallet({ adnDir, cwd: options.cwd || repoRoot });
   }
 
-  if (result.configured_clients.length) {
-    result.next_steps.push("Restart or reload the configured AI client to activate AgentRouter MCP tools.");
-  } else {
-    result.next_steps.push("No desktop MCP config was changed. Rerun with --client cursor, --client claude-desktop, or --client all to force a client config.");
-  }
+  result.readiness = await diagnoseAgentRouter({
+    home,
+    agentRouterUrl,
+    adnDir,
+    claudeConfig,
+    cursorConfig,
+    requireConfiguredClient: options.requireConfiguredClient !== false,
+    skipNetwork: options.skipNetworkCheck === true
+  });
+  result.ok = result.readiness.ready;
+
+  if (result.configured_clients.length) result.next_steps.push("Restart or reload the configured AI client to activate AgentRouter MCP tools.");
+  else result.next_steps.push("No desktop MCP config was changed. Rerun with --client cursor, --client claude-desktop, or --client all to force a client config.");
   if (result.wallet?.address) {
     result.next_steps.push(`Fund ${result.wallet.address} with Arc Testnet USDC before the first paid data call.`);
   } else {
@@ -84,7 +93,7 @@ export async function installAgentRouter(options = {}) {
 
 export function formatInstallResult(result) {
   const lines = [];
-  lines.push("AgentRouter installed.");
+  lines.push(result.ok ? "AgentRouter installed. READY" : "AgentRouter installed. NOT_READY");
   if (result.skill_paths?.length) {
     lines.push(`Skill installed: ${result.skill_paths.join(", ")}`);
   }
@@ -102,6 +111,12 @@ export function formatInstallResult(result) {
   } else if (result.wallet?.error) {
     lines.push(`Wallet was not created automatically: ${result.wallet.error}`);
   }
+  if (result.readiness) {
+    lines.push(`Readiness: ${result.readiness.status}`);
+    for (const check of result.readiness.checks || []) {
+      lines.push(`${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.message}`);
+    }
+  }
   for (const nextStep of result.next_steps || []) {
     lines.push(nextStep);
   }
@@ -112,7 +127,11 @@ export function formatInstallResult(result) {
 export function parseInstallArgs(argv) {
   const options = { clients: [] };
   const args = [...argv];
-  if (args[0] === "install") args.shift();
+  if (args[0] === "install" || args[0] === "setup") args.shift();
+  if (args[0] === "doctor" || args[0] === "diagnose" || args[0] === "status") {
+    options.doctor = true;
+    args.shift();
+  }
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--client") {
@@ -139,6 +158,10 @@ export function parseInstallArgs(argv) {
       options.createWallet = false;
     } else if (arg === "--no-skill") {
       options.installSkill = false;
+    } else if (arg === "--no-network-check") {
+      options.skipNetworkCheck = true;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else {
@@ -152,17 +175,70 @@ export function installUsage() {
   return `Usage:
   agentrouter
   agentrouter install
+  agentrouter doctor
   agentrouter install --client cursor
   agentrouter install --client claude-desktop
   agentrouter install --client all
+  agentrouter install --client auto
 
 Options:
   --url <url>        AgentRouter server URL. Default: https://agentrouter.network
   --max-price <n>   Default max price per data call in USDC. Default: 0.05
   --adn-dir <path>  Local AgentRouter wallet/payment directory.
+  --json            Print machine-readable JSON.
+  --no-network-check  Skip remote health check.
   --no-wallet       Install skill/config only.
   --no-skill        Configure MCP/wallet only.
 `;
+}
+
+export async function diagnoseAgentRouter(options = {}) {
+  const home = options.home || os.homedir();
+  const agentRouterUrl = trimTrailingSlash(options.agentRouterUrl || process.env.AGENT_ROUTER_URL || DEFAULT_AGENT_ROUTER_URL);
+  const adnDir = path.resolve(options.adnDir || process.env.AGENTROUTER_ADN_DIR || path.join(home, ".agentrouter", "adn"));
+  const claudeConfig = options.claudeConfig || process.env.CLAUDE_DESKTOP_CONFIG || path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  const cursorConfig = options.cursorConfig || process.env.CURSOR_MCP_CONFIG || path.join(home, ".cursor", "mcp.json");
+  const skillDirs = resolveSkillDirs({ home, value: options.skillDirs || process.env.AGENTROUTER_SKILL_DIRS });
+  const checks = [];
+
+  checks.push(await checkAnySkillInstalled(skillDirs));
+  checks.push(await checkWallet(adnDir));
+  const claude = await checkMcpConfig("Claude Desktop", claudeConfig, { agentRouterUrl, adnDir });
+  const cursor = await checkMcpConfig("Cursor", cursorConfig, { agentRouterUrl, adnDir });
+  checks.push(claude, cursor);
+  if (options.skipNetwork !== true) checks.push(await checkRemoteHealth(agentRouterUrl));
+
+  const hasClient = claude.ok || cursor.ok;
+  if (options.requireConfiguredClient !== false) {
+    checks.push({
+      name: "client_config",
+      ok: hasClient,
+      message: hasClient ? "At least one local MCP client is configured." : "No supported local MCP client config contains AgentRouter."
+    });
+  }
+
+  const ready = checks.filter((check) => check.required !== false).every((check) => check.ok);
+  return {
+    ok: ready,
+    ready,
+    status: ready ? "READY" : "NOT_READY",
+    agent_router_url: agentRouterUrl,
+    checks,
+    repair_command: "npx -y github:connectwilson/agentrouter-markets#main --client all",
+    next_step: ready
+      ? "Restart or reload the configured AI client, then ask a normal data/API question."
+      : "Run the repair command, restart or reload the AI client, then run agentrouter doctor again."
+  };
+}
+
+export function formatDoctorResult(result) {
+  const lines = [`AgentRouter doctor: ${result.status}`];
+  for (const check of result.checks || []) {
+    lines.push(`${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.message}`);
+  }
+  if (!result.ready) lines.push(`Repair: ${result.repair_command}`);
+  lines.push(result.next_step);
+  return `${lines.join("\n")}\n`;
 }
 
 async function loadSkillMarkdown({ skillText, skillUrl }) {
@@ -178,6 +254,117 @@ async function loadSkillMarkdown({ skillText, skillUrl }) {
     } catch {
       throw new Error(`Unable to fetch AgentRouter Skill from ${skillUrl}: ${error.message}`);
     }
+  }
+}
+
+async function checkAnySkillInstalled(skillDirs) {
+  const installed = [];
+  for (const skillDir of skillDirs) {
+    const skillPath = path.join(skillDir, "SKILL.md");
+    if (await fileExists(skillPath)) installed.push(skillPath);
+  }
+  return {
+    name: "skill",
+    ok: installed.length > 0,
+    message: installed.length ? `Found AgentRouter Skill at ${installed.join(", ")}` : "AgentRouter Skill is not installed.",
+    paths: installed
+  };
+}
+
+async function checkWallet(adnDir) {
+  const walletPath = path.join(adnDir, "wallet.json");
+  const sessionPath = path.join(adnDir, "wallet-session.key");
+  if (!await fileExists(walletPath)) {
+    return {
+      name: "wallet",
+      ok: false,
+      message: `Local payment wallet is missing at ${walletPath}.`,
+      wallet_path: walletPath
+    };
+  }
+  try {
+    const wallet = JSON.parse(await fs.readFile(walletPath, "utf8"));
+    return {
+      name: "wallet",
+      ok: Boolean(wallet.address && await fileExists(sessionPath)),
+      message: wallet.address && await fileExists(sessionPath)
+        ? `Local payment wallet is ready: ${wallet.address}`
+        : "Local payment wallet exists but session secret or address is missing.",
+      wallet_path: walletPath,
+      address: wallet.address || null
+    };
+  } catch (error) {
+    return {
+      name: "wallet",
+      ok: false,
+      message: `Local payment wallet is unreadable: ${error.message}`,
+      wallet_path: walletPath
+    };
+  }
+}
+
+async function checkMcpConfig(clientName, configPath, { agentRouterUrl, adnDir }) {
+  if (!await fileExists(configPath)) {
+    return {
+      name: `${slug(clientName)}_mcp`,
+      required: false,
+      ok: false,
+      message: `${clientName} MCP config is missing at ${configPath}.`,
+      config_path: configPath
+    };
+  }
+  try {
+    const config = JSON.parse(await fs.readFile(configPath, "utf8") || "{}");
+    const server = config?.mcpServers?.AgentRouter;
+    const ok = Boolean(
+      server &&
+      server.command === "npx" &&
+      Array.isArray(server.args) &&
+      server.args.includes("agent-router-mcp") &&
+      server.env?.AGENT_ROUTER_URL === agentRouterUrl &&
+      server.env?.ADN_PAYMENT_BACKEND === "circle_arc" &&
+      server.env?.ADN_DIR === adnDir
+    );
+    return {
+      name: `${slug(clientName)}_mcp`,
+      required: false,
+      ok,
+      message: ok ? `${clientName} MCP config is ready.` : `${clientName} MCP config exists but AgentRouter is missing or misconfigured.`,
+      config_path: configPath
+    };
+  } catch (error) {
+    return {
+      name: `${slug(clientName)}_mcp`,
+      required: false,
+      ok: false,
+      message: `${clientName} MCP config is not valid JSON: ${error.message}`,
+      config_path: configPath
+    };
+  }
+}
+
+async function checkRemoteHealth(agentRouterUrl) {
+  try {
+    const response = await fetch(`${agentRouterUrl}/health`, { signal: AbortSignal.timeout(8000) });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      // Health endpoint should be JSON, but the HTTP status is still useful.
+    }
+    const ok = response.ok && payload.ok !== false;
+    return {
+      name: "remote_health",
+      ok,
+      message: ok ? `AgentRouter server is reachable at ${agentRouterUrl}.` : `AgentRouter server health check failed with HTTP ${response.status}.`,
+      status_code: response.status
+    };
+  } catch (error) {
+    return {
+      name: "remote_health",
+      ok: false,
+      message: `AgentRouter server is unreachable: ${error.message}`
+    };
   }
 }
 
@@ -258,7 +445,7 @@ async function createLocalWallet({ adnDir, cwd }) {
 }
 
 function parseClients(value) {
-  if (!value) return [];
+  if (!value) return null;
   return String(value).split(",").map((item) => item.trim()).filter(Boolean);
 }
 
@@ -271,6 +458,7 @@ function normalizeClients(value) {
     if (["claude", "claude-desktop", "claude_desktop"].includes(item)) normalized.add("claude-desktop");
     else if (["cursor"].includes(item)) normalized.add("cursor");
     else if (item === "all") normalized.add("all");
+    else if (item === "auto") normalized.add("auto");
     else normalized.add(item);
   }
   return normalized;
@@ -311,4 +499,8 @@ function timestamp() {
 function requireValue(value, name) {
   if (!value) throw new Error(`${name} requires a value`);
   return value;
+}
+
+function slug(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
