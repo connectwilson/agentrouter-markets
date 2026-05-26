@@ -15,6 +15,7 @@
     "test": "node --test",
     "test:mvp": "node --test",
     "provider:import": "node scripts/import-provider-docs.js",
+    "provider:sync": "node scripts/sync-provider-configs.js",
     "router:ask": "node bin/agent-router.js ask",
     "mcpb:check": "node --check mcpb/agentrouter/server/index.js",
     "mcpb:pack": "mcpb pack mcpb/agentrouter",

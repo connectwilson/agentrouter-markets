@@ -111,10 +111,16 @@ export async function handleCustomProvider(req, res, serviceId) {
   });
   if (!payment.ok) return;
 
+  const result = await executeProviderConfig(config, input);
+  await sendPaidResult({ res, payment, body: result.body, status: result.status });
+}
+
+export async function executeProviderConfig(config, input = {}) {
+  const serviceId = config.manifest?.service_id || "custom_provider";
   if (config.source?.type === "hosted_http") {
     const upstream = await callHostedHttpSource(config, input);
     if (upstream?.upstream_error) {
-      sendJson(res, 502, {
+      return { status: 502, body: {
         schema_version: "agent_data_envelope_v1",
         service_id: serviceId,
         request_id: `req_${Date.now()}`,
@@ -141,10 +147,9 @@ export async function handleCustomProvider(req, res, serviceId) {
           suggested_followups: ["Ask the provider to validate the upstream API key and sample request."]
         },
         summary: "Hosted HTTP upstream call failed."
-      });
-      return;
+      } };
     }
-    await sendPaidResult({ res, payment, body: createEnvelope({
+    return { status: 200, body: createEnvelope({
       serviceId,
       input,
       data: shapeHostedHttpPayload(upstream, input),
@@ -153,12 +158,11 @@ export async function handleCustomProvider(req, res, serviceId) {
       isEstimated: false,
       confidence: 0.8,
       summary: config.source.summary
-    }) });
-    return;
+    }) };
   }
 
   if (config.source?.type !== "static_json") {
-    sendJson(res, 200, {
+    return { status: 200, body: {
       schema_version: "agent_data_envelope_v1",
       service_id: serviceId,
       request_id: `req_${Date.now()}`,
@@ -169,11 +173,10 @@ export async function handleCustomProvider(req, res, serviceId) {
         retryable: false,
         suggested_action: "Use a supported provider config or add a source adapter."
       }
-    });
-    return;
+    } };
   }
 
-  await sendPaidResult({ res, payment, body: createEnvelope({
+  return { status: 200, body: createEnvelope({
     serviceId,
     input,
     data: config.source.live_data,
@@ -182,7 +185,7 @@ export async function handleCustomProvider(req, res, serviceId) {
     isEstimated: false,
     confidence: 0.8,
     summary: config.source.summary
-  }) });
+  }) };
 }
 
 async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, payTo, description }) {
@@ -231,17 +234,17 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
   return { ok: true, payment: { required: false } };
 }
 
-async function sendPaidResult({ res, payment, body }) {
+async function sendPaidResult({ res, payment, body, status = 200 }) {
   if (payment.payment?.required) {
     const settlement = await settleProviderX402Payment(payment.payment, body);
     if (settlement.failed) {
       sendX402Response(res, settlement.response);
       return;
     }
-    sendJson(res, 200, body, settlement.headers);
+    sendJson(res, status, body, settlement.headers);
     return;
   }
-  sendJson(res, 200, body);
+  sendJson(res, status, body);
 }
 
 function issueChallenge({ serviceId, amount, currency, network, payTo }) {

@@ -10,6 +10,7 @@ import { readProviderConfig, writeProviderConfig } from "./provider-config.js";
 import { assertArcUsdcBalance, sendArcUsdcTransfer, isEvmAddress } from "./arc-payment.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
 import { registerErc8004AgentIdentity } from "./erc8004.js";
+import { executeProviderConfig } from "./provider-runtime.js";
 
 export function registerService(store, manifest, baseUrl) {
   const manifestErrors = validateManifest(manifest);
@@ -231,6 +232,12 @@ export async function validateService(store, serviceId) {
 
   const manifest = record.manifest;
   const requestBody = manifest.sample_request || {};
+  const config = await readProviderConfig(serviceId).catch(() => null);
+  if (config) {
+    const result = await executeProviderConfig(config, requestBody);
+    return storeProviderValidationResult({ record, serviceId, status: result.status, responseBody: result.body });
+  }
+
   const firstResponse = await fetch(manifest.endpoint.url, {
     method: manifest.endpoint.method || "POST",
     headers: { "content-type": "application/json" },
@@ -264,15 +271,20 @@ export async function validateService(store, serviceId) {
     body: JSON.stringify(requestBody)
   });
   const responseBody = await paidResponse.json();
+  return storeProviderValidationResult({ record, serviceId, status: paidResponse.status, responseBody });
+}
+
+function storeProviderValidationResult({ record, serviceId, status, responseBody }) {
+  const manifest = record.manifest;
   const schemaErrors = validateJsonSchema(responseBody, manifest.output_schema);
   const envelopeErrors = validateEnvelope(responseBody);
   const resultErrors = validateRealResultFeedback(responseBody);
-  const ok = paidResponse.ok && schemaErrors.length === 0 && envelopeErrors.length === 0 && resultErrors.length === 0;
+  const ok = status >= 200 && status < 300 && schemaErrors.length === 0 && envelopeErrors.length === 0 && resultErrors.length === 0;
 
   return storeValidation(record, {
     ok,
     service_id: serviceId,
-    status: paidResponse.status,
+    status,
     provider_error: responseBody?.error || null,
     schema_errors: schemaErrors,
     envelope_errors: envelopeErrors,
