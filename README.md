@@ -331,6 +331,16 @@ npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --a
 
 The skill teaches Claude when to use AgentRouter, how to route data requests, and how to connect the MCP router when the current client supports MCP.
 
+## Remote MCP Connector
+
+For Claude web, Claude Managed Agents, and any product that supports URL-based Remote MCP, add this connector URL:
+
+```text
+https://agentrouter-markets.onrender.com/mcp
+```
+
+Claude custom connectors can connect to any third-party remote MCP server URL. Managed Agents declare URL MCP servers in `mcp_servers` and require servers to support the streamable HTTP transport.
+
 ## Universal MCP Integration
 
 The runtime integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.

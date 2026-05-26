@@ -31,6 +31,68 @@ const clientLogoPaths = {
   "windsurf.svg": new URL("../public/assets/client-logos/windsurf.svg", import.meta.url)
 };
 const brandLogoPath = new URL("../public/assets/brand/logo.png", import.meta.url);
+const remoteMcpTools = [
+  {
+    name: "agentrouter_request",
+    description: "Route a structured data/API capability request through AgentRouter, invoke the selected service when payment policy allows it, verify the response, and return evidence metadata.",
+    inputSchema: {
+      type: "object",
+      required: ["capability", "params"],
+      properties: {
+        capability: { type: "string", description: "Structured capability name, for example token_smart_money_activity." },
+        params: { type: "object", description: "Capability-specific input parameters." },
+        constraints: { type: "object", description: "Routing and payment constraints, for example max_price_usdc and freshness_seconds." },
+        budget: { type: "object", description: "Optional budget object." },
+        consumer_context: { type: "object", description: "Optional caller context." }
+      }
+    }
+  },
+  {
+    name: "agentrouter_quote",
+    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider.",
+    inputSchema: {
+      type: "object",
+      required: ["capability", "params"],
+      properties: {
+        capability: { type: "string" },
+        params: { type: "object" },
+        constraints: { type: "object" },
+        budget: { type: "object" }
+      }
+    }
+  },
+  {
+    name: "agentrouter_capabilities",
+    description: "List AgentRouter capability schemas. Call this before agentrouter_request when unsure which structured capability or params to use.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "agentrouter_feedback",
+    description: "Submit post-call consumer feedback after deciding whether an AgentRouter result helped answer the user's task.",
+    inputSchema: {
+      type: "object",
+      required: ["request_id", "feedback"],
+      properties: {
+        request_id: { type: "string" },
+        consumer_id: { type: "string" },
+        feedback: { type: "object" }
+      }
+    }
+  },
+  {
+    name: "agentrouter_ask",
+    description: "Natural-language fallback for AgentRouter demos. Prefer agentrouter_capabilities plus agentrouter_request when the main agent can produce a structured request.",
+    inputSchema: {
+      type: "object",
+      required: ["task"],
+      properties: {
+        task: { type: "string" },
+        max_price: { type: "string", default: "0.05" },
+        currency: { type: "string", default: "USDC" }
+      }
+    }
+  }
+];
 
 export function createServer({ store = createMemoryStore(), baseUrl = "" } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -72,6 +134,11 @@ async function routeRequest(req, res, store, baseUrl) {
 
   if (req.method === "GET" && url.pathname === "/agent-router/health") {
     sendJson(res, 200, { ok: true, service: "agent-router" });
+    return;
+  }
+
+  if (url.pathname === "/mcp" || url.pathname === "/agent-router/mcp") {
+    await handleRemoteMcp(req, res, store, baseUrl);
     return;
   }
 
@@ -699,6 +766,176 @@ function requireServiceOwner(req, res, auth, record) {
     }
   });
   return false;
+}
+
+async function handleRemoteMcp(req, res, store, baseUrl) {
+  const headers = remoteMcpHeaders();
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, headers);
+    res.end();
+    return;
+  }
+
+  if (req.method === "GET" || req.method === "HEAD") {
+    sendRemoteMcpJson(res, 200, {
+      ok: true,
+      transport: "streamable_http_jsonrpc",
+      endpoint: `${baseUrl.replace(/\/$/, "")}/mcp`,
+      serverInfo: { name: "AgentRouter", version: "0.1.0" },
+      capabilities: { tools: {} },
+      tools: remoteMcpTools
+    });
+    return;
+  }
+
+  if (req.method !== "POST") {
+    sendRemoteMcpJson(res, 405, {
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600, message: "Remote MCP endpoint supports GET, POST, and OPTIONS." }
+    });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = await readJson(req);
+  } catch (error) {
+    sendRemoteMcpJson(res, 400, {
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32700, message: `Invalid JSON: ${error.message}` }
+    });
+    return;
+  }
+
+  const messages = Array.isArray(payload) ? payload : [payload];
+  const responses = [];
+  for (const message of messages) {
+    const response = await dispatchRemoteMcpMessage(message, store, baseUrl);
+    if (response) responses.push(response);
+  }
+  if (!responses.length) {
+    res.writeHead(202, headers);
+    res.end();
+    return;
+  }
+  sendRemoteMcpJson(res, 200, Array.isArray(payload) ? responses : responses[0]);
+}
+
+async function dispatchRemoteMcpMessage(message, store, baseUrl) {
+  if (!message || typeof message !== "object") {
+    return remoteMcpError(null, -32600, "Invalid JSON-RPC message.");
+  }
+  if (message.method?.startsWith("notifications/")) return null;
+  const id = Object.hasOwn(message, "id") ? message.id : null;
+  if (!Object.hasOwn(message, "id")) return null;
+
+  try {
+    if (message.method === "initialize") {
+      return remoteMcpResult(id, {
+        protocolVersion: message.params?.protocolVersion || "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "AgentRouter", version: "0.1.0" }
+      });
+    }
+    if (message.method === "ping") return remoteMcpResult(id, {});
+    if (message.method === "tools/list") {
+      return remoteMcpResult(id, { tools: remoteMcpTools });
+    }
+    if (message.method === "tools/call") {
+      const result = await callRemoteMcpTool(message.params?.name, message.params?.arguments || {}, store, baseUrl);
+      return remoteMcpResult(id, {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        isError: result?.ok === false && ["transport_error", "http_error", "unknown_tool"].includes(result.status)
+      });
+    }
+    return remoteMcpError(id, -32601, `Unknown method: ${message.method}`);
+  } catch (error) {
+    return remoteMcpError(id, -32000, error.message);
+  }
+}
+
+async function callRemoteMcpTool(name, args, store, baseUrl) {
+  await loadProviderConfigs(store, baseUrl, { validate: false });
+  if (name === "agentrouter_request") {
+    return routeCapabilityRequest(store, {
+      capability: args.capability,
+      params: args.params || {},
+      constraints: args.constraints || {},
+      budget: args.budget || {},
+      consumer_context: args.consumer_context || { source: "remote_mcp" }
+    });
+  }
+  if (name === "agentrouter_quote") {
+    return quoteCapabilityRequest(store, {
+      capability: args.capability,
+      params: args.params || {},
+      constraints: args.constraints || {},
+      budget: args.budget || {}
+    });
+  }
+  if (name === "agentrouter_capabilities") {
+    return {
+      catalog_version: "agent_router_capability_catalog_v1",
+      preferred_tool: "agentrouter_request",
+      capabilities: getCapabilityCatalog()
+    };
+  }
+  if (name === "agentrouter_feedback") {
+    const body = { ...args };
+    if (!body.service_id) body.service_id = resolveFeedbackServiceId(store, body.request_id || body.feedback?.request_id);
+    const result = recordConsumerFeedback(store, body);
+    const trustAnchor = await recordConsumerFeedbackAnchor(store, result, baseUrl, {
+      deferErc8004ToConsumer: Boolean(body.defer_erc8004_to_consumer)
+    });
+    return {
+      ...result,
+      arc_anchor: trustAnchor.arc_anchor,
+      erc8004: trustAnchor.erc8004,
+      trust_anchor: trustAnchor
+    };
+  }
+  if (name === "agentrouter_ask") {
+    return askAgentRouter(store, {
+      task: args.task || args.query || "",
+      max_price: args.max_price || args.maxPrice || "0.05",
+      currency: args.currency || "USDC",
+      invoke: true
+    });
+  }
+  return {
+    ok: false,
+    status: "unknown_tool",
+    tool: name,
+    available_tools: remoteMcpTools.map((tool) => tool.name)
+  };
+}
+
+function remoteMcpResult(id, result) {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function remoteMcpError(id, code, message) {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function remoteMcpHeaders() {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type, accept, mcp-session-id, authorization, anthropic-beta, anthropic-version, x-api-key",
+    "access-control-expose-headers": "mcp-session-id",
+    "cache-control": "no-store"
+  };
+}
+
+function sendRemoteMcpJson(res, statusCode, body) {
+  res.writeHead(statusCode, {
+    ...remoteMcpHeaders(),
+    "content-type": "application/json; charset=utf-8"
+  });
+  res.end(JSON.stringify(body, null, 2));
 }
 
 function safeReturnTo(value) {

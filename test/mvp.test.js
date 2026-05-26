@@ -797,6 +797,59 @@ test("public provider endpoints require Arc payment even with direct endpoint ac
   });
 });
 
+test("remote MCP endpoint exposes AgentRouter tools over HTTP JSON-RPC", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const initialize = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "remote-mcp-test", version: "0.1.0" }
+        }
+      })
+    });
+    assert.equal(initialize.status, 200);
+    assert.equal(initialize.headers.get("access-control-allow-origin"), "*");
+    const initialized = await initialize.json();
+    assert.equal(initialized.result.serverInfo.name, "AgentRouter");
+    assert.deepEqual(initialized.result.capabilities, { tools: {} });
+
+    const listed = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })
+    });
+    assert.equal(listed.status, 200);
+    const listPayload = await listed.json();
+    assert.ok(listPayload.result.tools.some((tool) => tool.name === "agentrouter_request"));
+    assert.ok(listPayload.result.tools.some((tool) => tool.name === "agentrouter_ask"));
+
+    const capabilityCall = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "agentrouter_capabilities", arguments: {} }
+      })
+    });
+    assert.equal(capabilityCall.status, 200);
+    const capabilityPayload = await capabilityCall.json();
+    const toolResult = JSON.parse(capabilityPayload.result.content[0].text);
+    assert.equal(toolResult.catalog_version, "agent_router_capability_catalog_v1");
+    assert.ok(Array.isArray(toolResult.capabilities));
+  });
+});
+
 test("AgentRouter MCP server exposes Claude-callable tools", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
