@@ -335,6 +335,8 @@ If your environment needs explicit non-interactive flags:
 npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter -g -y --copy
 ```
 
+After install, restart or reload the AI client. For the first paid data request, AgentRouter checks the quote/payment path first and shows wallet funding instructions if the local Arc wallet needs USDC. The agent should not bypass that prompt with web search or a provider-specific MCP tool.
+
 The skill teaches Claude, Codex, OpenClaw, Hermes, Cursor, Windsurf, and similar agents when to use AgentRouter. If MCP tools are not attached, the skill can still call the hosted AgentRouter network through the GitHub npx CLI fallback:
 
 ```bash

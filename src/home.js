@@ -45,7 +45,7 @@ export function homeHtml({ auth = {} } = {}) {
               <button type="button" id="home-copy-install">Copy</button>
             </div>
           </div>
-          <p class="install-note" id="home-install-note">Installs the AgentRouter Skill with the standard skills CLI.</p>
+          <p class="install-note" id="home-install-note">Installs the AgentRouter Skill with the standard skills CLI. Restart or reload the client after install; the first paid data call checks balance and shows funding instructions if needed.</p>
           <div class="client-row" aria-label="Supported AI agent tools">
             <span>Works with</span>
             <div class="client-logos">
