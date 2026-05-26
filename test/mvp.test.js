@@ -3038,6 +3038,23 @@ test("CLI route resolves service and pays with local wallet", async () => {
   });
 });
 
+test("agent-router ask uses local wallet instead of quote-only path when wallet is present", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
+    const routed = await runAgentRouterCli(["ask", "BTC 当前最大爆仓痛点是多少"], {
+      ADN_REGISTRY_URL: baseUrl
+    });
+    assert.equal(routed.code, 0, routed.stderr);
+    const payload = JSON.parse(routed.stdout);
+    assert.equal(payload.status, "route_with_assumption");
+    assert.equal(payload.local_payment.status, "success");
+    assert.notEqual(payload.protocol?.invocation_policy, "quote_only_no_server_side_payment");
+    const log = await readPaymentLog();
+    assert.equal(log.at(-1).service_id, "btc_liquidation_max_pain_demo");
+  });
+});
+
 test("CLI route returns clarification before payment for unclear max pain task", async () => {
   await resetWalletForTests();
   await withServer(async ({ baseUrl }) => {
@@ -3229,6 +3246,27 @@ test("circle_arc local wallet returns funding guidance before payment when USDC 
 function runCli(args, env = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, ["bin/adn.js", ...args], {
+      cwd: process.cwd(),
+      env: { ...process.env, ADN_WALLET_PASSPHRASE: "test-passphrase", ...env },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("close", (code) => {
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+function runAgentRouterCli(args, env = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["bin/agent-router.js", ...args], {
       cwd: process.cwd(),
       env: { ...process.env, ADN_WALLET_PASSPHRASE: "test-passphrase", ...env },
       stdio: ["ignore", "pipe", "pipe"]

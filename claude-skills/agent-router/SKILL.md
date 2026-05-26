@@ -41,7 +41,26 @@ When the user asks a data/API question that fits AgentRouter, or asks to use Age
    - `agentrouter_wallet_create`: manual fallback wallet bootstrap; normally not needed because the local MCP bridge auto-creates a session wallet during initialization
    - `agentrouter_wallet_setup`: advanced wallet bootstrap; opens a one-time local setup page for a user-chosen encryption passphrase
    - `agentrouter_wallet_init`: advanced only; create a local encrypted EVM wallet when a local passphrase is already available in the MCP environment
-2. If MCP tools are not available but HTTP or shell commands are available, call the hosted AgentRouter HTTP endpoint first. This is the fastest universal Skill-first path for hosted agents because it does not clone GitHub, install npm packages, or require local MCP tools:
+2. If MCP tools are not available but shell commands are available, use the AgentRouter CLI first for paid or verifiable data. After the AgentRouter installer has run, the CLI detects the local wallet at `~/.agentrouter/adn` and pays through the local wallet instead of using the quote-only remote path:
+
+```bash
+AGENT_ROUTER_URL=https://agentrouter.network \
+AGENT_ROUTER_MAX_PRICE=0.05 \
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "<user original request>"
+```
+
+If the user has a nonstandard wallet directory, include it explicitly:
+
+```bash
+ADN_DIR="$HOME/.agentrouter/adn" \
+AGENT_ROUTER_URL=https://agentrouter.network \
+AGENT_ROUTER_MAX_PRICE=0.05 \
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask --local-wallet "<user original request>"
+```
+
+If the CLI returns `payment_required` with `invocation_policy: quote_only_no_server_side_payment`, it did not see the local wallet/payment backend. Do not retry the same quote-only path. Use MCP tools if available, or rerun the CLI with `--local-wallet` and `ADN_DIR="$HOME/.agentrouter/adn"`.
+
+3. If neither MCP tools nor shell commands are available but HTTP is available, call the hosted AgentRouter HTTP endpoint. This is quote-only for paid data because server-side payment is intentionally disabled:
 
 ```bash
 curl -sS -X POST "https://agentrouter.network/agent-router/ask" \
@@ -57,23 +76,7 @@ curl -sS -X POST "https://agentrouter-markets.onrender.com/agent-router/ask" \
   -d '{"task":"<user original request>","max_price":"0.05"}'
 ```
 
-3. If direct HTTP is unavailable but shell commands and GitHub access are available, use the AgentRouter CLI through GitHub npx. The skill teaches the agent what to do, and the CLI performs live discovery/routing against the hosted AgentRouter network.
-
-```bash
-AGENT_ROUTER_URL=https://agentrouter.network \
-AGENT_ROUTER_MAX_PRICE=0.05 \
-npx -y --package github:connectwilson/agentrouter-markets#main agent-router capabilities
-```
-
-For natural-language routing requests:
-
-```bash
-AGENT_ROUTER_URL=https://agentrouter.network \
-AGENT_ROUTER_MAX_PRICE=0.05 \
-npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "<user original request>"
-```
-
-For structured requests, prefer:
+4. For structured requests over CLI, prefer MCP when available. If MCP is not available, the CLI can still quote/search remotely:
 
 ```bash
 AGENT_ROUTER_URL=https://agentrouter.network \
@@ -81,7 +84,7 @@ AGENT_ROUTER_MAX_PRICE=0.05 \
 npx -y --package github:connectwilson/agentrouter-markets#main agent-router request '{"capability":"token_smart_money_activity","params":{"token_symbol":"AZTEC","chain":"ethereum","window":"24h"}}'
 ```
 
-4. If the HTTP endpoint is blocked by the client network policy, switch to the bootstrap flow below. Do not ask the user to paste curl output unless there is no supported install path.
+5. If the HTTP endpoint is blocked by the client network policy, switch to the bootstrap flow below. Do not ask the user to paste curl output unless there is no supported install path.
 
 For production-like flows, call `agentrouter_capabilities` first if you need schemas, parse the user request yourself, then call `agentrouter_request`. AgentRouter should not be treated as the semantic parser. Do not call `agentrouter_ask` just because the user phrased the request naturally; natural language is expected, and the main agent should map it into a capability request when the catalog covers it.
 
