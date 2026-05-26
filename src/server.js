@@ -1109,7 +1109,9 @@ else
   echo "No desktop MCP config was changed."
   echo "For web or hosted agents, add the Remote MCP URL below if the client supports Remote MCP."
   echo "For Claude Desktop, rerun with AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1 if you want this script to write the MCP config."
+  echo "Restart or reload your AI client if it caches skills before asking a data question."
 fi
+echo "Then ask: Use AgentRouter to query the data you need."
 echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"
 `;
   res.writeHead(200, {
