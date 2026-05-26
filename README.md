@@ -107,7 +107,7 @@ node bin/adn.js search "Base 7d fund flow"
 node bin/adn.js manifest chain_fund_flow_7d_base
 node bin/adn.js preview chain_fund_flow_7d_base
 node bin/adn.js invoke chain_fund_flow_7d_base '{"chain":"base","days":7}'
-node bin/adn.js route "BTC 当前最大爆仓痛点是多少" --max-price 0.05 --freshness 300
+node bin/adn.js route "What is BTC liquidation max pain right now?" --max-price 0.05 --freshness 300
 node bin/adn.js feedback chain_fund_flow_7d_base
 ```
 
@@ -127,10 +127,10 @@ Example:
 
 ```bash
 ADN_REGISTRY_URL=http://127.0.0.1:8787 \
-node bin/adn.js route "BTC 当前最大爆仓痛点是多少" --max-price 0.05 --freshness 300
+node bin/adn.js route "What is BTC liquidation max pain right now?" --max-price 0.05 --freshness 300
 ```
 
-For this ambiguous crypto query, the router returns `route_with_assumption` and explicitly states that it interpreted "爆仓痛点" as perpetual futures liquidation max-pain, not options max pain. If the task only says "BTC 最大痛点是多少", the router returns `needs_clarification` instead of guessing.
+For this ambiguous crypto query, the router returns `route_with_assumption` and explicitly states that it interpreted "liquidation max pain" as perpetual futures liquidation max-pain, not options max pain. If the task only says "What is BTC max pain?", the router returns `needs_clarification` instead of guessing.
 
 Router response fields include:
 
@@ -534,7 +534,7 @@ The installable skill in `claude-skills/agent-router/SKILL.md` is intentionally 
 After publishing the skill folder to GitHub, users can ask their AI client:
 
 ```text
-请从这个 GitHub 链接安装 AgentRouter Skill，并用 AgentRouter 帮我查询数据：
+Install the AgentRouter Skill from this GitHub link, then use AgentRouter to answer my data request:
 <YOUR_GITHUB_SKILL_URL>
 ```
 

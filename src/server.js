@@ -1421,7 +1421,7 @@ function agentRouterDemoHtml() {
         </div>
       </div>
       <label for="task">Natural-language demo wrapper</label>
-      <textarea id="task">BTC 当前最大爆仓痛点是多少？如果我现在有 3x long，要不要降杠杆？</textarea>
+      <textarea id="task">What is BTC liquidation max pain right now? If I currently have a 3x long, should I reduce leverage?</textarea>
       <div class="actions">
         <button id="runStructured">Route Structured Request</button>
         <button class="secondary" id="runAsk">Run /ask Demo Wrapper</button>
