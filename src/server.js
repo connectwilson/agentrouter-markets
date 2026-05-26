@@ -1037,10 +1037,14 @@ set -euo pipefail
 AGENT_ROUTER_URL="\${AGENT_ROUTER_URL:-${origin}}"
 SKILL_URL="\${AGENT_ROUTER_URL%/}/skills/AgentRouter/SKILL.md"
 TARGETS="\${AGENTROUTER_SKILL_DIRS:-$HOME/.agents/skills/agentrouter:$HOME/.claude/skills/agentrouter:$HOME/.codex/skills/agentrouter}"
+CLAUDE_CONFIG="\${CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
+CONFIGURE_CLAUDE_DESKTOP="\${AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP:-1}"
 
 tmp_file="$(mktemp)"
+config_tmp="$(mktemp)"
 cleanup() {
   rm -f "$tmp_file"
+  rm -f "$config_tmp"
 }
 trap cleanup EXIT
 
@@ -1053,7 +1057,50 @@ for target_dir in "\${target_dirs[@]}"; do
   cp "$tmp_file" "$target_dir/SKILL.md"
 done
 
+configured_claude="no"
+if [ "$CONFIGURE_CLAUDE_DESKTOP" != "0" ]; then
+  mkdir -p "$(dirname "$CLAUDE_CONFIG")"
+  if [ -f "$CLAUDE_CONFIG" ]; then
+    cp "$CLAUDE_CONFIG" "$CLAUDE_CONFIG.bak.$(date +%Y%m%d%H%M%S)"
+  else
+    printf '{}\n' > "$CLAUDE_CONFIG"
+  fi
+
+  AGENT_ROUTER_URL="$AGENT_ROUTER_URL" CONFIG_PATH="$CLAUDE_CONFIG" OUT_PATH="$config_tmp" node <<'NODE'
+const fs = require("fs");
+const path = process.env.CONFIG_PATH;
+const out = process.env.OUT_PATH;
+const agentRouterUrl = (process.env.AGENT_ROUTER_URL || "https://agentrouter.network").replace(/\\/$/, "");
+let config = {};
+try {
+  config = JSON.parse(fs.readFileSync(path, "utf8") || "{}");
+} catch (error) {
+  const backup = path + ".invalid." + Date.now();
+  fs.copyFileSync(path, backup);
+  config = {};
+}
+config.mcpServers = config.mcpServers && typeof config.mcpServers === "object" ? config.mcpServers : {};
+config.mcpServers.AgentRouter = {
+  command: "npx",
+  args: ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
+  env: {
+    AGENT_ROUTER_URL: agentRouterUrl,
+    AGENT_ROUTER_MAX_PRICE: "0.05"
+  }
+};
+fs.writeFileSync(out, JSON.stringify(config, null, 2) + "\\n");
+NODE
+  mv "$config_tmp" "$CLAUDE_CONFIG"
+  configured_claude="yes"
+fi
+
 echo "AgentRouter skill installed."
+if [ "$configured_claude" = "yes" ]; then
+  echo "Claude Desktop MCP server configured."
+  echo "Restart Claude Desktop, then ask: Use AgentRouter to check BTC liquidation max pain."
+else
+  echo "Claude Desktop MCP configuration skipped."
+fi
 echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"
 `;
   res.writeHead(200, {

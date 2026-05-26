@@ -154,6 +154,10 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     const scriptText = await installScript.text();
     assert.match(scriptText, /SKILL_URL="\$\{AGENT_ROUTER_URL%\/\}\/skills\/AgentRouter\/SKILL.md"/);
     assert.match(scriptText, /\$HOME\/\.agents\/skills\/agentrouter/);
+    assert.match(scriptText, /claude_desktop_config\.json/);
+    assert.match(scriptText, /config\.mcpServers\.AgentRouter/);
+    assert.match(scriptText, /github:connectwilson\/agentrouter-markets#main/);
+    assert.match(scriptText, /Restart Claude Desktop/);
     assert.doesNotMatch(scriptText, /github\.com/);
   });
 });
