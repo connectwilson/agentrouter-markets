@@ -100,7 +100,8 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(homeHtml, /Network snapshot/);
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
-    assert.match(homeHtml, /curl -fsSL https:\/\/agentrouter\.network\/install\.sh \| bash/);
+    assert.match(homeHtml, /https:\/\/agentrouter\.network\/skills\/AgentRouter\/SKILL\.md/);
+    assert.match(homeHtml, /does not execute a remote shell script/);
     assert.match(homeHtml, /https:\/\/agentrouter\.network\/mcp/);
 
     const human = await fetch(`${baseUrl}/human`);

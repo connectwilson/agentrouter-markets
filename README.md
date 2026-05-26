@@ -321,12 +321,12 @@ https://agentrouter.network/auth/github/callback
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
 
-## One-Line Skill Install
+## Safe Skill Install
 
-The fastest shell-capable agent entrypoint installs the AgentRouter Skill directly from `agentrouter.network`, without cloning GitHub:
+The default shell-capable agent entrypoint downloads the AgentRouter Skill markdown directly. It does not execute a remote shell script and does not clone GitHub:
 
 ```bash
-curl -fsSL https://agentrouter.network/install.sh | bash
+mkdir -p "$HOME/.agents/skills/agentrouter" "$HOME/.claude/skills/agentrouter" "$HOME/.codex/skills/agentrouter" && curl -fsSL https://agentrouter.network/skills/AgentRouter/SKILL.md -o "$HOME/.agents/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.claude/skills/agentrouter/SKILL.md" && cp "$HOME/.agents/skills/agentrouter/SKILL.md" "$HOME/.codex/skills/agentrouter/SKILL.md"
 ```
 
 For agents that already support the `skills` CLI and GitHub cloning, this also works:
@@ -343,7 +343,13 @@ AGENT_ROUTER_MAX_PRICE=0.05 \
 npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "BTC liquidation max pain"
 ```
 
-This mirrors the Surf-style split: one command installs the skill, and the skill tells the agent which CLI or MCP path to use for live data.
+For local terminals where you are comfortable auditing and running the installer script, the advanced installer remains available:
+
+```bash
+curl -fsSL https://agentrouter.network/install.sh | bash
+```
+
+This mirrors the Surf-style split: one safe command installs the skill, and the skill tells the agent which HTTP, CLI, or MCP path to use for live data.
 
 ## Remote MCP Connector
 
