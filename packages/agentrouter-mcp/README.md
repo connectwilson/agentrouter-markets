@@ -27,7 +27,7 @@ Most AI clients configure MCP like this:
       "command": "npx",
       "args": ["-y", "@agentrouter/mcp"],
       "env": {
-        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
+        "AGENT_ROUTER_URL": "https://agentrouter.network",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
       }
     }

@@ -99,7 +99,7 @@ To register ERC-8004 identities:
 
 ```bash
 ADN_ERC8004_OWNER_PRIVATE_KEY=0x...
-ADN_ERC8004_METADATA_BASE_URL=https://agentrouter-markets.onrender.com
+ADN_ERC8004_METADATA_BASE_URL=https://agentrouter.network
 ADN_ERC8004_IDENTITY_REGISTRY=0x8004A818BFB912233c491871b3d84c89A494BD9e
 ```
 

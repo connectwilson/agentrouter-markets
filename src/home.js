@@ -1,4 +1,4 @@
-const remoteMcpUrl = "https://agentrouter-markets.onrender.com/mcp";
+const remoteMcpUrl = "https://agentrouter.network/mcp";
 const skillInstallCommand = "npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --agent claude-code -g -y --copy";
 const localMcpCommand = "npx -y --package github:connectwilson/agentrouter-markets#main agent-router-mcp";
 const localInstallConfig = `{

@@ -2,7 +2,7 @@
 import { askAgentRouterRemote } from "../src/agent-router.js";
 
 const [command = "ask", ...args] = process.argv.slice(2);
-const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "http://127.0.0.1:8799").replace(/\/$/, "");
+const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter.network").replace(/\/$/, "");
 
 try {
   if (command === "ask" || command === "find") {

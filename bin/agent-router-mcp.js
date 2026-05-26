@@ -8,7 +8,7 @@ import { routeTaskWithLocalWallet } from "../src/local-route.js";
 import { currentPaymentBackend } from "../src/payment-adapter.js";
 import { initSessionWallet, initWallet, readWallet, walletStatus } from "../src/wallet.js";
 
-const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter-markets.onrender.com").replace(/\/$/, "");
+const baseUrl = (process.env.AGENT_ROUTER_URL || process.env.ADN_REGISTRY_URL || "https://agentrouter.network").replace(/\/$/, "");
 
 const tools = [
   {

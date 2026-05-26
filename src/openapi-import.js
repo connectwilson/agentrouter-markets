@@ -416,7 +416,7 @@ function shouldPublishToRemote({ body, baseUrl, remoteUrl }) {
 
 function normalizedRemoteRegistryUrl(value) {
   const renderUrl = process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "";
-  const raw = value || process.env.ADN_REMOTE_REGISTRY_URL || process.env.AGENT_ROUTER_PUBLIC_URL || renderUrl || "https://agentrouter-markets.onrender.com";
+  const raw = value || process.env.ADN_REMOTE_REGISTRY_URL || process.env.AGENT_ROUTER_PUBLIC_URL || renderUrl || "https://agentrouter.network";
   if (!raw) return "";
   return normalizeEndpoint(raw, "https://agentrouter.local").replace(/\/$/, "");
 }

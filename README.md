@@ -244,7 +244,7 @@ ADN_ARC_ANCHOR_PRIVATE_KEY=0x...
 ADN_ERC8004_OWNER_PRIVATE_KEY=0x...
 ADN_ERC8004_PRIVATE_KEY=0x...
 ADN_ERC8004_AGENT_ID=1001
-ADN_ERC8004_METADATA_BASE_URL=https://agentrouter-markets.onrender.com
+ADN_ERC8004_METADATA_BASE_URL=https://agentrouter.network
 ADN_ERC8004_IDENTITY_REGISTRY=0x8004A818BFB912233c491871b3d84c89A494BD9e
 ADN_ERC8004_REPUTATION_REGISTRY=0x8004B663056A597Dffe9eCcC1965A193B7388713
 ```
@@ -316,7 +316,7 @@ Register these callback URLs with GitHub:
 
 ```text
 http://127.0.0.1:8800/auth/github/callback
-https://agentrouter-markets.onrender.com/auth/github/callback
+https://agentrouter.network/auth/github/callback
 ```
 
 OAuth is for user identity only. Provider-owned API credentials still belong in Provider Studio/provider secret storage, not OAuth environment variables.
@@ -332,7 +332,7 @@ npx -y skills@latest add connectwilson/agentrouter-skill --skill AgentRouter --a
 The skill teaches Claude, Codex, OpenClaw, Hermes, Cursor, Windsurf, and similar agents when to use AgentRouter. If MCP tools are not attached, the skill can still call the hosted AgentRouter network through the GitHub npx CLI fallback:
 
 ```bash
-AGENT_ROUTER_URL=https://agentrouter-markets.onrender.com \
+AGENT_ROUTER_URL=https://agentrouter.network \
 AGENT_ROUTER_MAX_PRICE=0.05 \
 npx -y --package github:connectwilson/agentrouter-markets#main agent-router ask "BTC liquidation max pain"
 ```
@@ -344,14 +344,14 @@ This mirrors the Surf-style split: one command installs the skill, and the skill
 For Claude web, Claude Managed Agents, and any product that supports URL-based Remote MCP, add this connector URL:
 
 ```text
-https://agentrouter-markets.onrender.com/mcp
+https://agentrouter.network/mcp
 ```
 
 Claude custom connectors can connect to any third-party remote MCP server URL. Managed Agents declare URL MCP servers in `mcp_servers` and require servers to support the streamable HTTP transport.
 
 ## Universal MCP Integration
 
-The runtime integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter-markets.onrender.com` or your local AgentRouter server.
+The runtime integration is a universal MCP server: any MCP-capable AI client calls AgentRouter locally, and the MCP server forwards requests to either the Render deployment at `https://agentrouter.network` or your local AgentRouter server.
 
 Run the MCP server with npx:
 
@@ -370,7 +370,7 @@ Most AI clients configure MCP like this:
       "command": "npx",
       "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
-        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
+        "AGENT_ROUTER_URL": "https://agentrouter.network",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
       }
     }
@@ -416,7 +416,7 @@ Settings -> Extensions -> Install Extension -> choose agentrouter.mcpb
 When prompted, keep:
 
 ```text
-AgentRouter URL = https://agentrouter-markets.onrender.com
+AgentRouter URL = https://agentrouter.network
 Default Max Price = 0.05
 ```
 
@@ -470,7 +470,7 @@ MCP config:
       "command": "npx",
       "args": ["-y", "--package", "github:connectwilson/agentrouter-markets#main", "agent-router-mcp"],
       "env": {
-        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
+        "AGENT_ROUTER_URL": "https://agentrouter.network",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
       }
     }

@@ -24,7 +24,7 @@ Last updated: 2026-05-25
 - Search results now expose `trust_score`; structured routing returns provider selection reasons.
 - Verified the full provider-to-demand flow: Provider Studio OpenAPI import publishes `get_liquidation_max_pain`; AgentRouter `/ask` compiles natural language into a structured `perp_liquidation_max_pain` request, selects the uploaded service, pays, validates, and returns data.
 - OpenAPI capability inference now enriches imported liquidation services with the standard `perp_liquidation`, `liquidation_heatmap`, and `perp_liquidation_max_pain` capabilities.
-- Deployed AgentRouter Markets to Render at `https://agentrouter-markets.onrender.com`.
+- Deployed AgentRouter Markets to Render at `https://agentrouter.network`.
 - Claude/Codex Skill and MCP defaults now point to the Render endpoint instead of the temporary Cloudflare/Railway endpoints.
 - Added payment backend abstraction: `dev`, `x402`, `omniagentpay`, and `circle_arc`.
 - Added `POST /agent-router/quote` so agents can inspect selected service, input, price, and guard result before paying.
@@ -78,7 +78,7 @@ For any MCP-capable AI agent client, add the AgentRouter MCP server:
       "command": "npx",
       "args": ["-y", "@agentrouter/mcp"],
       "env": {
-        "AGENT_ROUTER_URL": "https://agentrouter-markets.onrender.com",
+        "AGENT_ROUTER_URL": "https://agentrouter.network",
         "AGENT_ROUTER_MAX_PRICE": "0.05"
       }
     }

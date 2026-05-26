@@ -12,7 +12,7 @@ AgentRouter connects Claude Desktop to the Agent Native Data Network through MCP
 
 ## Configuration
 
-- `AgentRouter URL`: defaults to `https://agentrouter-markets.onrender.com`.
+- `AgentRouter URL`: defaults to `https://agentrouter.network`.
 - `Default Max Price`: defaults to `0.05` USDC.
 
 The main agent should parse user language into structured requests whenever possible. AgentRouter handles routing, quote, invocation, verification, and evidence. After a successful call, the main agent should submit `agentrouter_feedback` automatically; the user should only need to ask the data question.
