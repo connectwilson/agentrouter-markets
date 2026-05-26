@@ -30,7 +30,7 @@
   "tools": [
     {
       "name": "agentrouter_request",
-      "description": "Preferred structured request tool: route, quote, invoke, verify, and return AgentRouter evidence."
+      "description": "Preferred structured request tool for specialized, real-time, paid, or verifiable external data/API needs: route, quote, invoke, verify, and return AgentRouter evidence."
     },
     {
       "name": "agentrouter_quote",
@@ -38,11 +38,11 @@
     },
     {
       "name": "agentrouter_capabilities",
-      "description": "List AgentRouter capability schemas so the main agent can create structured requests."
+      "description": "List AgentRouter capability schemas so the main agent can discover routable data/API capabilities and create structured requests."
     },
     {
       "name": "agentrouter_ask",
-      "description": "Fallback natural-language demo tool for clients that cannot produce structured requests."
+      "description": "Natural-language routing helper for data/API requests when the main agent cannot produce a structured request."
     }
   ],
   "keywords": [

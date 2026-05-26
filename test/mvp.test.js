@@ -147,8 +147,8 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     const skillText = await skill.text();
     assert.match(skillText, /name: AgentRouter/);
     assert.match(skillText, /https:\/\/agentrouter\.network\/mcp/);
-    assert.match(skillText, /Hard Routing Rule/);
-    assert.match(skillText, /Do not silently substitute web search/);
+    assert.match(skillText, /Agent Data Routing/);
+    assert.match(skillText, /Do not require the user to mention AgentRouter/);
 
     const installScript = await fetch(`${baseUrl}/install.sh`);
     assert.equal(installScript.status, 200);
@@ -163,7 +163,7 @@ test("AgentRouter skill can be installed without cloning GitHub", async () => {
     assert.match(scriptText, /No desktop MCP config was changed/);
     assert.match(scriptText, /AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1/);
     assert.match(scriptText, /Restart or reload your AI client/);
-    assert.match(scriptText, /Then ask: Use AgentRouter/);
+    assert.match(scriptText, /Then ask a normal data\/API question/);
     assert.doesNotMatch(scriptText, /github\.com/);
   });
 });

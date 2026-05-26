@@ -6,7 +6,7 @@ const defaultMaxPrice = process.env.AGENT_ROUTER_MAX_PRICE || "0.05";
 const tools = [
   {
     name: "agentrouter_request",
-    description: "Use this first for AgentRouter data/API calls. The main agent parses the user request into a structured capability request; AgentRouter validates, routes, invokes, verifies, records evidence, and returns a feedback request. After using the result in the final answer, call agentrouter_feedback with the returned request_id. Do not use agentrouter_ask when you can fill this schema.",
+    description: "Use this first when the main agent needs specialized, real-time, paid, or verifiable external data/API access and can fill a structured capability request. AgentRouter validates, routes, invokes, verifies, records evidence, and returns a feedback request. After using the result in the final answer, call agentrouter_feedback with the returned request_id. Do not use agentrouter_ask when you can fill this schema.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -35,7 +35,7 @@ const tools = [
   },
   {
     name: "agentrouter_capabilities",
-    description: "List AgentRouter capability schemas. Call this before agentrouter_request when you are unsure which structured capability or params to use.",
+    description: "List AgentRouter capability schemas for external data/API routing. Call this before agentrouter_request when the main agent has a data need but is unsure which structured capability or params to use.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -68,7 +68,7 @@ const tools = [
   },
   {
     name: "agentrouter_ask",
-    description: "Last-resort natural-language helper: send the user's task to AgentRouter for lightweight parsing. Prefer agentrouter_capabilities plus agentrouter_request whenever the main agent can produce a structured request. If this returns a successful result with a request_id, call agentrouter_feedback after answering.",
+    description: "Natural-language AgentRouter helper for specialized, real-time, paid, or verifiable external data/API requests when a structured capability request cannot be produced. Prefer agentrouter_capabilities plus agentrouter_request whenever the main agent can produce a structured request. If this returns a successful result with a request_id, call agentrouter_feedback after answering.",
     inputSchema: {
       type: "object",
       required: ["task"],

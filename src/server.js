@@ -36,7 +36,7 @@ const agentRouterSkillPath = new URL("../claude-skills/agent-router/SKILL.md", i
 const remoteMcpTools = [
   {
     name: "agentrouter_request",
-    description: "Route a structured data/API capability request through AgentRouter, invoke the selected service when payment policy allows it, verify the response, and return evidence metadata.",
+    description: "Use when the main agent needs specialized, real-time, paid, or verifiable external data/API access and can fill a structured capability request. AgentRouter routes, invokes, verifies, and returns evidence metadata.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -65,7 +65,7 @@ const remoteMcpTools = [
   },
   {
     name: "agentrouter_capabilities",
-    description: "List AgentRouter capability schemas. Call this before agentrouter_request when unsure which structured capability or params to use.",
+    description: "List AgentRouter capability schemas for external data/API routing. Call this before agentrouter_request when the main agent has a data need but is unsure which structured capability or params to use.",
     inputSchema: { type: "object", properties: {} }
   },
   {
@@ -83,7 +83,7 @@ const remoteMcpTools = [
   },
   {
     name: "agentrouter_ask",
-    description: "Natural-language fallback for AgentRouter demos. Prefer agentrouter_capabilities plus agentrouter_request when the main agent can produce a structured request.",
+    description: "Natural-language AgentRouter helper for specialized, real-time, paid, or verifiable external data/API requests. Prefer agentrouter_capabilities plus agentrouter_request when the main agent can produce a structured request.",
     inputSchema: {
       type: "object",
       required: ["task"],
@@ -1109,9 +1109,9 @@ else
   echo "No desktop MCP config was changed."
   echo "For web or hosted agents, add the Remote MCP URL below if the client supports Remote MCP."
   echo "For Claude Desktop, rerun with AGENTROUTER_CONFIGURE_CLAUDE_DESKTOP=1 if you want this script to write the MCP config."
-  echo "Restart or reload your AI client if it caches skills before asking a data question."
+  echo "Restart or reload your AI client if it caches skills before asking data/API questions."
 fi
-echo "Then ask: Use AgentRouter to query the data you need."
+echo "Then ask a normal data/API question; AgentRouter is available as the routing tool."
 echo "Remote MCP: \${AGENT_ROUTER_URL%/}/mcp"
 `;
   res.writeHead(200, {
