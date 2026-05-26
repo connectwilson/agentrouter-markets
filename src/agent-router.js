@@ -526,8 +526,9 @@ function withResolvedToken(intent, resolved, meta) {
     }
   };
   return {
-    ok: true,
-    status: "resolved",
+    ok: resolution.auto_pay_allowed,
+    status: resolution.auto_pay_allowed ? "resolved" : "token_resolution_ambiguous",
+    message: resolution.blocking_reason,
     token_symbol: intent.token,
     token_address: resolved.address,
     chain: resolved.chain || intent.chain || null,
@@ -537,6 +538,8 @@ function withResolvedToken(intent, resolved, meta) {
     requested_symbol: resolution.requested_symbol,
     resolved_symbol: resolution.resolved_symbol,
     resolution_type: resolution.resolution_type,
+    auto_pay_allowed: resolution.auto_pay_allowed,
+    blocking_reason: resolution.blocking_reason,
     requires_disclosure: resolution.requires_disclosure,
     disclosure: resolution.disclosure,
     intent: nextIntent,
@@ -608,6 +611,10 @@ function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, 
     matched_name: name || null,
     chain: chain || null,
     resolution_type: resolutionType,
+    auto_pay_allowed: exact || wrappedLike,
+    blocking_reason: exact || wrappedLike
+      ? null
+      : `Token resolver matched ${resolved || name || "a different token"} for requested ${requested || "token"}. AgentRouter will not auto-pay for symbol substitutions.`,
     requires_disclosure: requiresDisclosure,
     disclosure: requiresDisclosure
       ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`

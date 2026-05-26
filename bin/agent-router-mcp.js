@@ -580,6 +580,29 @@ async function resolveTokenForLocalWalletRequest({ capability, params, constrain
     matchedName: match.name,
     chain: match.chain || chain
   });
+  if (!resolution.auto_pay_allowed) {
+    return {
+      ok: false,
+      status: "token_resolution_ambiguous",
+      token_symbol: tokenSymbol,
+      token_address: match.address,
+      chain: match.chain || chain,
+      matched_name: match.name || null,
+      matched_symbol: match.symbol || null,
+      asset_resolution: resolution,
+      requested_symbol: resolution.requested_symbol,
+      resolved_symbol: resolution.resolved_symbol,
+      resolution_type: resolution.resolution_type,
+      auto_pay_allowed: resolution.auto_pay_allowed,
+      blocking_reason: resolution.blocking_reason,
+      requires_disclosure: resolution.requires_disclosure,
+      disclosure: resolution.disclosure,
+      resolver_service_id: resolver.service_id,
+      resolver_verification_mode: resolverVerificationMode,
+      resolver_input: resolverInput,
+      message: resolution.blocking_reason
+    };
+  }
   return {
     ok: true,
     status: "resolved",
@@ -660,6 +683,8 @@ function publicTokenResolution(tokenResolution) {
     requested_symbol: tokenResolution.requested_symbol || tokenResolution.token_symbol || null,
     resolved_symbol: tokenResolution.resolved_symbol || tokenResolution.matched_symbol || null,
     resolution_type: tokenResolution.resolution_type || null,
+    auto_pay_allowed: tokenResolution.asset_resolution?.auto_pay_allowed ?? null,
+    blocking_reason: tokenResolution.asset_resolution?.blocking_reason || null,
     requires_disclosure: Boolean(tokenResolution.requires_disclosure),
     disclosure: tokenResolution.disclosure || null,
     resolver_verification_mode: tokenResolution.resolver_verification_mode || null,
@@ -731,6 +756,10 @@ function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, 
     matched_name: name || null,
     chain: chain || null,
     resolution_type: resolutionType,
+    auto_pay_allowed: exact || wrappedLike,
+    blocking_reason: exact || wrappedLike
+      ? null
+      : `Token resolver matched ${resolved || name || "a different token"} for requested ${requested || "token"}. AgentRouter will not auto-pay for symbol substitutions.`,
     requires_disclosure: requiresDisclosure,
     disclosure: requiresDisclosure
       ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`

@@ -2013,6 +2013,47 @@ test("AgentRouter retries the next token smart-money service when a provider fai
   });
 });
 
+test("AgentRouter blocks ambiguous token symbol substitutions before target payment", async () => {
+  await withServer(async ({ baseUrl }) => {
+    try {
+      const resolverResponse = await fetch(`${baseUrl}/studio/providers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "static-json",
+          service_id: "ambiguous_token_search_resolver",
+          title: "Token Search Resolver",
+          provider_name: "Ambiguous Token Directory",
+          description_for_agent: "Use this service to search token symbols and resolve contract addresses by chain.",
+          capabilities: "data_service,token_search,entity_search,token_metadata",
+          price: "0.01",
+          sample_request: "{\"search_query\":\"GENIUS\",\"result_type\":\"token\",\"chain\":\"ethereum\",\"limit\":5}",
+          sample_data: "{\"data\":[{\"symbol\":\"GNUS\",\"name\":\"Genius Token & NFT Collections\",\"token_address\":\"0x614577036f0a024dbc1c88ba616b394dd65d105a\",\"chain\":\"ethereum\"}]}",
+          live_data: "{\"data\":[{\"symbol\":\"GNUS\",\"name\":\"Genius Token & NFT Collections\",\"token_address\":\"0x614577036f0a024dbc1c88ba616b394dd65d105a\",\"chain\":\"ethereum\"}]}",
+          summary: "Resolve token symbols to token contract addresses."
+        })
+      });
+      assert.equal(resolverResponse.status, 201);
+
+      const cli = await runAgentRouterCli(["ask", "查 GENIUS 近 24 小时聪明钱动向"], {
+        ADN_REGISTRY_URL: baseUrl
+      });
+      assert.equal(cli.code, 0, cli.stderr);
+      const payload = JSON.parse(cli.stdout);
+      assert.equal(payload.ok, false);
+      assert.equal(payload.status, "token_resolution_ambiguous");
+      assert.equal(payload.data_returned, false);
+      assert.equal(payload.token_resolution.resolution_type, "symbol_substitution");
+      assert.equal(payload.token_resolution.matched_symbol, "GNUS");
+      assert.match(payload.token_resolution.blocking_reason, /will not auto-pay/);
+      assert.equal(payload.local_payment, undefined);
+      assert.equal(payload.timing.quote_route_attempt_1_ms, undefined);
+    } finally {
+      await fs.rm(path.join(process.env.ADN_PROVIDER_DIR, "ambiguous_token_search_resolver.json"), { force: true });
+    }
+  });
+});
+
 test("AgentRouter builds service-aware input for address profile endpoints", async () => {
   await withServer(async ({ baseUrl }) => {
     const studioResponse = await fetch(`${baseUrl}/studio/providers`, {

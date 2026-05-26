@@ -145,6 +145,8 @@ const CAPABILITY_ALIASES = [
     ],
     defaultInput: (intent) => ({
       chains: [intent.chain || chainFromAsset(intent.asset) || "ethereum"],
+      asset: intent.asset,
+      window: intent.window,
       pagination: { page: 1, per_page: 10 }
     })
   },
@@ -751,6 +753,9 @@ function scoreCandidate(record, intent, requiredCapabilities, constraints, match
   if (!serviceCoversCapability(surfaceText, intent.capability)) {
     return { service_id: manifest.service_id, routing_score: 0 };
   }
+  if (!serviceCoversRequestedAsset(manifest, intent)) {
+    return { service_id: manifest.service_id, routing_score: 0 };
+  }
   const assetFit = intent.asset ? Number(sampleText.includes(String(intent.asset).toLowerCase())) : 1;
   const trust = summarizeTrust(record);
   const trustScore = trust.trust_score;
@@ -843,6 +848,19 @@ function serviceCoversCapability(surfaceText, capability) {
   }
   const terms = dynamicCapabilityTerms(capability);
   return terms.length > 0 && terms.every((term) => surfaceText.includes(term));
+}
+
+function serviceCoversRequestedAsset(manifest, intent) {
+  const asset = String(intent.token_symbol || intent.asset || "").toUpperCase();
+  if (!asset) return true;
+  const schemaProperties = manifest.input_schema?.properties || {};
+  for (const field of ["asset", "token", "token_symbol", "symbol"]) {
+    const allowed = schemaProperties[field]?.enum;
+    if (Array.isArray(allowed) && allowed.length) {
+      return allowed.map((item) => String(item).toUpperCase()).includes(asset);
+    }
+  }
+  return true;
 }
 
 function summarizeCandidates(candidates) {
@@ -1032,6 +1050,27 @@ async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, b
     matchedName: match.name,
     chain: match.chain || normalizeProviderChain(intent.chain || "ethereum")
   });
+  if (!resolution.auto_pay_allowed) return {
+    ok: false,
+    status: "token_resolution_ambiguous",
+    token_symbol: tokenSymbol,
+    token_address: match.address,
+    chain: match.chain || normalizeProviderChain(intent.chain || "ethereum"),
+    matched_name: match.name || null,
+    matched_symbol: match.symbol || null,
+    asset_resolution: resolution,
+    requested_symbol: resolution.requested_symbol,
+    resolved_symbol: resolution.resolved_symbol,
+    resolution_type: resolution.resolution_type,
+    auto_pay_allowed: resolution.auto_pay_allowed,
+    blocking_reason: resolution.blocking_reason,
+    requires_disclosure: resolution.requires_disclosure,
+    disclosure: resolution.disclosure,
+    resolver_service_id: resolver.service_id,
+    resolver_verification_mode: resolverVerificationMode,
+    resolver_input: resolverInput,
+    message: resolution.blocking_reason
+  };
   return {
     ok: true,
     status: "resolved",
@@ -1113,6 +1152,10 @@ function describeTokenResolution({ requestedSymbol, matchedSymbol, matchedName, 
     matched_name: name || null,
     chain: chain || null,
     resolution_type: resolutionType,
+    auto_pay_allowed: exact || wrappedLike,
+    blocking_reason: exact || wrappedLike
+      ? null
+      : `Token resolver matched ${resolved || name || "a different token"} for requested ${requested || "token"}. AgentRouter will not auto-pay for symbol substitutions.`,
     requires_disclosure: requiresDisclosure,
     disclosure: requiresDisclosure
       ? `Requested ${requested || "token"}; resolver selected ${resolved || name || "a token candidate"}${chain ? ` on ${chain}` : ""}. Treat the result as ${scope}.`
