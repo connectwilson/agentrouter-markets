@@ -105,12 +105,6 @@ export function homeHtml({ auth = {} } = {}) {
               <small>Observed demand</small>
               <div class="spark" id="spark-calls"></div>
             </div>
-            <div class="stat-block">
-              <span>Estimated USDC</span>
-              <strong id="home-usdc">--</strong>
-              <small>Price × call count</small>
-              <div class="spark" id="spark-usdc"></div>
-            </div>
           </div>
 
           <div class="network-tables">
@@ -150,12 +144,10 @@ export function homeHtml({ auth = {} } = {}) {
         async function loadHomeStats() {
           let stats = { services: [], registered_services: 0, verified_services: 0, total_calls: 0 };
           try { stats = await fetch("/agent-router/stats").then((res) => res.json()); } catch {}
-          const usdc = (stats.services || []).reduce((sum, service) => sum + Number(service.price || 0) * Number(service.total_calls || 0), 0);
           setText("home-services", stats.registered_services || 0);
           setText("home-verified", stats.verified_services || 0);
           setText("home-calls", stats.total_calls || 0);
-          setText("home-usdc", formatUsdc(usdc));
-          renderSparks(stats, usdc);
+          renderSparks(stats);
           renderHomeTables(stats.services || []);
         }
         ${sharedClientHelpers()}
@@ -169,12 +161,11 @@ export function homeHtml({ auth = {} } = {}) {
             button.textContent = "Select";
           }
         });
-        function renderSparks(stats, usdc) {
+        function renderSparks(stats) {
           const values = [
             ["spark-services", Number(stats.registered_services || 0)],
             ["spark-verified", Number(stats.verified_services || 0)],
-            ["spark-calls", Number(stats.total_calls || 0)],
-            ["spark-usdc", Number(usdc || 0)]
+            ["spark-calls", Number(stats.total_calls || 0)]
           ];
           for (const [id, value] of values) {
             const node = document.getElementById(id);

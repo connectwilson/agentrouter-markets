@@ -369,7 +369,10 @@ async function callHostedHttpSource(config, input) {
       }
     };
     if (prepared.body !== undefined) request.body = prepared.body;
-    const response = await fetch(prepared.url, request);
+    const response = await fetch(prepared.url, {
+      ...request,
+      signal: AbortSignal.timeout(Number(process.env.ADN_UPSTREAM_TIMEOUT_MS || 15000))
+    });
     const payload = await parseUpstreamPayload(response);
     const outcome = classifyUpstreamResponse(response, payload, attempt);
     if (!outcome.upstream_error) return payload;

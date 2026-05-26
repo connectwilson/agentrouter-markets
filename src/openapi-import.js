@@ -375,6 +375,9 @@ async function removeUnverifiedServiceForRetry(store, serviceId) {
 }
 
 function summarizeValidationFailure(validation = {}) {
+  if (validation.error === "EXPECTED_402_PAYMENT_REQUIRED" && validation.status === 503) {
+    return "Provider payout wallet is missing or invalid. Add a provider EVM payout address before publishing paid services.";
+  }
   const providerCode = validation.provider_error?.code;
   const providerMessage = validation.provider_error?.message;
   if (providerCode === "UPSTREAM_ERROR") {
@@ -428,7 +431,7 @@ function isLocalBaseUrl(baseUrl) {
 }
 
 async function publishApiDraftsToRemote({ body, remoteUrl }) {
-  const response = await fetch(`${remoteUrl}/studio/import/publish`, {
+  const response = await fetchWithTimeout(`${remoteUrl}/studio/import/publish`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -454,7 +457,7 @@ async function fetchOpenApiDocument(apiUrl) {
   for (const candidate of candidates) {
     try {
       attempted.push(candidate);
-      const response = await fetch(candidate);
+      const response = await fetchWithTimeout(candidate);
       if (!response.ok) continue;
       const doc = await response.json();
       if (doc.openapi || doc.swagger) return { source: candidate, doc };
@@ -840,7 +843,7 @@ function looksLikeApiDocsSource(apiUrl) {
 }
 
 async function fetchTextDocument(url) {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (!response.ok) {
     const error = new Error(`${url} returned HTTP ${response.status}`);
     error.statusCode = 422;
@@ -872,7 +875,7 @@ async function fetchMarkdownVariant(url) {
     parsed.hash = "";
     parsed.search = "";
     parsed.pathname = `${parsed.pathname.replace(/\/$/, "")}.md`;
-    const response = await fetch(parsed.toString());
+    const response = await fetchWithTimeout(parsed.toString());
     if (!response.ok) return "";
     return await response.text();
   } catch {
@@ -893,7 +896,7 @@ function endpointSignalScore(text) {
 }
 
 async function fetchSkillDocument(skillUrl) {
-  const response = await fetch(skillUrl);
+  const response = await fetchWithTimeout(skillUrl);
   if (!response.ok) {
     const error = new Error(`Skill import failed: ${skillUrl} returned HTTP ${response.status}`);
     error.statusCode = 422;
@@ -1375,6 +1378,7 @@ function parseEmbeddedOpenApiEndpoints(content, sourceUrl) {
         if (!operation) continue;
         const methodUpper = method.toUpperCase();
         const decodedRoutePath = decodePathTemplate(routePath);
+        if (skipReasonFor(decodedRoutePath, method, operation)) continue;
         const sampleRequest = { ...paramsFromPathTemplate(decodedRoutePath), ...sampleRequestFor(operation, pathItem, doc) };
         const previewData = previewDataFor(operation, doc);
         const title = operation.summary || titleFromPath(decodedRoutePath, methodUpper);
@@ -1745,11 +1749,13 @@ function sampleRequestFor(operation, pathItem, doc) {
   const sample = {};
   for (const parameter of [...(pathItem.parameters || []), ...(operation.parameters || [])]) {
     if (!["query", "path"].includes(parameter.in)) continue;
-    sample[parameter.name] = exampleForSchema(parameter.schema, {
+    const value = exampleForSchema(parameter.schema, {
       explicitExample: parameter.example,
       name: parameter.name,
       doc
     });
+    if (!parameter.required && (value === "" || value === undefined || value === null)) continue;
+    sample[parameter.name] = value === "" ? sampleStringForName(parameter.name) : value;
   }
   const bodySchema = operation.requestBody?.content?.["application/json"]?.schema;
   const resolvedBodySchema = resolveSchemaRef(bodySchema, doc);
@@ -1798,7 +1804,7 @@ function exampleForSchema(schema = {}, { explicitExample, name = "", doc } = {})
   schema = resolveSchemaRef(schema, doc) || {};
   if (explicitExample !== undefined) return explicitExample;
   if (schema.example !== undefined) return schema.example;
-  if (schema.default !== undefined) return schema.default;
+  if (schema.default !== undefined && schema.default !== "") return schema.default;
   if (schema.enum?.length) return schema.enum[0];
   if (schema.type === "number" || schema.type === "integer") return 1;
   if (schema.type === "boolean") return true;
@@ -1819,6 +1825,13 @@ function sampleStringForName(name) {
   const lower = String(name || "").toLowerCase();
   if (lower.includes("address") || lower === "wallet") return "0x0000000000000000000000000000000000000000";
   if (lower.includes("asset") || lower.includes("symbol")) return "BTC";
+  if (lower.includes("exchange")) return "Binance";
+  if (lower.includes("ticker")) return "GBTC";
+  if (lower.includes("interval")) return "1d";
+  if (lower.includes("range")) return "1d";
+  if (lower.includes("limit") || lower.includes("per_page")) return 10;
+  if (lower === "page") return 1;
+  if (lower.includes("language")) return "en";
   if (lower.includes("chain")) return "base";
   if (lower.includes("window")) return "7d";
   return "example";
@@ -1865,4 +1878,12 @@ function requireString(value, name) {
     throw error;
   }
   return String(value).trim();
+}
+
+function fetchWithTimeout(url, options = {}) {
+  const timeoutMs = Number(process.env.ADN_DOCS_FETCH_TIMEOUT_MS || 12000);
+  return fetch(url, {
+    ...options,
+    signal: options.signal || AbortSignal.timeout(timeoutMs)
+  });
 }

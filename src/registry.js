@@ -731,6 +731,14 @@ export async function loadProviderConfigs(store, baseUrl, { validate = true } = 
   const loaded = [];
   for (const config of configs) {
     const manifest = withCurrentRuntimeEndpoint(config.manifest, baseUrl);
+    if (store.services.has(manifest.service_id)) {
+      const record = store.services.get(manifest.service_id);
+      record.manifest = manifest;
+      record.updated_at = record.updated_at || new Date().toISOString();
+      store.providers.set(manifest.provider.provider_id, manifest.provider);
+      loaded.push({ service_id: manifest.service_id, record, validation: record.validation_runs?.at(-1) || null, already_loaded: true });
+      continue;
+    }
     const record = registerService(store, manifest, baseUrl);
     let validation = null;
     if (validate) {
@@ -749,6 +757,16 @@ export async function loadProviderConfigs(store, baseUrl, { validate = true } = 
         });
         unregisterService(store, manifest.service_id);
       }
+    } else {
+      validation = {
+        ok: true,
+        service_id: manifest.service_id,
+        source: "persisted_provider_config",
+        message: "Loaded from a provider config that was persisted after successful publish validation.",
+        created_at: new Date().toISOString()
+      };
+      record.validation_runs.push(validation);
+      record.verification_status = "verified";
     }
     loaded.push({ service_id: manifest.service_id, record, validation });
   }

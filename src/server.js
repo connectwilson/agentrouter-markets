@@ -133,6 +133,7 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "GET" && (url.pathname === "/stats" || url.pathname === "/agent-router/stats")) {
+    await loadProviderConfigs(store, baseUrl, { validate: false });
     sendJson(res, 200, summarizeRegistryStats(store));
     return;
   }
@@ -161,6 +162,7 @@ async function routeRequest(req, res, store, baseUrl) {
     const limit = url.searchParams.get("limit") || 24;
     const offset = url.searchParams.get("offset") || 0;
     const includeDetails = url.searchParams.get("include_details") === "true";
+    await loadProviderConfigs(store, baseUrl, { validate: false });
     if (includeDetails) {
       const records = query || maxPrice || verifiedOnly || capabilities.length
         ? searchServices(store, { query, capabilities, maxPrice, verifiedOnly })
