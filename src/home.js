@@ -149,13 +149,13 @@ export function homeHtml({ auth = {} } = {}) {
       <script>
         async function loadHomeStats() {
           let stats = { services: [], registered_services: 0, verified_services: 0, total_calls: 0, total_feedback_events: 0 };
-          try { stats = await fetch("/agent-router/stats").then((res) => res.json()); } catch {}
+          try { stats = await fetch("/agent-router/home-stats").then((res) => res.json()); } catch {}
           setText("home-services", stats.registered_services || 0);
           setText("home-verified", stats.verified_services || 0);
           setText("home-calls", stats.total_calls || 0);
           setText("home-feedback", stats.total_feedback_events || 0);
           renderSparks(stats);
-          renderHomeTables(stats.services || []);
+          renderHomeTables(stats);
         }
         ${sharedClientHelpers()}
         document.getElementById("home-copy-install").addEventListener("click", async () => {
@@ -184,11 +184,12 @@ export function homeHtml({ auth = {} } = {}) {
             }).join("");
           }
         }
-        function renderHomeTables(services) {
-          const sorted = [...services].sort((a, b) =>
+        function renderHomeTables(stats) {
+          const services = stats.services || [];
+          const sorted = stats.featured_services || [...services].sort((a, b) =>
             Number(b.trust_score || 0) + Number(b.total_calls || 0) - Number(a.trust_score || 0) - Number(a.total_calls || 0)
           );
-          const recent = [...services].slice(-8).reverse();
+          const recent = stats.recent_services || [...services].slice(-8).reverse();
           document.getElementById("featured-services").innerHTML = renderRows(sorted.slice(0, 8), "score");
           document.getElementById("recent-services").innerHTML = renderRows(recent.slice(0, 8), "when");
         }

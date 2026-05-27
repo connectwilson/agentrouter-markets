@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import { URL } from "node:url";
 import { readJson, sendHtml, sendJson, sendNotFound, getRequestBaseUrl } from "./http-utils.js";
-import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeRegistryStats } from "./store.js";
+import { createMemoryStore, listServiceSummaries, publicServiceRecord, publicSampleResponse, publicValidationRun, summarizeHomeStats, summarizeRegistryStats } from "./store.js";
 import { baseFundFlowManifest, btcLiquidationMaxPainManifest } from "./fixtures.js";
 import { handleBtcLiquidationProvider, handleCustomProvider, handleFundFlowProvider, handleMockUpstreamApplicationError, handleMockUpstreamHeaderKey, handleMockUpstreamSentiment } from "./provider-runtime.js";
 import { hydratePersistentServiceEvents, invokePaidService, recordConsumerFeedback, registerService, searchServices, validateService, loadProviderConfigs, runServiceHealthCheck, updateServicePayoutWallet, registerServiceErc8004Identity, withCurrentRuntimeEndpoint } from "./registry.js";
@@ -208,6 +208,13 @@ async function routeRequest(req, res, store, baseUrl) {
         "set-cookie": clearSessionCookie(baseUrl)
       });
     }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/agent-router/home-stats") {
+    sendJson(res, 200, summarizeHomeStats(store), {
+      "cache-control": "public, max-age=15, stale-while-revalidate=60"
+    });
     return;
   }
 

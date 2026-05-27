@@ -435,6 +435,35 @@ export function summarizeRegistryStats(store, { ownerKey = "" } = {}) {
   };
 }
 
+export function summarizeHomeStats(store) {
+  const records = [...store.services.values()];
+  const services = records.map((record) => publicServiceSummary(record));
+  const featured = [...services]
+    .sort((a, b) => Number(b.trust_score || 0) + Number(b.total_calls || 0) - Number(a.trust_score || 0) - Number(a.total_calls || 0))
+    .slice(0, 8);
+  const recent = [...services]
+    .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))
+    .slice(0, 8);
+  const merged = [];
+  const seen = new Set();
+  for (const service of [...featured, ...recent]) {
+    if (seen.has(service.service_id)) continue;
+    seen.add(service.service_id);
+    merged.push(service);
+  }
+  return {
+    stats_version: "agent_router_home_stats_v1",
+    registered_services: services.length,
+    verified_services: services.filter((service) => service.verification_status === "verified").length,
+    total_calls: services.reduce((sum, service) => sum + Number(service.total_calls || 0), 0),
+    total_feedback_events: records.reduce((sum, record) => sum + (record.feedback_events || []).length, 0),
+    total_consumer_feedback: services.reduce((sum, service) => sum + Number(service.consumer_feedback_count || 0), 0),
+    featured_services: featured,
+    recent_services: recent,
+    services: merged
+  };
+}
+
 export function listServiceSummaries(store, {
   query = "",
   capabilities = [],

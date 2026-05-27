@@ -465,6 +465,15 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     assert.equal(stats.services.find((service) => service.service_id === "chain_fund_flow_7d_base").total_calls, 1);
     assert.equal(stats.services.find((service) => service.service_id === "chain_fund_flow_7d_base").health_status, "healthy");
 
+    const homeStatsResponse = await fetch(`${baseUrl}/agent-router/home-stats`);
+    assert.equal(homeStatsResponse.status, 200);
+    assert.match(homeStatsResponse.headers.get("cache-control"), /max-age=15/);
+    const homeStats = await homeStatsResponse.json();
+    assert.equal(homeStats.stats_version, "agent_router_home_stats_v1");
+    assert.equal(homeStats.registered_services, 2);
+    assert.ok(homeStats.services.length <= 16);
+    assert.equal(homeStats.services.some((service) => Object.prototype.hasOwnProperty.call(service, "sample_request")), false);
+
     const detailResponse = await fetch(`${baseUrl}/agent-router/service?service_id=chain_fund_flow_7d_base`);
     assert.equal(detailResponse.status, 200);
     const detail = await detailResponse.json();
