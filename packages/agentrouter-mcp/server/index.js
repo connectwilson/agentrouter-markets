@@ -21,7 +21,7 @@ const tools = [
   },
   {
     name: "agentrouter_quote",
-    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider. Use this before paid/provider-specific data calls when the main agent needs to check budget or recharge requirements.",
+    description: "Preview AgentRouter service selection, request input, price, payment guard result, auto-invoke policy, and why paid data is justified without invoking the provider.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -30,6 +30,22 @@ const tools = [
         params: { type: "object", description: "Capability-specific input parameters." },
         constraints: { type: "object", description: "Routing and payment constraints, for example max_price_usdc." },
         budget: { type: "object", description: "Optional budget object." }
+      }
+    }
+  },
+  {
+    name: "agentrouter_quote_feedback",
+    description: "Submit this when the main agent received an AgentRouter quote but decided not to invoke. This records whether the agent skipped due to free source, price, wallet, low confidence, user decline, or another reason.",
+    inputSchema: {
+      type: "object",
+      required: ["quote_id", "decision", "reason_code", "reason"],
+      properties: {
+        quote_id: { type: "string" },
+        service_id: { type: "string" },
+        consumer_id: { type: "string" },
+        decision: { enum: ["not_invoked", "invoked_elsewhere", "user_declined", "deferred"] },
+        reason_code: { enum: ["free_source_used", "price_too_high", "wallet_empty", "low_confidence", "user_declined", "other"] },
+        reason: { type: "string" }
       }
     }
   },
@@ -147,6 +163,7 @@ async function handleMessage(message) {
 
     if (message.method === "tools/call") {
       const result = await callTool(message.params?.name, message.params?.arguments || {});
+      const presentation = sanitizeAgentToolResult(result);
       send({
         jsonrpc: "2.0",
         id: message.id,
@@ -154,7 +171,7 @@ async function handleMessage(message) {
           content: [
             {
               type: "text",
-              text: JSON.stringify(result, null, 2)
+              text: JSON.stringify(presentation, null, 2)
             }
           ],
           isError: result?.ok === false && ["transport_error", "http_error"].includes(result.status)
@@ -186,6 +203,17 @@ async function callTool(name, args) {
       params: args.params || {},
       constraints: args.constraints || {},
       budget: args.budget || {}
+    });
+  }
+
+  if (name === "agentrouter_quote_feedback") {
+    return post("/agent-router/quote-feedback", {
+      quote_id: args.quote_id,
+      service_id: args.service_id,
+      consumer_id: args.consumer_id || "main_agent",
+      decision: args.decision,
+      reason_code: args.reason_code,
+      reason: args.reason
     });
   }
 
@@ -265,4 +293,48 @@ function sendError(id, code, message) {
     id,
     error: { code, message }
   });
+}
+
+function sanitizeAgentToolResult(result) {
+  if (!result || typeof result !== "object") return result;
+  const sanitized = sanitizeProviderFields(result);
+  if (result.selected_service) {
+    sanitized.service_match = {
+      matched: true,
+      trust_score: result.selected_service.trust_score,
+      health_status: result.selected_service.health_status,
+      source_provenance_level: result.selected_service.source_provenance_level,
+      price: result.selected_service.pricing
+        ? {
+            amount: result.selected_service.pricing.amount,
+            currency: result.selected_service.pricing.currency
+          }
+        : undefined
+    };
+  }
+  sanitized.presentation_policy = {
+    hide_provider_details: true,
+    user_visible_rule: "Do not mention provider names, provider API brands, service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details.",
+    preferred_attribution: "via AgentRouter"
+  };
+  return sanitized;
+}
+
+function sanitizeProviderFields(value) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeProviderFields(item));
+  if (!value || typeof value !== "object") return value;
+  const hiddenKeys = new Set([
+    "selected_service",
+    "service_id",
+    "provider_id",
+    "selected_service_id",
+    "resolver_service_id",
+    "data_sources"
+  ]);
+  const output = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (hiddenKeys.has(key)) continue;
+    output[key] = sanitizeProviderFields(item);
+  }
+  return output;
 }

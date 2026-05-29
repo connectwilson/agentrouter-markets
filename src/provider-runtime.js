@@ -1,6 +1,7 @@
 import { isArcNetwork, isEvmAddress, verifyArcUsdcTransfer } from "./arc-payment.js";
 import { createPaymentRequirements, verifyPaymentProof } from "./payment.js";
 import { currentPaymentBackend } from "./payment-adapter.js";
+import { hashJson } from "./evidence.js";
 import { createEnvelope, readProviderConfig } from "./provider-config.js";
 import { createLiveBtcLiquidationEnvelope, createLiveFundFlowEnvelope } from "./fixtures.js";
 import { readJson, sendJson, sendNotFound } from "./http-utils.js";
@@ -8,6 +9,7 @@ import { readProviderSecret } from "./provider-secrets.js";
 import { isRealX402ProviderEnabled, processProviderX402Payment, sendX402Response, settleProviderX402Payment } from "./real-x402-provider.js";
 
 const issuedChallenges = new Map();
+const preflightResults = new Map();
 
 export async function handleFundFlowProvider(req, res) {
   const input = await readJson(req);
@@ -96,6 +98,16 @@ export async function handleCustomProvider(req, res, serviceId) {
 
   const input = await readJson(req);
   const manifest = config.manifest;
+  const inputHash = hashJson(input || {});
+  const paymentProof = req.headers["x-payment"];
+  let preflight = null;
+  if (!paymentProof && shouldPreflightProviderConfig(config)) {
+    preflight = await executeProviderConfig(config, input);
+    if (!isSuccessfulProviderResult(preflight)) {
+      sendJson(res, 422, createPrepayValidationFailure({ serviceId, input, preflight }));
+      return;
+    }
+  }
   const amount = manifest.pricing.amount;
   const currency = manifest.pricing.currency;
   const network = manifest.pricing.network;
@@ -107,11 +119,29 @@ export async function handleCustomProvider(req, res, serviceId) {
     currency,
     network,
     payTo: providerPayoutAddress(manifest),
-    description: manifest.description_for_agent || manifest.title
+    description: manifest.description_for_agent || manifest.title,
+    inputHash,
+    preflight
   });
   if (!payment.ok) return;
 
-  const result = await executeProviderConfig(config, input);
+  if (payment.input_hash && payment.input_hash !== inputHash) {
+    sendJson(res, 409, {
+      schema_version: "agent_data_envelope_v1",
+      service_id: serviceId,
+      request_id: `req_${Date.now()}`,
+      status: "error",
+      query: input || {},
+      error: {
+        code: "PAYMENT_INPUT_MISMATCH",
+        message: "Payment challenge was issued for a different request input.",
+        retryable: false
+      }
+    });
+    return;
+  }
+
+  const result = payment.preflight?.result || await executeProviderConfig(config, input);
   await sendPaidResult({ res, payment, body: result.body, status: result.status });
 }
 
@@ -188,7 +218,7 @@ export async function executeProviderConfig(config, input = {}) {
   }) };
 }
 
-async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, payTo, description }) {
+async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, network, payTo, description, inputHash = null, preflight = null }) {
   if (isRealX402ProviderEnabled()) {
     const payment = await processProviderX402Payment({
       req,
@@ -214,7 +244,15 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
       });
       return { ok: false };
     }
-    const payment = issueChallenge({ serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network, payTo });
+    const payment = issueChallenge({
+      serviceId,
+      amount,
+      currency,
+      network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network,
+      payTo,
+      inputHash,
+      preflight
+    });
     sendJson(res, 402, {
       error: "Payment Required",
       payment
@@ -227,11 +265,18 @@ async function requirePaymentOrRespond({ req, res, serviceId, amount, currency, 
     sendJson(res, 402, {
       error: "Invalid Payment",
       code: verification.error,
-      payment: createPaymentRequirements({ serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network, payTo })
+      payment: createPaymentRequirements({ serviceId, amount, currency, network: currentPaymentBackend() === "circle_arc" ? "arc-testnet" : network, payTo, inputHash })
     });
     return { ok: false };
   }
-  return { ok: true, payment: { required: false } };
+  const cachedPreflight = verification.challenge_nonce ? preflightResults.get(verification.challenge_nonce) : null;
+  if (verification.challenge_nonce) preflightResults.delete(verification.challenge_nonce);
+  return {
+    ok: true,
+    payment: { required: false },
+    input_hash: verification.payment?.input_hash || null,
+    preflight: cachedPreflight
+  };
 }
 
 async function sendPaidResult({ res, payment, body, status = 200 }) {
@@ -247,9 +292,16 @@ async function sendPaidResult({ res, payment, body, status = 200 }) {
   sendJson(res, status, body);
 }
 
-function issueChallenge({ serviceId, amount, currency, network, payTo }) {
-  const payment = createPaymentRequirements({ serviceId, amount, currency, network, payTo });
+function issueChallenge({ serviceId, amount, currency, network, payTo, inputHash = null, preflight = null }) {
+  const payment = createPaymentRequirements({ serviceId, amount, currency, network, payTo, inputHash });
   issuedChallenges.set(payment.nonce, payment);
+  if (preflight) {
+    preflightResults.set(payment.nonce, {
+      input_hash: inputHash,
+      result: preflight,
+      expires_at: payment.expires_at
+    });
+  }
   return payment;
 }
 
@@ -278,6 +330,7 @@ async function verifyPaymentWithChallenge(paymentProof, expected) {
       verification.payment.arc_verification = arc;
     }
     issuedChallenges.delete(challenge.nonce);
+    verification.challenge_nonce = challenge.nonce;
   }
   return verification;
 }
@@ -310,6 +363,14 @@ export async function handleMockUpstreamSentiment(req, res) {
     });
     return;
   }
+  if (String(input.asset || "").toUpperCase() === "BAD") {
+    sendJson(res, 422, {
+      error: "invalid asset",
+      code: "INVALID_ASSET",
+      message: "asset BAD is not supported"
+    });
+    return;
+  }
   sendJson(res, 200, {
     asset: input.asset || "ETH",
     window: input.window || "7d",
@@ -320,6 +381,55 @@ export async function handleMockUpstreamSentiment(req, res) {
     neutral_ratio: 0.17,
     source: "mock_upstream_sentiment"
   });
+}
+
+function shouldPreflightProviderConfig(config) {
+  return config.source?.type === "hosted_http";
+}
+
+function isSuccessfulProviderResult(result) {
+  return Number(result?.status || 0) >= 200
+    && Number(result?.status || 0) < 300
+    && result?.body?.status === "success"
+    && !result?.body?.error;
+}
+
+function createPrepayValidationFailure({ serviceId, input, preflight }) {
+  const providerError = preflight?.body?.error || {
+    code: "PROVIDER_PREPAY_VALIDATION_FAILED",
+    message: "Provider preflight validation failed before payment."
+  };
+  return {
+    schema_version: "agent_data_envelope_v1",
+    service_id: serviceId,
+    request_id: `prepay_${Date.now()}`,
+    status: "error",
+    payment_required: false,
+    payment_collected: false,
+    billing_status: "not_charged",
+    query: input || {},
+    error: {
+      code: "PREPAY_VALIDATION_FAILED",
+      message: "The provider upstream rejected this request before payment. No payment challenge was issued.",
+      retryable: false,
+      upstream_status: preflight?.body?.error?.upstream_status || preflight?.status || null,
+      provider_error: providerError
+    },
+    metadata: {
+      data_sources: ["provider_config_hosted_http"],
+      generated_at: new Date().toISOString(),
+      freshness_seconds: 0,
+      is_estimated: false,
+      confidence: 0,
+      limitations: ["The request was rejected before payment because the upstream API would not return valid data for this input."]
+    },
+    agent_hints: {
+      good_for: [],
+      warnings: ["No payment was collected for this failed request."],
+      suggested_followups: ["Fix the request parameters or choose a different service."]
+    },
+    summary: "Provider preflight validation failed before payment."
+  };
 }
 
 export async function handleMockUpstreamApplicationError(_req, res) {

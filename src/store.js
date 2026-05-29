@@ -8,6 +8,7 @@ export function createMemoryStore() {
     qualityEvents: [],
     evidenceEvents: [],
     routeObservations: [],
+    quoteFeedbackEvents: [],
     authSessions: new Map(),
     oauthStates: new Map()
   };
@@ -22,10 +23,15 @@ export function publicServiceRecord(record) {
   const displayTitle = displayTitleForRecord(record);
   return {
     service_id: record.manifest.service_id,
+    manifest_type: record.manifest.manifest_type || "hosted_http_data_api",
+    version: record.manifest.version || "1.0.0",
+    manifest_hash: record.manifest.integrity?.manifest_hash || record.manifest.registration?.manifest_hash || null,
+    config_hash: record.manifest.integrity?.config_hash || record.manifest.registration?.config_hash || null,
     title: record.manifest.title,
     display_title: displayTitle,
     description_for_agent: record.manifest.description_for_agent,
     capabilities: record.manifest.capabilities,
+    routing: record.manifest.routing || null,
     pricing: record.manifest.pricing,
     verification_status: record.verification_status,
     trust,
@@ -430,6 +436,7 @@ export function summarizeRegistryStats(store, { ownerKey = "" } = {}) {
     estimated_revenue: Number(services.reduce((sum, service) => sum + Number(service.estimated_revenue || 0), 0).toFixed(8)),
     providers: summarizeProviders(services),
     route_observations: store.routeObservations?.length || 0,
+    quote_feedback_events: store.quoteFeedbackEvents?.length || 0,
     evidence_events: store.evidenceEvents?.length || 0,
     services
   };

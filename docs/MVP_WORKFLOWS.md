@@ -8,7 +8,7 @@
 4. Review discovered endpoint cards.
 5. Select the endpoints to publish.
 6. Create/register/validate the services from the confirmation panel.
-7. Confirm each service appears in registry search.
+7. Confirm each service appears in AgentRouter service search with `manifest_hash`, `config_hash`, structured routing metadata, and validation status.
 
 ## Demand Agent Flow
 
@@ -16,9 +16,10 @@
 2. The main agent calls AgentRouter with the original task.
 3. AgentRouter searches registered services using task-derived search queries.
 4. AgentRouter selects a service and builds input.
-5. The connector invokes the selected service with a max-price budget.
+5. The connector invokes the selected service with a max-price budget and x402/Arc payment.
 6. The provider returns an agent-friendly result envelope.
-7. The caller receives answer, selected service, input, result, and feedback metadata.
+7. AgentRouter records evidence binding `service_id`, `manifest_hash`, `input_hash`, `output_hash`, `payment_tx`, and `verification_report`.
+8. The caller receives the answer, verification metadata, evidence trace, and a feedback request.
 
 ## Claude Integration Flow
 

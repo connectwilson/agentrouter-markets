@@ -135,6 +135,7 @@ export function studioHtml({ draft, loadedService, auth = {} } = {}) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ADN Provider Studio</title>
+  ${faviconLinks()}
   <style>
     /* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 */
     :root {
@@ -1740,6 +1741,13 @@ function brandLogo() {
     <span class="brand-icon" aria-hidden="true"><img src="/assets/brand/logo.png" alt=""></span>
     <span class="brand-word">AgentRouter</span>
   `;
+}
+
+function faviconLinks() {
+  return `
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />`;
 }
 
 function html(value) {

@@ -20,8 +20,9 @@ process.env.ADN_ERC8004_AGENT_ID = "1001";
 process.env.ADN_PROVIDER_RECEIVE_ADDRESS = "0x2c4d600a04c0d3bbb1e3cc8a13e54e21c2b6c0bb";
 
 const { createServer, seedDemoService } = await import("../src/server.js");
-const { loadProviderConfigs, searchServices } = await import("../src/registry.js");
+const { loadProviderConfigs, registerService, searchServices } = await import("../src/registry.js");
 const { withCurrentRuntimeEndpoint } = await import("../src/registry.js");
+const { baseFundFlowManifest } = await import("../src/fixtures.js");
 const { DiscoveryConnector, runConsumerDemo } = await import("../src/connector.js");
 const { discoverApiServices } = await import("../src/openapi-import.js");
 const { readPaymentLog, resetWalletForTests } = await import("../src/wallet.js");
@@ -42,6 +43,8 @@ test.after(async () => {
 
 async function withServer(fn, options = {}) {
   await resetWalletForTests();
+  await fs.rm(process.env.ADN_PROVIDER_DIR, { recursive: true, force: true });
+  await fs.mkdir(process.env.ADN_PROVIDER_DIR, { recursive: true });
   await initSessionWallet();
   const server = createServer(options.serverBaseUrl ? { baseUrl: options.serverBaseUrl } : {});
   const authCookie = "ar_session=test-session";
@@ -99,6 +102,8 @@ test("home page and Provider Studio render separately", async () => {
     const home = await fetch(`${baseUrl}/`);
     assert.equal(home.status, 200);
     const homeHtml = await home.text();
+    assert.match(homeHtml, /rel="icon"/);
+    assert.match(homeHtml, /\/favicon\.png/);
     assert.match(homeHtml, /Network snapshot/);
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
@@ -113,6 +118,12 @@ test("home page and Provider Studio render separately", async () => {
     assert.match(humanHtml, /Your API inventory stays private/);
     assert.match(humanHtml, /Add data\/API/);
     assert.doesNotMatch(humanHtml, /Your API cards/);
+
+    const signedInHuman = await rawFetch(`${baseUrl}/human`, { headers: { cookie: authCookie } });
+    assert.equal(signedInHuman.status, 200);
+    const signedInHumanHtml = await signedInHuman.text();
+    assert.match(signedInHumanHtml, /Feedback events/);
+    assert.match(signedInHumanHtml, /Quality loop/);
 
     const humanStats = await fetch(`${baseUrl}/human/stats`);
     assert.equal(humanStats.status, 401);
@@ -137,9 +148,35 @@ test("home page and Provider Studio render separately", async () => {
     const studio = await fetch(`${baseUrl}/studio`, { headers: { cookie: authCookie } });
     assert.equal(studio.status, 200);
     const studioHtml = await studio.text();
+    assert.match(studioHtml, /rel="icon"/);
     assert.match(studioHtml, /Provider Studio/);
     assert.match(studioHtml, /Verify & Publish Selected/);
     assert.doesNotMatch(studioHtml, /Buyer auth/);
+
+    const favicon = await fetch(`${baseUrl}/favicon.png`);
+    assert.equal(favicon.status, 200);
+    assert.equal(favicon.headers.get("content-type"), "image/png");
+    assert.ok(Number(favicon.headers.get("content-length")) > 0);
+  });
+});
+
+test("AgentRouter origin document is available from well-known and fallback paths", async () => {
+  await withServer(async ({ baseUrl }) => {
+    for (const pathName of ["/.well-known/agentrouter.json", "/agentrouter.json", "/agent-router/origin"]) {
+      const response = await fetch(`${baseUrl}${pathName}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type").includes("application/json"), true);
+      const payload = await response.json();
+      assert.equal(payload.agentrouter, "1");
+      assert.equal(payload.origin, baseUrl);
+      assert.equal(payload.layer_role, "execution_routing_verification");
+      assert.ok(payload.endpoints.remote_mcp.endsWith("/mcp"));
+      assert.ok(payload.services.some((service) => service.service_id === "chain_fund_flow_7d_base"));
+    }
+
+    const head = await fetch(`${baseUrl}/.well-known/agentrouter.json`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-type").includes("application/json"), true);
   });
 });
 
@@ -360,6 +397,56 @@ test("GitHub login entrypoint renders and OAuth callback creates a session", asy
   });
 });
 
+test("provider dashboard only exposes services owned by the signed-in provider", async () => {
+  await withServer(async ({ server, baseUrl, authCookie, rawFetch }) => {
+    const ownedManifest = structuredClone(baseFundFlowManifest);
+    ownedManifest.service_id = "owned_provider_private_demo";
+    ownedManifest.title = "Owned Provider Private Demo";
+    ownedManifest.provider = { provider_id: "provider_private_alice" };
+    ownedManifest.capabilities = ["private_provider_demo", "data_service"];
+    const ownedResponse = await rawFetch(`${baseUrl}/services/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: authCookie },
+      body: JSON.stringify(ownedManifest)
+    });
+    assert.equal(ownedResponse.status, 201);
+
+    const foreignManifest = structuredClone(baseFundFlowManifest);
+    foreignManifest.service_id = "foreign_provider_private_demo";
+    foreignManifest.title = "Foreign Provider Private Demo";
+    foreignManifest.provider = { provider_id: "provider_private_bob" };
+    foreignManifest.capabilities = ["private_provider_demo", "data_service"];
+    foreignManifest.registration = {
+      ...(foreignManifest.registration || {}),
+      owner: {
+        user_key: "github:other-provider",
+        provider: "github",
+        user_id: "other-provider",
+        handle: "other-provider",
+        created_at: new Date().toISOString()
+      }
+    };
+    registerService(server.store, foreignManifest, baseUrl);
+
+    const statsResponse = await rawFetch(`${baseUrl}/human/stats`, {
+      headers: { cookie: authCookie }
+    });
+    assert.equal(statsResponse.status, 200);
+    const stats = await statsResponse.json();
+    assert.deepEqual(stats.services.map((service) => service.service_id), ["owned_provider_private_demo"]);
+    assert.equal(stats.registered_services, 1);
+
+    const editOwned = await rawFetch(`${baseUrl}/studio?service_id=owned_provider_private_demo`, {
+      headers: { cookie: authCookie }
+    });
+    assert.equal(editOwned.status, 200);
+    const editForeign = await rawFetch(`${baseUrl}/studio?service_id=foreign_provider_private_demo`, {
+      headers: { cookie: authCookie }
+    });
+    assert.equal(editForeign.status, 403);
+  });
+});
+
 test("published services can bind an Arc payout wallet without re-registration", async () => {
   await withServer(async ({ baseUrl }) => {
     const payoutAddress = "0x1111111111111111111111111111111111111111";
@@ -401,6 +488,14 @@ test("published services can register ERC-8004 identity metadata and use it for 
     assert.equal(metadata.services[0].service_id, "chain_fund_flow_7d_base");
     assert.equal(metadata.registrations[0].chain, "arc-testnet");
 
+    const toolManifestResponse = await fetch(`${baseUrl}/.well-known/erc8257/tools/chain_fund_flow_7d_base.json`);
+    assert.equal(toolManifestResponse.status, 200);
+    const toolManifest = await toolManifestResponse.json();
+    assert.equal(toolManifest.standard, "ERC-8257");
+    assert.equal(toolManifest.tool_id, "chain_fund_flow_7d_base");
+    assert.equal(toolManifest.tool_type, "hosted_http_data_api");
+    assert.equal(toolManifest.agentrouter.layer_role, "execution_routing_verification");
+
     const registerResponse = await fetch(`${baseUrl}/services/chain_fund_flow_7d_base/erc8004/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -439,6 +534,14 @@ test("discovery connector searches, previews, invokes, and records feedback", as
 
     const manifest = await connector.getManifest("chain_fund_flow_7d_base");
     assert.equal(manifest.title, "Base 7D Fund Flow");
+    assert.equal(manifest.manifest_type, "hosted_http_data_api");
+    assert.equal(manifest.version, "1.0.0");
+    assert.match(manifest.integrity.manifest_hash, /^0x[0-9a-f]{64}$/);
+    assert.match(manifest.integrity.config_hash, /^0x[0-9a-f]{64}$/);
+    assert.equal(manifest.registration.manifest_hash, manifest.integrity.manifest_hash);
+    assert.equal(manifest.erc8257.tool_manifest_standard, "ERC-8257");
+    assert.equal(manifest.routing.routing_version, "agentrouter_structured_routing_v1");
+    assert.ok(manifest.routing.domains.includes("crypto"));
 
     const preview = await connector.previewService("chain_fund_flow_7d_base", manifest.sample_request);
     assert.equal(preview.sample_type, "historical");
@@ -453,6 +556,9 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     assert.equal(invocation.result.schema_version, "agent_data_envelope_v1");
     assert.equal(invocation.feedback.schema_valid, true);
     assert.match(invocation.feedback.payment_tx, /^0x[0-9a-f]{64}$/);
+    assert.equal(invocation.feedback.payment_collected, true);
+    assert.equal(invocation.feedback.billing_status, "charged_success");
+    assert.equal(invocation.feedback.result_delivery_status, "delivered");
 
     const feedback = await connector.getFeedback("chain_fund_flow_7d_base");
     assert.equal(feedback.length, 1);
@@ -480,6 +586,19 @@ test("discovery connector searches, previews, invokes, and records feedback", as
     assert.equal(detail.service_detail_version, "agent_router_service_detail_v1");
     assert.equal(detail.service.source_provenance.source_provenance_level, "wrapped_api");
     assert.ok(detail.service.badges.some((badge) => badge.code === "verified_live_endpoint"));
+
+    const detailHtmlResponse = await fetch(`${baseUrl}/agent-router/service?service_id=chain_fund_flow_7d_base&format=html`);
+    assert.equal(detailHtmlResponse.status, 200);
+    const detailHtml = await detailHtmlResponse.text();
+    assert.match(detailHtml, /Service calls/);
+    assert.match(detailHtml, /Success rate/);
+    assert.match(detailHtml, /Trust score/);
+    assert.match(detailHtml, /Health/);
+    assert.match(detailHtml, /Request schema/);
+    assert.match(detailHtml, /Response schema/);
+    assert.match(detailHtml, /Evidence traces/);
+    assert.match(detailHtml, /Routing signals/);
+    assert.match(detailHtml, /Selection hints/);
 
     const qualityResponse = await fetch(`${baseUrl}/agent-router/quality?service_id=chain_fund_flow_7d_base`);
     assert.equal(qualityResponse.status, 200);
@@ -636,8 +755,14 @@ test("AgentRouter capability catalog and structured request route deterministica
     assert.equal(routed.consumer_feedback_request.service_id, "btc_liquidation_max_pain_demo");
     assert.equal(routed.consumer_feedback_request.request_id, routed.result.request_id);
     assert.equal(routed.evidence.evidence_version, "agent_router_evidence_v1");
+    assert.equal(routed.evidence.evidence_profile.profile_type, "paid_hosted_http_data_api_execution");
     assert.equal(routed.evidence.route_type, "structured_capability_request");
     assert.equal(routed.evidence.service_id, "btc_liquidation_max_pain_demo");
+    assert.equal(routed.evidence.service_binding.service_id, "btc_liquidation_max_pain_demo");
+    assert.match(routed.evidence.manifest_hash, /^0x[0-9a-f]{64}$/);
+    assert.match(routed.evidence.input_hash, /^0x[0-9a-f]{64}$/);
+    assert.match(routed.evidence.output_hash, /^0x[0-9a-f]{64}$/);
+    assert.match(routed.evidence.verification_report.report_hash, /^0x[0-9a-f]{64}$/);
     assert.match(routed.evidence.trace_hash, /^0x[0-9a-f]{64}$/);
     assert.match(routed.evidence.result_hash, /^0x[0-9a-f]{64}$/);
     assert.equal(routed.evidence.arc_anchor.network, "arc-testnet");
@@ -713,6 +838,9 @@ test("local wallet paid invocation records evidence trace verification and consu
     assert.equal(invocation.evidence_recording.payment_verification.ok, true);
     assert.equal(invocation.evidence_recording.payment_verification.status, "verified_arc_usdc_transfer");
     assert.equal(invocation.evidence_recording.feedback.payment_tx, invocation.local_payment.payment_tx);
+    assert.equal(invocation.evidence_recording.feedback.payment_collected, true);
+    assert.equal(invocation.evidence_recording.feedback.billing_status, "charged_success");
+    assert.equal(invocation.evidence_recording.feedback.result_delivery_status, "delivered");
     assert.match(invocation.evidence_recording.evidence.trace_hash, /^0x[0-9a-f]{64}$/);
     assert.equal(invocation.evidence_recording.evidence.request_id, invocation.result.request_id);
     assert.equal(invocation.evidence_recording.evidence.arc_anchor.status, "anchored");
@@ -834,6 +962,13 @@ test("AgentRouter quote simulates route and payment guards without invoking prov
     assert.equal(quoted.quote.would_pay, true);
     assert.equal(quoted.quote.guard_result, "pass");
     assert.equal(quoted.quote.payment_backend.backend, "circle_arc");
+    assert.equal(quoted.quote.agent_decision.quote_status, "quote_ready");
+    assert.equal(quoted.quote.agent_decision.auto_invoke_allowed, true);
+    assert.equal(quoted.quote.agent_decision.requires_additional_user_confirmation, false);
+    assert.match(quoted.quote.agent_decision.why_paid_data_is_justified, /public/i);
+    assert.ok(quoted.quote.agent_decision.expected_data.length > 0);
+    assert.equal(quoted.quote.agent_decision.main_agent_next_action, "invoke_agentrouter_request");
+    assert.equal(quoted.quote_feedback_request.must_submit_if_not_invoked, true);
     assert.equal(quoted.result, undefined);
     const feedback = await fetch(`${baseUrl}/services/btc_liquidation_max_pain_demo/feedback`).then((res) => res.json());
     assert.equal(feedback.length, 0);
@@ -863,6 +998,50 @@ test("AgentRouter quote blocks payments above budget before invocation", async (
     assert.equal(quoted.status, "quote_blocked");
     assert.equal(quoted.quote.guard_result, "budget_too_low");
     assert.equal(quoted.quote.would_pay, false);
+    assert.equal(quoted.quote.agent_decision.auto_invoke_allowed, false);
+    assert.equal(quoted.quote.agent_decision.requires_additional_user_confirmation, true);
+    assert.equal(quoted.quote.agent_decision.main_agent_next_action, "ask_user_to_raise_budget_or_choose_free_answer");
+  });
+});
+
+test("AgentRouter records quote skip feedback when a main agent chooses not to invoke", async () => {
+  await withServer(async ({ baseUrl }) => {
+    const quoteResponse = await fetch(`${baseUrl}/agent-router/quote`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        capability: "perp_liquidation_max_pain",
+        params: {
+          asset: "BTC",
+          market_type: "perpetual_futures",
+          window: "current"
+        },
+        constraints: { max_price_usdc: "0.05" }
+      })
+    });
+    const quoted = await quoteResponse.json();
+    assert.equal(quoted.quote_feedback_request.endpoint, "/agent-router/quote-feedback");
+
+    const skipResponse = await fetch(`${baseUrl}/agent-router/quote-feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        quote_id: quoted.quote.quote_id,
+        service_id: quoted.selected_service.service_id,
+        consumer_id: "main_agent_test",
+        decision: "not_invoked",
+        reason_code: "free_source_used",
+        reason: "The main agent chose a public answer after seeing the quote."
+      })
+    });
+    assert.equal(skipResponse.status, 200);
+    const payload = await skipResponse.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.event.decision, "not_invoked");
+    assert.equal(payload.event.reason_code, "free_source_used");
+
+    const stats = await fetch(`${baseUrl}/agent-router/stats`).then((res) => res.json());
+    assert.equal(stats.quote_feedback_events, 1);
   });
 });
 
@@ -999,6 +1178,31 @@ test("remote MCP endpoint exposes AgentRouter tools over HTTP JSON-RPC", async (
     const toolResult = JSON.parse(capabilityPayload.result.content[0].text);
     assert.equal(toolResult.catalog_version, "agent_router_capability_catalog_v1");
     assert.ok(Array.isArray(toolResult.capabilities));
+
+    const quoteCall = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "agentrouter_quote",
+          arguments: {
+            capability: "perp_liquidation_max_pain",
+            params: { asset: "BTC", market_type: "perpetual_futures", window: "current" },
+            constraints: { max_price_usdc: "0.05" }
+          }
+        }
+      })
+    });
+    assert.equal(quoteCall.status, 200);
+    const quotePayload = await quoteCall.json();
+    const quoteResult = JSON.parse(quotePayload.result.content[0].text);
+    assert.equal(quoteResult.selected_service, undefined);
+    assert.equal(quoteResult.service_match.matched, true);
+    assert.equal(quoteResult.presentation_policy.hide_provider_details, true);
+    assert.equal(JSON.stringify(quoteResult).includes("btc_liquidation_max_pain_demo"), false);
   });
 });
 
@@ -3266,6 +3470,61 @@ test("Provider runtime reports non-JSON upstream responses clearly", async () =>
     assert.equal(payload.error.code, "VALIDATION_FAILED");
     assert.equal(payload.validation.status, 502);
     assert.match(JSON.stringify(payload.validation), /UPSTREAM_NON_JSON_RESPONSE/);
+  });
+});
+
+test("hosted HTTP provider preflights upstream failures before payment", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    const studioResponse = await fetch(`${baseUrl}/studio/providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: "hosted-http",
+        service_id: "prepay_validation_sentiment_demo",
+        provider_id: "provider_studio",
+        title: "Prepay Validation Sentiment Demo",
+        description_for_agent: "Use this service to verify upstream validation failures are caught before payment.",
+        capabilities: "sentiment_data,hosted_http,demo_data",
+        price: "0.01",
+        sample_request: "{\"asset\":\"ETH\",\"window\":\"7d\"}",
+        sample_data: "{\"asset\":\"ETH\",\"sentiment_score\":0.61,\"sample\":true}",
+        summary: "ETH sentiment from Provider Studio.",
+        upstream_url: "/mock/upstream/sentiment",
+        upstream_method: "POST",
+        secret_name: "PROVIDER_SECRET",
+        secret_value: "demo-provider-secret",
+        auth_header: "authorization"
+      })
+    });
+    assert.ok([200, 201].includes(studioResponse.status));
+
+    const direct = await fetch(`${baseUrl}/provider/custom/prepay_validation_sentiment_demo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ asset: "BAD", window: "7d" })
+    });
+    assert.equal(direct.status, 422);
+    const directPayload = await direct.json();
+    assert.equal(directPayload.error.code, "PREPAY_VALIDATION_FAILED");
+    assert.equal(directPayload.payment_required, false);
+    assert.equal(directPayload.payment_collected, false);
+    assert.equal(directPayload.billing_status, "not_charged");
+
+    const beforeLog = await readPaymentLog();
+    await assert.rejects(
+      () => invokePaidServiceWithLocalWallet({
+        baseUrl,
+        serviceId: "prepay_validation_sentiment_demo",
+        input: { asset: "BAD", window: "7d" },
+        budget: { max_amount: "0.05", currency: "USDC" }
+      }),
+      (error) => error.code === "provider_prepay_validation_failed"
+        && error.payload?.payment_collected === false
+        && error.payload?.billing_status === "not_charged"
+    );
+    const afterLog = await readPaymentLog();
+    assert.equal(afterLog.length, beforeLog.length);
   });
 });
 

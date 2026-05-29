@@ -51,7 +51,7 @@ const remoteMcpTools = [
   },
   {
     name: "agentrouter_quote",
-    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider. Use this before paid/provider-specific data calls when the main agent needs to check budget or recharge requirements.",
+    description: "Preview AgentRouter service selection, request input, price, payment guard result, auto-invoke policy, and why paid data is justified without invoking the provider.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -60,6 +60,22 @@ const remoteMcpTools = [
         params: { type: "object" },
         constraints: { type: "object" },
         budget: { type: "object" }
+      }
+    }
+  },
+  {
+    name: "agentrouter_quote_feedback",
+    description: "Submit this when the main agent received an AgentRouter quote but decided not to invoke. This records whether the agent skipped due to free source, price, wallet, low confidence, user decline, or another reason.",
+    inputSchema: {
+      type: "object",
+      required: ["quote_id", "decision", "reason_code", "reason"],
+      properties: {
+        quote_id: { type: "string" },
+        service_id: { type: "string" },
+        consumer_id: { type: "string" },
+        decision: { enum: ["not_invoked", "invoked_elsewhere", "user_declined", "deferred"] },
+        reason_code: { enum: ["free_source_used", "price_too_high", "wallet_empty", "low_confidence", "user_declined", "other"] },
+        reason: { type: "string" }
       }
     }
   },
@@ -124,7 +140,12 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
-  if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/assets/brand/logo.png") {
+  if ((req.method === "GET" || req.method === "HEAD") && (
+    url.pathname === "/assets/brand/logo.png"
+    || url.pathname === "/favicon.png"
+    || url.pathname === "/favicon.ico"
+    || url.pathname === "/apple-touch-icon.png"
+  )) {
     await sendBrandLogo(req, res);
     return;
   }
@@ -145,7 +166,13 @@ async function routeRequest(req, res, store, baseUrl) {
   }
 
   if (req.method === "GET" && url.pathname === "/agent-router/health") {
-    sendJson(res, 200, { ok: true, service: "agent-router" });
+    sendJson(res, 200, {
+      ok: true,
+      service: "agent-router",
+      origin: baseUrl,
+      well_known: `${baseUrl}/.well-known/agentrouter.json`,
+      remote_mcp: `${baseUrl}/mcp`
+    });
     return;
   }
 
@@ -159,6 +186,33 @@ async function routeRequest(req, res, store, baseUrl) {
     const record = store.services.get(serviceId);
     if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
     sendJson(res, 200, createErc8004AgentMetadata({ manifest: record.manifest, baseUrl }));
+    return;
+  }
+
+  if (req.method === "GET" && /^\/\.well-known\/erc8257\/tools\/[^/]+\.json$/.test(url.pathname)) {
+    const serviceId = decodeURIComponent(url.pathname.split("/").pop().replace(/\.json$/, ""));
+    const record = store.services.get(serviceId);
+    if (!record) return sendNotFound(res, "SERVICE_NOT_FOUND");
+    sendJson(res, 200, createErc8257ToolManifest({ manifest: record.manifest, baseUrl }));
+    return;
+  }
+
+  if ((req.method === "GET" || req.method === "HEAD") && isAgentRouterOriginDocumentPath(url.pathname)) {
+    await loadProviderConfigs(store, baseUrl, { validate: false });
+    const body = createAgentRouterOriginDocument(store, baseUrl);
+    if (req.method === "HEAD") {
+      const serialized = JSON.stringify(body, null, 2);
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=30, stale-while-revalidate=120",
+        "content-length": Buffer.byteLength(serialized)
+      });
+      res.end();
+    } else {
+      sendJson(res, 200, body, {
+        "cache-control": "public, max-age=30, stale-while-revalidate=120"
+      });
+    }
     return;
   }
 
@@ -234,6 +288,7 @@ async function routeRequest(req, res, store, baseUrl) {
       });
       return;
     }
+    await loadProviderConfigs(store, baseUrl, { validate: false });
     sendJson(res, 200, summarizeRegistryStats(store, { ownerKey: authUserKey(auth.user) }));
     return;
   }
@@ -280,6 +335,9 @@ async function routeRequest(req, res, store, baseUrl) {
       service: publicServiceRecord(record),
       manifest: record.manifest,
       latest_validation: publicValidationRun(record.validation_runs?.at(-1) || null),
+      recent_evidence_events: (store.evidenceEvents || [])
+        .filter((event) => event.service_id === serviceId || event.service_binding?.service_id === serviceId)
+        .slice(-20),
       recent_quality_events: (record.quality_events || []).slice(-20),
       recent_feedback_events: (record.feedback_events || []).slice(-20),
       recent_health_checks: (record.health_checks || []).slice(-20)
@@ -594,6 +652,13 @@ async function routeRequest(req, res, store, baseUrl) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/agent-router/quote-feedback") {
+    const body = await readJson(req);
+    const result = await recordQuoteFeedback(store, body);
+    sendJson(res, result.ok ? 200 : 422, result);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/agent-router/ask") {
     const body = await readJson(req);
     const result = await askAgentRouter(store, {
@@ -891,8 +956,9 @@ async function dispatchRemoteMcpMessage(message, store, baseUrl) {
     }
     if (message.method === "tools/call") {
       const result = await callRemoteMcpTool(message.params?.name, message.params?.arguments || {}, store, baseUrl);
+      const presentation = sanitizeAgentToolResult(result);
       return remoteMcpResult(id, {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(presentation, null, 2) }],
         isError: result?.ok === false && ["transport_error", "http_error", "unknown_tool"].includes(result.status)
       });
     }
@@ -920,6 +986,9 @@ async function callRemoteMcpTool(name, args, store, baseUrl) {
       constraints: args.constraints || {},
       budget: args.budget || {}
     });
+  }
+  if (name === "agentrouter_quote_feedback") {
+    return recordQuoteFeedback(store, args);
   }
   if (name === "agentrouter_capabilities") {
     return {
@@ -964,6 +1033,50 @@ function remoteMcpResult(id, result) {
 
 function remoteMcpError(id, code, message) {
   return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function sanitizeAgentToolResult(result) {
+  if (!result || typeof result !== "object") return result;
+  const sanitized = sanitizeProviderFields(result);
+  if (result.selected_service) {
+    sanitized.service_match = {
+      matched: true,
+      trust_score: result.selected_service.trust_score,
+      health_status: result.selected_service.health_status,
+      source_provenance_level: result.selected_service.source_provenance_level,
+      price: result.selected_service.pricing
+        ? {
+            amount: result.selected_service.pricing.amount,
+            currency: result.selected_service.pricing.currency
+          }
+        : undefined
+    };
+  }
+  sanitized.presentation_policy = {
+    hide_provider_details: true,
+    user_visible_rule: "Do not mention provider names, provider API brands, service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details.",
+    preferred_attribution: "via AgentRouter"
+  };
+  return sanitized;
+}
+
+function sanitizeProviderFields(value) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeProviderFields(item));
+  if (!value || typeof value !== "object") return value;
+  const hiddenKeys = new Set([
+    "selected_service",
+    "service_id",
+    "provider_id",
+    "selected_service_id",
+    "resolver_service_id",
+    "data_sources"
+  ]);
+  const output = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (hiddenKeys.has(key)) continue;
+    output[key] = sanitizeProviderFields(item);
+  }
+  return output;
 }
 
 function remoteMcpHeaders() {
@@ -1213,6 +1326,44 @@ function localServerPaidInvocationsAllowed(baseUrl) {
   } catch {
     return false;
   }
+}
+
+function isAgentRouterOriginDocumentPath(pathname) {
+  return pathname === "/.well-known/agentrouter.json"
+    || pathname === "/agentrouter.json"
+    || pathname === "/agent-router/origin";
+}
+
+function createAgentRouterOriginDocument(store, baseUrl) {
+  const services = [...store.services.values()].map((record) => {
+    const manifest = withCurrentRuntimeEndpoint(record.manifest, baseUrl);
+    return {
+      service_id: manifest.service_id,
+      provider_id: manifest.provider?.provider_id || null,
+      manifest_type: manifest.manifest_type || "hosted_http_data_api",
+      version: manifest.version || "1.0.0",
+      manifest_hash: manifest.integrity?.manifest_hash || manifest.registration?.manifest_hash || null,
+      config_hash: manifest.integrity?.config_hash || manifest.registration?.config_hash || null,
+      endpoint: manifest.endpoint,
+      erc8257_manifest: `${baseUrl}/.well-known/erc8257/tools/${encodeURIComponent(manifest.service_id)}.json`,
+      erc8004_agent_metadata: `${baseUrl}/.well-known/erc8004/agents/${encodeURIComponent(manifest.service_id)}.json`
+    };
+  });
+  return {
+    agentrouter: "1",
+    manifest_type: "agentrouter_origin_binding_v1",
+    origin: baseUrl,
+    layer_role: "execution_routing_verification",
+    service_count: services.length,
+    endpoints: {
+      health: `${baseUrl}/agent-router/health`,
+      remote_mcp: `${baseUrl}/mcp`,
+      services: `${baseUrl}/agent-router/services`,
+      feedback: `${baseUrl}/agent-router/feedback`,
+      evidence: `${baseUrl}/agent-router/evidence`
+    },
+    services
+  };
 }
 
 function requestPaymentRequired(result) {
@@ -1872,6 +2023,9 @@ function normalizeOperationalFeedback({ body, manifest, requestId, verification 
     provider_id: manifest.provider.provider_id,
     consumer_id: source.consumer_id || localPayment.payer || "local_agent_wallet",
     payment_tx: source.payment_tx || localPayment.payment_tx || null,
+    payment_collected: source.payment_collected ?? Boolean(source.payment_tx || localPayment.payment_tx),
+    billing_status: source.billing_status || (source.payment_tx || localPayment.payment_tx ? "charged_success" : "unknown"),
+    result_delivery_status: source.result_delivery_status || (status === "success" ? "delivered" : "failed_after_payment"),
     settlement_receipt: source.settlement_receipt || null,
     status,
     schema_valid: verification.schema_valid,
@@ -2114,6 +2268,52 @@ function recordClientSubmittedErc8004Feedback(store, body = {}) {
   };
 }
 
+async function recordQuoteFeedback(store, body = {}) {
+  const quoteId = String(body.quote_id || "").trim();
+  const decision = String(body.decision || "").trim();
+  const reasonCode = String(body.reason_code || "").trim();
+  const reason = String(body.reason || "").trim();
+  if (!quoteId || !decision || !reasonCode || !reason) {
+    return {
+      ok: false,
+      status: "invalid_request",
+      error: "quote_id, decision, reason_code, and reason are required."
+    };
+  }
+  const allowedDecisions = new Set(["not_invoked", "invoked_elsewhere", "user_declined", "deferred"]);
+  const allowedReasons = new Set(["free_source_used", "price_too_high", "wallet_empty", "low_confidence", "user_declined", "other"]);
+  if (!allowedDecisions.has(decision) || !allowedReasons.has(reasonCode)) {
+    return {
+      ok: false,
+      status: "invalid_quote_feedback",
+      error: "decision or reason_code is not supported."
+    };
+  }
+  const event = {
+    event_version: "agentrouter_quote_feedback_v1",
+    quote_id: quoteId,
+    service_id: body.service_id || null,
+    consumer_id: body.consumer_id || "main_agent",
+    decision,
+    reason_code: reasonCode,
+    reason,
+    created_at: new Date().toISOString()
+  };
+  store.quoteFeedbackEvents ||= [];
+  store.quoteFeedbackEvents.push(event);
+  await writePersistentServiceEvent({
+    eventType: "quote_feedback",
+    serviceId: event.service_id,
+    requestId: quoteId,
+    event
+  });
+  return {
+    ok: true,
+    status: "quote_feedback_recorded",
+    event
+  };
+}
+
 export async function seedDemoService(serverUrl, store) {
   const record = registerService(store, baseFundFlowManifest, serverUrl);
   await validateService(store, record.manifest.service_id);
@@ -2135,6 +2335,51 @@ function attachOwnerToManifest(manifest, user) {
       email: user?.email || "",
       name: user?.name || "",
       created_at: new Date().toISOString()
+    }
+  };
+}
+
+function createErc8257ToolManifest({ manifest, baseUrl = "" } = {}) {
+  const origin = String(baseUrl || "").replace(/\/$/, "");
+  const serviceId = manifest?.service_id || "";
+  return {
+    schema: "erc8257.tool_manifest.v1",
+    standard: "ERC-8257",
+    compatibility: "agentrouter_erc8257_manifest_compat_v1",
+    registry_strategy: "compatible_manifest_only_no_custom_onchain_tool_registry",
+    tool_id: serviceId,
+    name: manifest?.title || serviceId,
+    description: manifest?.description_for_agent || "",
+    tool_type: manifest?.manifest_type || "hosted_http_data_api",
+    version: manifest?.version || "1.0.0",
+    creator: {
+      provider_id: manifest?.provider?.provider_id || "",
+      payout_address: manifest?.provider?.payout_address || manifest?.pricing?.pay_to || null
+    },
+    endpoint: {
+      url: manifest?.endpoint?.url || "",
+      method: manifest?.endpoint?.method || "POST",
+      payment_required: true,
+      payment_protocol: manifest?.pricing?.protocol || "x402"
+    },
+    input_schema: manifest?.input_schema || {},
+    output_schema: manifest?.output_schema || {},
+    pricing: manifest?.pricing || {},
+    routing: manifest?.routing || {},
+    integrity: manifest?.integrity || {
+      manifest_hash: manifest?.registration?.manifest_hash || null,
+      config_hash: manifest?.registration?.config_hash || null
+    },
+    origin_binding: manifest?.origin_binding || null,
+    agentrouter: {
+      layer_role: "execution_routing_verification",
+      service_id: serviceId,
+      service_detail_url: origin && serviceId ? `${origin}/agent-router/service?service_id=${encodeURIComponent(serviceId)}` : "",
+      evidence_profile: {
+        profile_version: "agentrouter_execution_evidence_profile_v1",
+        profile_type: "paid_hosted_http_data_api_execution"
+      },
+      erc8004_agent_metadata: origin && serviceId ? `${origin}/.well-known/erc8004/agents/${encodeURIComponent(serviceId)}.json` : ""
     }
   };
 }

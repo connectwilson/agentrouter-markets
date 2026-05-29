@@ -4,9 +4,10 @@ import { publicServiceRecord, summarizeTrust } from "./store.js";
 import { normalizeEndpoint } from "./http-utils.js";
 import { suggestCapabilities } from "./id-utils.js";
 import { createSettlementReceipt } from "./payment-adapter.js";
+import { hashJson } from "./evidence.js";
 import { normalizeConsumerFeedback, verifyServiceResult } from "./verifier.js";
 import { listPersistentServiceEvents, writePersistentServiceEvent } from "./persistence.js";
-import { readProviderConfig, writeProviderConfig } from "./provider-config.js";
+import { finalizeManifest, readProviderConfig, writeProviderConfig } from "./provider-config.js";
 import { assertArcUsdcBalance, sendArcUsdcTransfer, isEvmAddress } from "./arc-payment.js";
 import { assertPolicyAllows, readWallet, recordPayment } from "./wallet.js";
 import { registerErc8004AgentIdentity } from "./erc8004.js";
@@ -26,14 +27,14 @@ export function registerService(store, manifest, baseUrl) {
     throw error;
   }
 
-  const normalized = {
+  const normalized = finalizeManifest({
     ...manifest,
     capabilities: normalizeManifestCapabilities(manifest),
     endpoint: {
       ...manifest.endpoint,
       url: normalizeEndpoint(manifest.endpoint.url, baseUrl)
     }
-  };
+  });
   const duplicate = findDuplicateService(store, normalized);
   if (duplicate) {
     const error = new Error(`Service source is already registered as ${duplicate.manifest.service_id}.`);
@@ -235,7 +236,8 @@ export async function validateService(store, serviceId) {
   const config = await readProviderConfig(serviceId).catch(() => null);
   if (config) {
     const result = await executeProviderConfig(config, requestBody);
-    return storeProviderValidationResult({ record, serviceId, status: result.status, responseBody: result.body });
+    const originBinding = await verifyOriginBinding(manifest);
+    return storeProviderValidationResult({ record, serviceId, status: result.status, responseBody: result.body, originBinding });
   }
 
   const firstResponse = await fetch(manifest.endpoint.url, {
@@ -271,10 +273,11 @@ export async function validateService(store, serviceId) {
     body: JSON.stringify(requestBody)
   });
   const responseBody = await paidResponse.json();
-  return storeProviderValidationResult({ record, serviceId, status: paidResponse.status, responseBody });
+  const originBinding = await verifyOriginBinding(manifest);
+  return storeProviderValidationResult({ record, serviceId, status: paidResponse.status, responseBody, originBinding });
 }
 
-function storeProviderValidationResult({ record, serviceId, status, responseBody }) {
+function storeProviderValidationResult({ record, serviceId, status, responseBody, originBinding = null }) {
   const manifest = record.manifest;
   const schemaErrors = validateJsonSchema(responseBody, manifest.output_schema);
   const envelopeErrors = validateEnvelope(responseBody);
@@ -290,8 +293,58 @@ function storeProviderValidationResult({ record, serviceId, status, responseBody
     envelope_errors: envelopeErrors,
     result_errors: resultErrors,
     result_preview: previewResultData(responseBody?.data),
+    origin_binding: originBinding,
     created_at: new Date().toISOString()
   });
+}
+
+async function verifyOriginBinding(manifest) {
+  const binding = manifest?.origin_binding;
+  if (!binding?.well_known_url) return null;
+  const result = {
+    binding_version: "agentrouter_origin_binding_v1",
+    required: Boolean(binding.required),
+    well_known_url: binding.well_known_url,
+    origin: binding.origin || "",
+    status: "not_found",
+    ok: false,
+    checked_at: new Date().toISOString()
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(binding.well_known_url, { signal: controller.signal });
+    result.http_status = response.status;
+    if (response.status === 404) return result;
+    if (!response.ok) {
+      result.status = "unavailable";
+      return result;
+    }
+    const payload = await response.json();
+    const serviceId = manifest.service_id;
+    const providerId = manifest.provider?.provider_id;
+    const services = Array.isArray(payload.services) ? payload.services : [];
+    const directMatch = payload.service_id === serviceId || payload.provider_id === providerId;
+    const serviceMatch = services.some((service) =>
+      service?.service_id === serviceId ||
+      service?.manifest_hash === manifest.integrity?.manifest_hash ||
+      service?.upstream_url === manifest.source?.upstream_url
+    );
+    result.payload_hash = payload ? hashPayload(payload) : null;
+    result.status = directMatch || serviceMatch ? "verified" : "mismatch";
+    result.ok = directMatch || serviceMatch;
+    return result;
+  } catch (error) {
+    result.status = error?.name === "AbortError" ? "timeout" : "unavailable";
+    result.error = error.message;
+    return result;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function hashPayload(payload) {
+  return hashJson(payload);
 }
 
 export function searchServices(store, { query = "", capabilities = [], maxPrice, verifiedOnly = false } = {}) {
@@ -313,6 +366,7 @@ export function searchServices(store, { query = "", capabilities = [], maxPrice,
       manifest.agent_contract?.summary,
       manifest.agent_contract?.request_shape_summary,
       manifest.agent_contract?.response_shape_summary,
+      JSON.stringify(manifest.routing || {}),
       JSON.stringify(manifest.agent_contract?.request_data || {}),
       JSON.stringify(manifest.agent_contract?.response_data || {}),
       JSON.stringify(manifest.pricing || {}),
@@ -361,23 +415,36 @@ export async function invokePaidService(store, serviceId, input, budget) {
     body: JSON.stringify(input)
   });
   if (firstResponse.status !== 402) {
+    let providerPayload = null;
+    try {
+      providerPayload = await firstResponse.json();
+    } catch {}
+    const prepayFailure = providerPayload?.error?.code === "PREPAY_VALIDATION_FAILED";
     const feedback = await recordOperationalFailure(store, record, {
       input,
       statusCode: firstResponse.status,
       error: {
-        code: "EXPECTED_402_PAYMENT_REQUIRED",
-        message: `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`
+        code: prepayFailure ? "PREPAY_VALIDATION_FAILED" : "EXPECTED_402_PAYMENT_REQUIRED",
+        message: prepayFailure
+          ? providerPayload.error.message
+          : `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`,
+        provider_payload: providerPayload
       },
       started
     });
     return {
-      statusCode: firstResponse.status >= 500 ? 503 : 502,
+      statusCode: prepayFailure ? 422 : firstResponse.status >= 500 ? 503 : 502,
       body: {
         error: {
-          code: firstResponse.status >= 500 ? "PROVIDER_UNAVAILABLE_BEFORE_PAYMENT" : "EXPECTED_402_PAYMENT_REQUIRED",
-          message: `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`,
+          code: prepayFailure
+            ? "PROVIDER_PREPAY_VALIDATION_FAILED"
+            : firstResponse.status >= 500 ? "PROVIDER_UNAVAILABLE_BEFORE_PAYMENT" : "EXPECTED_402_PAYMENT_REQUIRED",
+          message: prepayFailure
+            ? "Provider preflight validation failed before payment. No payment was collected."
+            : `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`,
           upstream_status: firstResponse.status,
-          retryable: firstResponse.status >= 500
+          retryable: firstResponse.status >= 500,
+          provider_payload: providerPayload
         },
         feedback
       }
@@ -417,6 +484,9 @@ export async function invokePaidService(store, serviceId, input, budget) {
     provider_id: manifest.provider.provider_id,
     consumer_id: "agentrouter_consumer",
     payment_tx: paymentTx,
+    payment_collected: true,
+    billing_status: paidResponse.ok && schemaValid && !resultErrors.length ? "charged_success" : "charged_provider_error",
+    result_delivery_status: paidResponse.ok && schemaValid && !resultErrors.length ? "delivered" : "failed_after_payment",
     settlement_receipt: settlementReceipt,
     status: paidResponse.ok ? "success" : "error",
     http_status: paidResponse.status,
@@ -479,6 +549,9 @@ async function recordOperationalFailure(store, record, { input, statusCode, erro
     provider_id: record.manifest.provider.provider_id,
     consumer_id: "agentrouter_consumer",
     payment_tx: null,
+    payment_collected: false,
+    billing_status: "not_charged",
+    result_delivery_status: "not_delivered",
     status: "error",
     http_status: statusCode,
     schema_valid: false,
@@ -848,13 +921,13 @@ export function withCurrentRuntimeEndpoint(manifest, baseUrl) {
     return manifest;
   }
   if (!pathname.startsWith("/provider/custom/")) return manifest;
-  return {
+  return finalizeManifest({
     ...manifest,
     endpoint: {
       ...manifest.endpoint,
       url: `${baseUrl.replace(/\/$/, "")}${pathname}`
     }
-  };
+  });
 }
 
 function validateManifest(manifest) {

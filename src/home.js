@@ -31,7 +31,7 @@ export function homeHtml({ auth = {} } = {}) {
       <header class="hero">
         <div class="dot-grid" aria-hidden="true"></div>
         <div class="shell wide-shell hero-center">
-          <h1>Agent-native API routing layer</h1>
+          <h1>Agent-native execution, routing, and verification layer</h1>
           <p class="lead">AgentRouter gives your agent access to verifiable premium data sources, per call, with no subscriptions.</p>
           <a class="hero-cta" href="/agent">Explore Data/APIs</a>
 
@@ -82,7 +82,7 @@ export function homeHtml({ auth = {} } = {}) {
             <div>
               <span class="eyebrow">Network snapshot</span>
               <h2>Overall stats</h2>
-              <p>Live registry activity for AgentRouter Markets.</p>
+              <p>Live execution, routing, and verification activity for AgentRouter Markets.</p>
             </div>
             <a class="button ghost" href="/agent-router/stats">Raw stats</a>
           </div>
@@ -250,6 +250,7 @@ export function humanHtml({ auth = {} } = {}) {
             <div class="provider-metric"><span>Provided APIs</span><strong id="human-services">--</strong><small>Published service cards</small></div>
             <div class="provider-metric"><span>Verified APIs</span><strong id="human-verified">--</strong><small>Live validation passed</small></div>
             <div class="provider-metric"><span>Total calls received</span><strong id="human-calls">--</strong><small>Demand-side invocations</small></div>
+            <div class="provider-metric"><span>Feedback events</span><strong id="human-feedback">--</strong><small>Quality loop signals</small></div>
             <div class="provider-metric"><span>USDC received</span><strong id="human-usdc">--</strong><small>Estimated paid volume</small></div>
           </section>
 
@@ -329,6 +330,7 @@ export function humanHtml({ auth = {} } = {}) {
           setText("human-services", services.length);
           setText("human-verified", stats.verified_services || 0);
           setText("human-calls", stats.total_calls || 0);
+          setText("human-feedback", stats.total_feedback_events || 0);
           setText("human-usdc", formatUsdc(totalUsdc));
           renderProviderCards(stats);
           renderProviderSummary(stats);
@@ -589,6 +591,26 @@ export function serviceDetailHtml(detail, { auth = {} } = {}) {
   const endpoint = manifest.endpoint || {};
   const capabilities = manifest.capabilities || service.capabilities || [];
   const price = manifest.pricing || {};
+  const trust = service.trust || {};
+  const health = service.health || {};
+  const requestData = service.request_data || {};
+  const responseData = service.response_data || {};
+  const routing = manifest.routing || service.routing || {};
+  const preCallContext = manifest.pre_call_context || service.pre_call_context || {};
+  const sourceProvenance = service.source_provenance || manifest.source_provenance || {};
+  const selectionHints = {
+    capabilities,
+    routing_tags: routing.tags || routing.routing_tags || service.routing_tags || [],
+    input_fields: Object.keys(sampleRequest || {}),
+    buyer_requirements: preCallContext.buyer_requirements || {},
+    freshness: preCallContext.freshness || {},
+    source_provenance: sourceProvenance,
+    limitations: preCallContext.limitations || service.limitations || []
+  };
+  const recentEvidence = detail.recent_evidence_events || [];
+  const recentQuality = detail.recent_quality_events || [];
+  const latestEvidence = recentEvidence.at(-1) || null;
+  const latestQuality = recentQuality.at(-1) || null;
   const title = service.display_title || service.title || manifest.title || serviceId;
   const rawJsonHref = `/agent-router/service?service_id=${encodeURIComponent(serviceId)}&format=json`;
   const invokeExample = {
@@ -623,6 +645,14 @@ export function serviceDetailHtml(detail, { auth = {} } = {}) {
           </aside>
         </section>
 
+        <section class="detail-metrics" aria-label="Service quality summary">
+          <div><span>Price</span><strong>${html(price.amount || service.price || "0.00")} ${html(price.currency || service.currency || "USDC")}</strong><small>Per call</small></div>
+          <div><span>Service calls</span><strong>${html(trust.operational_feedback_count ?? service.total_calls ?? 0)}</strong><small>Observed demand</small></div>
+          <div><span>Success rate</span><strong>${html(formatPercent(trust.success_rate))}</strong><small>Runtime feedback</small></div>
+          <div><span>Trust score</span><strong>${html(formatScore(trust.trust_score))}</strong><small>Verification + feedback</small></div>
+          <div><span>Health</span><strong>${html(health.status || service.health_status || "unknown")}</strong><small>${html(health.last_validation_at || "No validation time")}</small></div>
+        </section>
+
         <section class="detail-grid">
           <article class="detail-panel">
             <div class="panel-head">
@@ -637,6 +667,10 @@ export function serviceDetailHtml(detail, { auth = {} } = {}) {
             </div>
             <h3>Example request shape</h3>
             <pre class="code-block">${html(JSON.stringify(sampleRequest, null, 2))}</pre>
+            <h3>Request schema</h3>
+            <pre class="code-block">${html(JSON.stringify(manifest.input_schema || requestData || {}, null, 2))}</pre>
+            <h3>Response schema</h3>
+            <pre class="code-block">${html(JSON.stringify(manifest.output_schema || responseData || {}, null, 2))}</pre>
           </article>
 
           <article class="detail-panel validation-panel">
@@ -666,6 +700,45 @@ export function serviceDetailHtml(detail, { auth = {} } = {}) {
           </div>
           <p class="detail-note">AgentRouter should replace the sample values with the buyer task's actual parameters, then route, quote, invoke, verify, and request feedback.</p>
           <pre class="code-block">${html(JSON.stringify(invokeExample, null, 2))}</pre>
+        </section>
+
+        <section class="detail-panel invoke-panel">
+          <div class="panel-head">
+            <span class="eyebrow">Routing and quality</span>
+            <h2>Routing signals</h2>
+          </div>
+          <p class="detail-note">Selection hints describe when this service should be considered before any paid invocation. They are used for routing, quote explanation, and post-call quality comparison.</p>
+          <div class="detail-kv">
+            <div>Primary capability</div><div>${html(capabilities[0] || service.capability || "data_service")}</div>
+            <div>Routing tags</div><div>${html(selectionHints.routing_tags.slice(0, 12).join(", ") || "none")}</div>
+            <div>Input fields</div><div>${html(selectionHints.input_fields.join(", ") || "no input")}</div>
+            <div>Buyer setup</div><div>${preCallContext.buyer_requirements?.needs_buyer_api_key ? "buyer key required" : "no buyer API key required"}</div>
+            <div>Source level</div><div>${html(sourceProvenance.source_provenance_level || "provider_supplied")}</div>
+          </div>
+          <h3>Selection hints</h3>
+          <pre class="code-block">${html(JSON.stringify(selectionHints, null, 2))}</pre>
+        </section>
+
+        <section class="detail-panel invoke-panel">
+          <div class="panel-head">
+            <span class="eyebrow">Evidence and feedback</span>
+            <h2>Evidence traces</h2>
+          </div>
+          <div class="detail-kv">
+            <div>Trace count</div><div>${html(recentEvidence.length)}</div>
+            <div>Latest trace</div><div>${html(latestEvidence?.trace_hash || "No paid-call evidence recorded yet")}</div>
+            <div>Latest payment</div><div>${html(latestEvidence?.payment_tx || "No payment tx recorded yet")}</div>
+            <div>Quality status</div><div>${html(latestQuality?.status || "No quality event yet")}</div>
+          </div>
+          <pre class="code-block">${html(JSON.stringify({
+            evidence_profile: latestEvidence?.evidence_profile || service.quality_profile?.result_contract || null,
+            latest_verification: latestEvidence?.verification_report || service.quality_profile?.latest_verification || null,
+            latest_quality_event: latestQuality ? {
+              status: latestQuality.status,
+              blocking_issues: latestQuality.blocking_issues || [],
+              consumer_feedback_expected: latestQuality.consumer_feedback_expected
+            } : null
+          }, null, 2))}</pre>
         </section>
       </main>
     `
@@ -703,6 +776,7 @@ function page({ title, auth = {}, body }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${html(title)}</title>
+  ${faviconLinks()}
   <style>${styles()}</style>
 </head>
 <body>
@@ -895,7 +969,7 @@ function styles() {
     .guest-provider-grid article { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:24px; }
     .guest-provider-grid h3 { margin:10px 0 8px; font-size:24px; line-height:1.12; }
     .guest-provider-grid p { margin:0; color:var(--color-muted); line-height:1.55; }
-    .provider-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; margin-bottom:24px; }
+    .provider-metrics { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px; margin-bottom:24px; }
     .provider-metric { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:20px; min-width:0; }
     .provider-metric span { display:block; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
     .provider-metric strong { display:block; margin-top:10px; font-size:38px; line-height:1; font-weight:720; overflow-wrap:anywhere; }
@@ -927,6 +1001,11 @@ function styles() {
     .detail-hero { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:34px; align-items:end; padding-bottom:30px; border-bottom:1px solid var(--color-line); }
     .detail-hero h1 { margin:10px 0 12px; font-size:46px; }
     .detail-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:22px; }
+    .detail-metrics { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:12px; margin-top:24px; }
+    .detail-metrics div { border:1px solid var(--color-line); border-radius:8px; background:#fff; padding:18px; min-width:0; }
+    .detail-metrics span { display:block; color:var(--color-muted); font-size:12px; font-weight:760; text-transform:uppercase; }
+    .detail-metrics strong { display:block; margin-top:10px; font-size:28px; line-height:1; font-weight:760; overflow-wrap:anywhere; }
+    .detail-metrics small { display:block; margin-top:10px; color:var(--color-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .detail-summary-card, .detail-panel { border:1px solid var(--color-line); border-radius:8px; background:#fff; }
     .detail-summary-card { padding:18px; display:grid; gap:14px; }
     .detail-summary-card div { display:grid; gap:5px; padding-bottom:12px; border-bottom:1px solid var(--color-line); }
@@ -1144,11 +1223,28 @@ function outputSummary(schema, preview) {
   return "JSON response envelope";
 }
 
+function formatPercent(value) {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  return `${Math.round(Number(value) * 100)}%`;
+}
+
+function formatScore(value) {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  return Number(value).toFixed(2);
+}
+
 function brandLogo() {
   return `
     <span class="brand-icon" aria-hidden="true"><img src="/assets/brand/logo.png" alt=""></span>
     <span class="brand-word">AgentRouter</span>
   `;
+}
+
+function faviconLinks() {
+  return `
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />`;
 }
 
 function html(value) {

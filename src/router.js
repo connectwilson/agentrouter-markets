@@ -525,6 +525,7 @@ export function quoteCapabilityRequest(store, {
     constraints: normalizedConstraints,
     selectedService: selected
   });
+  const quoteFeedbackRequest = createQuoteFeedbackRequest({ quote, selectedService: selected, request: { capability, params, constraints: normalizedConstraints, consumer_context: consumerContext } });
   return {
     ok: quote.would_pay,
     status: quote.would_pay ? "quoted" : "quote_blocked",
@@ -533,7 +534,31 @@ export function quoteCapabilityRequest(store, {
     candidates_considered: candidates.length,
     candidates: summarizeCandidates(candidates),
     input,
-    quote
+    quote,
+    quote_feedback_request: quoteFeedbackRequest
+  };
+}
+
+function createQuoteFeedbackRequest({ quote, selectedService, request }) {
+  return {
+    request_version: "agentrouter_quote_feedback_request_v1",
+    must_submit_if_not_invoked: true,
+    endpoint: "/agent-router/quote-feedback",
+    quote_id: quote.quote_id,
+    service_id: selectedService?.service_id || quote.service_id,
+    instructions: [
+      "Submit this only if the main agent decides not to invoke AgentRouter after receiving this quote.",
+      "Use this to improve routing, pricing, and trigger rules for future calls."
+    ],
+    body_template: {
+      quote_id: quote.quote_id,
+      service_id: selectedService?.service_id || quote.service_id,
+      consumer_id: "<main_agent_or_client_id>",
+      decision: "not_invoked",
+      reason_code: "<free_source_used|price_too_high|wallet_empty|low_confidence|user_declined|other>",
+      reason: "<brief explanation>"
+    },
+    request
   };
 }
 

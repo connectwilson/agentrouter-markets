@@ -23,13 +23,19 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     body: JSON.stringify(input)
   });
   if (firstResponse.status !== 402) {
-    const error = new Error(`Expected HTTP 402 payment challenge, got ${firstResponse.status}.`);
+    let payload = null;
+    try {
+      payload = await firstResponse.json();
+    } catch {}
+    const prepayFailure = payload?.error?.code === "PREPAY_VALIDATION_FAILED";
+    const error = new Error(prepayFailure
+      ? payload.error.message
+      : `Expected HTTP 402 payment challenge, got ${firstResponse.status}.`);
     error.code = firstResponse.status >= 500 ? "provider_unavailable_before_payment" : "payment_challenge_unavailable";
+    if (prepayFailure) error.code = "provider_prepay_validation_failed";
     error.upstreamStatus = firstResponse.status;
     error.retryable = firstResponse.status >= 500;
-    try {
-      error.payload = await firstResponse.json();
-    } catch {}
+    error.payload = payload;
     throw error;
   }
 
@@ -110,6 +116,9 @@ export async function invokePaidServiceWithLocalWallet({ baseUrl, serviceId, inp
     provider_id: manifest.provider.provider_id,
     consumer_id: "local_agent_wallet",
     payment_tx: event.payment_tx,
+    payment_collected: true,
+    billing_status: event.status === "success" ? "charged_success" : "charged_provider_error",
+    result_delivery_status: event.status === "success" ? "delivered" : "failed_after_payment",
     settlement_receipt: createSettlementReceipt({
       manifest: policyManifest,
       challenge: payment,

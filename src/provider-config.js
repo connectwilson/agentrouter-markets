@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { hashJson } from "./evidence.js";
 import { deleteProviderSecret, writeProviderSecret } from "./provider-secrets.js";
 import { assertPersistentProviderStorageReady, deletePersistentProviderConfig, listPersistentProviderConfigs, readPersistentProviderConfig, writePersistentProviderConfig } from "./persistence.js";
 
@@ -16,8 +17,11 @@ export function providerConfigPath(serviceId) {
 
 export async function writeProviderConfig(config) {
   await ensureProviderDir();
+  finalizeProviderConfig(config);
   assertPersistentProviderStorageReady({ requiresSecret: Boolean(config.source?.auth?.secret_value) });
   const sanitized = await sanitizeProviderConfig(config);
+  finalizeProviderConfig(sanitized);
+  Object.assign(config, sanitized);
   await writePersistentProviderConfig(sanitized);
   await fs.writeFile(providerConfigPath(config.manifest.service_id), `${JSON.stringify(sanitized, null, 2)}\n`);
   return providerConfigPath(config.manifest.service_id);
@@ -84,6 +88,8 @@ export function createStaticProviderConfig({
 }) {
   const manifest = {
     manifest_version: "agent_data_service_manifest_v1",
+    manifest_type: "hosted_http_data_api",
+    version: "1.0.0",
     service_id: serviceId,
     provider: {
       provider_id: providerId,
@@ -148,6 +154,7 @@ export function createStaticProviderConfig({
       max_data_lag_seconds: 86400
     },
     agent_contract: createAgentContract({ capabilities, sampleRequest, sampleData, summary }),
+    routing: createStructuredRoutingMetadata({ capabilities, sampleRequest, sampleData, summary, title }),
     registration: {
       source_fingerprint: createSourceFingerprint({
         type: "static_json",
@@ -159,6 +166,7 @@ export function createStaticProviderConfig({
       duplicate_policy: "same_provider_source_is_idempotent"
     }
   };
+  attachErc8257Compatibility(manifest);
 
   return {
     provider_config_version: "adn_provider_config_v1",
@@ -191,6 +199,8 @@ export function createHostedHttpProviderConfig({
 }) {
   const manifest = {
     manifest_version: "agent_data_service_manifest_v1",
+    manifest_type: "hosted_http_data_api",
+    version: "1.0.0",
     service_id: serviceId,
     provider: {
       provider_id: providerId,
@@ -261,6 +271,8 @@ export function createHostedHttpProviderConfig({
       max_data_lag_seconds: 300
     },
     agent_contract: createAgentContract({ capabilities, sampleRequest, sampleData, summary }),
+    routing: createStructuredRoutingMetadata({ capabilities, sampleRequest, sampleData, summary, title, upstreamUrl }),
+    origin_binding: createOriginBinding({ upstreamUrl, serviceId, providerId }),
     registration: {
       source_fingerprint: createSourceFingerprint({
         type: "hosted_http",
@@ -271,6 +283,7 @@ export function createHostedHttpProviderConfig({
       duplicate_policy: "same_provider_source_is_idempotent"
     }
   };
+  attachErc8257Compatibility(manifest);
 
   return {
     provider_config_version: "adn_provider_config_v1",
@@ -288,6 +301,243 @@ export function createHostedHttpProviderConfig({
     },
     manifest
   };
+}
+
+export function finalizeProviderConfig(config) {
+  if (!config || typeof config !== "object") return config;
+  config.provider_config_version ||= "adn_provider_config_v1";
+  config.version ||= "1.0.0";
+  const manifest = config.manifest || {};
+  finalizeManifest(manifest, config);
+  config.manifest = manifest;
+  return config;
+}
+
+export function finalizeManifest(manifest, config = null) {
+  if (!manifest || typeof manifest !== "object") return manifest;
+  manifest.manifest_version ||= "agent_data_service_manifest_v1";
+  manifest.manifest_type ||= "hosted_http_data_api";
+  manifest.version ||= "1.0.0";
+  manifest.capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : ["data_service"];
+  manifest.routing ||= createStructuredRoutingMetadata({
+    capabilities: manifest.capabilities,
+    sampleRequest: manifest.sample_request || {},
+    sampleData: manifest.sample_response?.data || {},
+    summary: manifest.agent_contract?.summary || manifest.description_for_agent || "",
+    title: manifest.title || manifest.service_id || "",
+    upstreamUrl: config?.source?.upstream_url || manifest.origin_binding?.origin || ""
+  });
+  manifest.agent_contract ||= createAgentContract({
+    capabilities: manifest.capabilities,
+    sampleRequest: manifest.sample_request || {},
+    sampleData: manifest.sample_response?.data || {},
+    summary: manifest.description_for_agent || ""
+  });
+  manifest.agent_contract.routing = manifest.routing;
+  manifest.agent_contract.capability_tags = manifest.capabilities;
+  if (config?.source?.type === "hosted_http" && !manifest.origin_binding) {
+    manifest.origin_binding = createOriginBinding({
+      upstreamUrl: config.source.upstream_url,
+      serviceId: manifest.service_id,
+      providerId: manifest.provider?.provider_id || ""
+    });
+  }
+  attachErc8257Compatibility(manifest);
+
+  const configHash = config
+    ? hashJson(stripConfigForHash(config))
+    : (manifest.integrity?.config_hash || hashJson({
+        provider_config_version: "manifest_only_runtime_config_v1",
+        service_id: manifest.service_id,
+        endpoint: manifest.endpoint || null,
+        pricing: manifest.pricing || null
+      }));
+  const manifestHash = hashJson(stripManifestForHash(manifest));
+  const now = manifest.integrity?.created_at || new Date().toISOString();
+  manifest.integrity = {
+    integrity_version: "agentrouter_manifest_integrity_v1",
+    algorithm: "sha256-stable-json",
+    manifest_hash: manifestHash,
+    config_hash: configHash,
+    created_at: now,
+    updated_at: new Date().toISOString()
+  };
+  manifest.registration = {
+    ...(manifest.registration || {}),
+    manifest_hash: manifestHash,
+    config_hash: configHash,
+    version: manifest.version,
+    manifest_type: manifest.manifest_type
+  };
+  manifest.erc8257 = {
+    ...(manifest.erc8257 || {}),
+    metadata_hash: manifestHash
+  };
+  return manifest;
+}
+
+export function createManifestHash(manifest) {
+  return hashJson(stripManifestForHash(manifest));
+}
+
+export function createConfigHash(config) {
+  return hashJson(stripConfigForHash(config));
+}
+
+function attachErc8257Compatibility(manifest) {
+  manifest.erc8257 = {
+    compatible: true,
+    compatibility_version: "agentrouter_erc8257_manifest_compat_v1",
+    tool_manifest_standard: "ERC-8257",
+    tool_type: manifest.manifest_type || "hosted_http_data_api",
+    tool_id: manifest.service_id,
+    registry_strategy: "compatible_manifest_only_no_custom_onchain_tool_registry",
+    metadata_hash: manifest.erc8257?.metadata_hash || null
+  };
+}
+
+function createOriginBinding({ upstreamUrl = "", serviceId = "", providerId = "" } = {}) {
+  let origin = "";
+  try {
+    origin = new URL(upstreamUrl).origin;
+  } catch {
+    origin = "";
+  }
+  return {
+    binding_version: "agentrouter_origin_binding_v1",
+    status: "not_checked",
+    required: false,
+    origin,
+    well_known_url: origin ? `${origin}/.well-known/agentrouter.json` : "",
+    expected_service_id: serviceId,
+    expected_provider_id: providerId,
+    verification_hint: "If the upstream origin serves /.well-known/agentrouter.json, AgentRouter can bind this service to that origin without inventing a new chain registry."
+  };
+}
+
+function createStructuredRoutingMetadata({ capabilities = [], sampleRequest = {}, sampleData = {}, summary = "", title = "", upstreamUrl = "" } = {}) {
+  const raw = [
+    title,
+    summary,
+    upstreamUrl,
+    ...(Array.isArray(capabilities) ? capabilities : []),
+    JSON.stringify(sampleRequest || {}),
+    JSON.stringify(sampleData || {})
+  ].join(" ").toLowerCase();
+  const normalizedCapabilities = Array.isArray(capabilities) ? capabilities.filter(Boolean) : [];
+  return {
+    routing_version: "agentrouter_structured_routing_v1",
+    domains: inferDomains(raw, normalizedCapabilities),
+    data_types: inferDataTypes(raw, normalizedCapabilities),
+    entities: inferEntities(raw, sampleRequest, sampleData),
+    chains: inferChains(raw, sampleRequest),
+    time_requirements: inferTimeRequirements(raw, sampleRequest),
+    input_fields: Object.keys(sampleRequest || {}),
+    output_fields: collectFieldPaths(sampleData || {}, 24),
+    keywords: inferKeywords([title, summary, ...normalizedCapabilities].join(" ")),
+    capability_refs: normalizedCapabilities
+  };
+}
+
+function inferDomains(raw, capabilities) {
+  const domains = new Set();
+  if (/crypto|token|chain|wallet|on[-_ ]?chain|defi|perp|futures|etf|exchange|nansen|coinglass|blockbeats/.test(raw)) domains.add("crypto");
+  if (/price|ohlc|market|volume|liquidation|funding|open interest|oi|orderbook/.test(raw)) domains.add("market_data");
+  if (/wallet|holder|address|smart money|flow|transfer|balance/.test(raw)) domains.add("onchain");
+  if (/news|article|rss|flash/.test(raw)) domains.add("news");
+  for (const capability of capabilities) {
+    if (capability.includes("wallet") || capability.includes("holder")) domains.add("onchain");
+    if (capability.includes("market") || capability.includes("price")) domains.add("market_data");
+  }
+  return [...(domains.size ? domains : new Set(["data_api"]))];
+}
+
+function inferDataTypes(raw, capabilities) {
+  const dataTypes = new Set(capabilities.filter((capability) => capability !== "data_service").slice(0, 12));
+  const patterns = [
+    ["smart_money", /smart money|聪明钱/],
+    ["holder_distribution", /holder|holders|持仓|持有人/],
+    ["token_flow", /flow|netflow|inflow|outflow|净流入|流入|流出/],
+    ["liquidation", /liquidation|爆仓/],
+    ["funding_rate", /funding|资金费率/],
+    ["open_interest", /open interest|\boi\b/],
+    ["price", /price|价格/],
+    ["news", /news|article|rss|快讯|新闻/],
+    ["etf_flow", /\betf\b/],
+    ["prediction_market", /prediction|polymarket/]
+  ];
+  for (const [name, pattern] of patterns) {
+    if (pattern.test(raw)) dataTypes.add(name);
+  }
+  return [...(dataTypes.size ? dataTypes : new Set(["generic_data"]))];
+}
+
+function inferEntities(raw, sampleRequest, sampleData) {
+  const fields = [...Object.keys(sampleRequest || {}), ...collectFieldPaths(sampleData || {}, 24)].join(" ").toLowerCase();
+  const source = `${raw} ${fields}`;
+  const entities = new Set();
+  if (/token|symbol|asset|coin|contract/.test(source)) entities.add("token");
+  if (/address|wallet|holder|account/.test(source)) entities.add("wallet_address");
+  if (/chain|network/.test(source)) entities.add("chain");
+  if (/exchange|cex|binance|bybit|okx|coinbase/.test(source)) entities.add("exchange");
+  if (/date|time|window|from|to|start|end/.test(source)) entities.add("time_window");
+  return [...entities];
+}
+
+function inferChains(raw, sampleRequest) {
+  const chains = new Set();
+  const known = ["ethereum", "base", "bsc", "bnb", "arbitrum", "optimism", "polygon", "solana", "hyperliquid", "hyperevm"];
+  for (const chain of known) {
+    if (raw.includes(chain)) chains.add(chain);
+  }
+  const chainValue = sampleRequest?.chain || sampleRequest?.network;
+  if (typeof chainValue === "string" && chainValue) chains.add(chainValue.toLowerCase());
+  return [...chains];
+}
+
+function inferTimeRequirements(raw, sampleRequest) {
+  const fields = Object.keys(sampleRequest || {}).join(" ").toLowerCase();
+  return {
+    supports_realtime: /live|real[-_ ]?time|current|latest|now|24h|hour|minute/.test(raw),
+    supports_historical: /date|from|to|start|end|history|historical|days|day|week|month/.test(`${raw} ${fields}`),
+    accepted_time_fields: Object.keys(sampleRequest || {}).filter((key) => /date|time|window|from|to|start|end|day|hour/i.test(key))
+  };
+}
+
+function inferKeywords(text) {
+  return [...new Set(String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_\-\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !["the", "and", "for", "with", "api", "data", "get", "post", "use", "this", "service"].includes(word))
+    .slice(0, 24))];
+}
+
+function stripManifestForHash(manifest) {
+  const clone = structuredClone(manifest || {});
+  delete clone.integrity;
+  if (clone.registration) {
+    delete clone.registration.manifest_hash;
+    delete clone.registration.config_hash;
+    delete clone.registration.version;
+    delete clone.registration.manifest_type;
+  }
+  if (clone.erc8257) delete clone.erc8257.metadata_hash;
+  if (clone.origin_binding) {
+    delete clone.origin_binding.status;
+    delete clone.origin_binding.checked_at;
+    delete clone.origin_binding.error;
+  }
+  return clone;
+}
+
+function stripConfigForHash(config) {
+  const clone = structuredClone(config || {});
+  if (clone.source?.auth) {
+    delete clone.source.auth.secret_value;
+  }
+  if (clone.manifest) clone.manifest = stripManifestForHash(clone.manifest);
+  return clone;
 }
 
 function inferSourceProvenanceLevel({ upstreamUrl = "", secretValue = "" } = {}) {

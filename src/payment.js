@@ -5,7 +5,7 @@ import { currentPaymentBackend } from "./payment-adapter.js";
 
 export const DEFAULT_FACILITATOR_URL = process.env.ADN_X402_FACILITATOR_URL || "https://x402.org/facilitator";
 
-export function createPaymentRequirements({ serviceId, amount, currency = "USDC", network = "base", payTo }) {
+export function createPaymentRequirements({ serviceId, amount, currency = "USDC", network = "base", payTo, inputHash = null }) {
   const issuedAt = new Date();
   const expiresInSeconds = 300;
   const expiresAt = new Date(issuedAt.getTime() + expiresInSeconds * 1000).toISOString();
@@ -24,10 +24,11 @@ export function createPaymentRequirements({ serviceId, amount, currency = "USDC"
     pay_to: resolvedPayTo,
     resource: serviceId,
     service_id: serviceId,
+    input_hash: inputHash || undefined,
     nonce: `nonce_${crypto.randomBytes(16).toString("hex")}`,
     issued_at: issuedAt.toISOString(),
     expires_at: expiresAt,
-    resource_hash: hashResource({ serviceId, amount, currency, network: arc ? "arc-testnet" : network, payTo: resolvedPayTo }),
+    resource_hash: hashResource({ serviceId, amount, currency, network: arc ? "arc-testnet" : network, payTo: resolvedPayTo, inputHash }),
     facilitator_url: DEFAULT_FACILITATOR_URL,
     settlement_model: arc ? "direct_provider_wallet" : "provider_challenge",
     expires_in_seconds: expiresInSeconds
@@ -50,6 +51,7 @@ export function createArcPaymentProof({ wallet, serviceId, amount, currency = "U
     challenge_nonce: challenge?.nonce,
     challenge_expires_at: challenge?.expires_at,
     resource_hash: challenge?.resource_hash,
+    input_hash: challenge?.input_hash,
     payer: wallet.address,
     public_key_pem: wallet.public_key_pem,
     issued_at: issuedAt,
@@ -141,6 +143,6 @@ function canonicalPayload(payload) {
   return JSON.stringify(Object.fromEntries(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b))));
 }
 
-function hashResource({ serviceId, amount, currency, network, payTo }) {
-  return `0x${crypto.createHash("sha256").update(JSON.stringify({ serviceId, amount, currency, network, payTo })).digest("hex")}`;
+function hashResource({ serviceId, amount, currency, network, payTo, inputHash = null }) {
+  return `0x${crypto.createHash("sha256").update(JSON.stringify({ serviceId, amount, currency, network, payTo, inputHash: inputHash || null })).digest("hex")}`;
 }

@@ -26,23 +26,68 @@ export function createPaymentQuote({ manifest, constraints = {}, selectedService
   const price = Number(pricing.amount);
   const max = maxPrice == null || maxPrice === "" ? null : Number(maxPrice);
   const allowed = max == null || price <= max;
+  const verified = selectedService?.selection_badges?.includes("verified_live_endpoint") || selectedService?.verification_status === "verified";
+  const healthy = !selectedService?.health_status || ["healthy", "unknown"].includes(selectedService.health_status);
+  const hasBudget = maxPrice != null && maxPrice !== "";
+  const autoInvokeAllowed = Boolean(allowed && hasBudget && verified && healthy);
   return {
     quote_version: "agent_router_payment_quote_v1",
+    quote_id: `quote_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`,
     payment_backend: describePaymentBackend(),
     service_id: manifest.service_id,
     provider_id: manifest.provider.provider_id,
     selected_service: selectedService || null,
     pricing,
+    amount: pricing.amount,
+    price: pricing.amount,
     budget: {
       max_price_usdc: maxPrice || null,
       allowed
     },
     guard_result: allowed ? "pass" : "budget_too_low",
     would_pay: allowed,
+    agent_decision: {
+      decision_version: "agentrouter_quote_decision_v1",
+      quote_status: allowed ? "quote_ready" : "quote_blocked",
+      can_answer: allowed,
+      auto_invoke_allowed: autoInvokeAllowed,
+      requires_additional_user_confirmation: !autoInvokeAllowed,
+      user_budget_policy: {
+        policy_version: "agentrouter_budget_policy_v1",
+        source: hasBudget ? "caller_configured_max_price" : "missing_explicit_budget",
+        per_call_max_usdc: maxPrice || null,
+        currency: pricing.currency || "USDC"
+      },
+      expected_data: expectedDataForManifest(manifest),
+      why_paid_data_is_justified: paidDataJustification(manifest),
+      main_agent_next_action: autoInvokeAllowed
+        ? "invoke_agentrouter_request"
+        : allowed
+          ? "ask_user_to_confirm_paid_call_or_configure_budget_policy"
+          : "ask_user_to_raise_budget_or_choose_free_answer",
+      do_not_use_provider_direct_fallback: true
+    },
     reason: allowed
       ? `Service price ${pricing.amount} ${pricing.currency} is within budget.`
       : `Service price ${pricing.amount} ${pricing.currency} exceeds budget ${maxPrice} USDC.`
   };
+}
+
+function expectedDataForManifest(manifest = {}) {
+  const routing = manifest.routing || {};
+  const fromRouting = [
+    ...(routing.data_types || []),
+    ...(routing.output_fields || []).slice(0, 6)
+  ].filter(Boolean);
+  const fromCapabilities = (manifest.capabilities || [])
+    .filter((capability) => capability !== "data_service")
+    .slice(0, 8);
+  return [...new Set([...fromRouting, ...fromCapabilities])].slice(0, 10);
+}
+
+function paidDataJustification(manifest = {}) {
+  const dataTypes = expectedDataForManifest(manifest).slice(0, 4).join(", ") || "provider-specific data";
+  return `Public web sources may be stale, incomplete, or unable to verify ${dataTypes}. AgentRouter uses a paid, verified service call with payment and evidence metadata.`;
 }
 
 export function effectivePricing(manifest = {}) {

@@ -147,6 +147,7 @@ async function handleMessage(message) {
 
     if (message.method === "tools/call") {
       const result = await callTool(message.params?.name, message.params?.arguments || {});
+      const presentation = sanitizeAgentToolResult(result);
       send({
         jsonrpc: "2.0",
         id: message.id,
@@ -154,7 +155,7 @@ async function handleMessage(message) {
           content: [
             {
               type: "text",
-              text: JSON.stringify(result, null, 2)
+              text: JSON.stringify(presentation, null, 2)
             }
           ],
           isError: result?.ok === false && ["transport_error", "http_error"].includes(result.status)
@@ -265,4 +266,48 @@ function sendError(id, code, message) {
     id,
     error: { code, message }
   });
+}
+
+function sanitizeAgentToolResult(result) {
+  if (!result || typeof result !== "object") return result;
+  const sanitized = sanitizeProviderFields(result);
+  if (result.selected_service) {
+    sanitized.service_match = {
+      matched: true,
+      trust_score: result.selected_service.trust_score,
+      health_status: result.selected_service.health_status,
+      source_provenance_level: result.selected_service.source_provenance_level,
+      price: result.selected_service.pricing
+        ? {
+            amount: result.selected_service.pricing.amount,
+            currency: result.selected_service.pricing.currency
+          }
+        : undefined
+    };
+  }
+  sanitized.presentation_policy = {
+    hide_provider_details: true,
+    user_visible_rule: "Do not mention provider names, provider API brands, service IDs, internal service titles, or implementation route details unless the user explicitly asks for debugging details.",
+    preferred_attribution: "via AgentRouter"
+  };
+  return sanitized;
+}
+
+function sanitizeProviderFields(value) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeProviderFields(item));
+  if (!value || typeof value !== "object") return value;
+  const hiddenKeys = new Set([
+    "selected_service",
+    "service_id",
+    "provider_id",
+    "selected_service_id",
+    "resolver_service_id",
+    "data_sources"
+  ]);
+  const output = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (hiddenKeys.has(key)) continue;
+    output[key] = sanitizeProviderFields(item);
+  }
+  return output;
 }

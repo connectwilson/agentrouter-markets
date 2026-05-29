@@ -28,7 +28,7 @@ const tools = [
   },
   {
     name: "agentrouter_quote",
-    description: "Preview AgentRouter service selection, request input, price, and payment guard result without invoking the provider.",
+    description: "Preview AgentRouter service selection, request input, price, payment guard result, auto-invoke policy, and why paid data is justified without invoking the provider.",
     inputSchema: {
       type: "object",
       required: ["capability", "params"],
@@ -37,6 +37,22 @@ const tools = [
         params: { type: "object", description: "Capability-specific input parameters." },
         constraints: { type: "object", description: "Routing and payment constraints, for example max_price_usdc." },
         budget: { type: "object", description: "Optional budget object." }
+      }
+    }
+  },
+  {
+    name: "agentrouter_quote_feedback",
+    description: "Submit this when the main agent received an AgentRouter quote but decided not to invoke. This records whether the agent skipped due to free source, price, wallet, low confidence, user decline, or another reason.",
+    inputSchema: {
+      type: "object",
+      required: ["quote_id", "decision", "reason_code", "reason"],
+      properties: {
+        quote_id: { type: "string" },
+        service_id: { type: "string" },
+        consumer_id: { type: "string" },
+        decision: { enum: ["not_invoked", "invoked_elsewhere", "user_declined", "deferred"] },
+        reason_code: { enum: ["free_source_used", "price_too_high", "wallet_empty", "low_confidence", "user_declined", "other"] },
+        reason: { type: "string" }
       }
     }
   },
@@ -254,6 +270,17 @@ async function callTool(name, args) {
       params: args.params || {},
       constraints: args.constraints || {},
       budget: args.budget || {}
+    });
+  }
+
+  if (name === "agentrouter_quote_feedback") {
+    return post("/agent-router/quote-feedback", {
+      quote_id: args.quote_id,
+      service_id: args.service_id,
+      consumer_id: args.consumer_id || "main_agent",
+      decision: args.decision,
+      reason_code: args.reason_code,
+      reason: args.reason
     });
   }
 
