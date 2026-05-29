@@ -1062,7 +1062,7 @@ test("public AgentRouter HTTP routes do not invoke paid services without protoco
           }
         })
       });
-      assert.equal(structured.status, 200);
+      assert.equal(structured.status, 402);
       const structuredPayload = await structured.json();
       assert.equal(structuredPayload.ok, false);
       assert.equal(structuredPayload.status, "payment_required");
@@ -1077,7 +1077,7 @@ test("public AgentRouter HTTP routes do not invoke paid services without protoco
           max_price: "0.05"
         })
       });
-      assert.equal(natural.status, 200);
+      assert.equal(natural.status, 402);
       const naturalPayload = await natural.json();
       assert.equal(naturalPayload.ok, false);
       assert.equal(naturalPayload.status, "payment_required");

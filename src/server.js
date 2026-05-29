@@ -608,7 +608,8 @@ async function routeRequest(req, res, store, baseUrl) {
     const body = await readJson(req);
     if (!localServerPaidInvocationsAllowed(baseUrl)) {
       const resolved = resolveRoute(store, body);
-      sendJson(res, 200, routePaymentRequired(resolved, body));
+      const payload = routePaymentRequired(resolved, body);
+      sendJson(res, paymentBoundaryStatusCode(payload), payload);
       return;
     }
     const result = await routeTask(store, body);
@@ -637,7 +638,8 @@ async function routeRequest(req, res, store, baseUrl) {
     const body = await readJson(req);
     if (!localServerPaidInvocationsAllowed(baseUrl)) {
       const result = quoteCapabilityRequest(store, body);
-      sendJson(res, result.ok === false && result.status === "invalid_request" ? 422 : 200, requestPaymentRequired(result));
+      const payload = requestPaymentRequired(result);
+      sendJson(res, paymentBoundaryStatusCode(payload), payload);
       return;
     }
     const result = await routeCapabilityRequest(store, body);
@@ -667,7 +669,7 @@ async function routeRequest(req, res, store, baseUrl) {
       currency: body.currency || "USDC",
       invoke: localServerPaidInvocationsAllowed(baseUrl)
     });
-    sendJson(res, 200, result);
+    sendJson(res, paymentBoundaryStatusCode(result), result);
     return;
   }
 
@@ -1380,6 +1382,12 @@ function requestPaymentRequired(result) {
       ? "Increase the max_price budget or choose a lower-cost service."
       : "Use local MCP with a payment-capable backend, or call the provider endpoint with a valid x402/Arc payment proof."
   };
+}
+
+function paymentBoundaryStatusCode(payload) {
+  if (payload?.status === "invalid_request") return 422;
+  if (payload?.status === "payment_required" || payload?.status === "quote_blocked") return 402;
+  return 200;
 }
 
 function routePaymentRequired(resolved, body) {

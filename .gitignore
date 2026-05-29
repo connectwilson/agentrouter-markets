@@ -1,5 +1,7 @@
 .adn/
+.codegraph/
 agentrouter-skill-export/
+public-release/
 providers/*.json
 providers/*.local.json
 providers/*secret*.json
