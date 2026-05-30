@@ -33,7 +33,7 @@ If AgentRouter returns `payment_required`, `wallet_needs_funding`, `action_requi
 
 When the user asks a data/API question that fits AgentRouter, or asks to use AgentRouter:
 
-1. If MCP tools are already available, use them directly:
+1. If MCP tools are already available, use them directly. This is the fastest and preferred path because the MCP bridge is a long-running local process with the wallet already loaded. Do not open a terminal or run `npx` when these tools exist.
    - `agentrouter_request`: default path; use after you parse the user request into a structured capability request. Successful paid calls automatically record payment verification, evidence trace, deterministic verification, and a feedback request.
    - `agentrouter_capabilities`: call this first when you are unsure which structured capability or params to use
    - `agentrouter_quote`: structured request -> route + quote + budget guard + auto-invoke policy only
@@ -44,7 +44,18 @@ When the user asks a data/API question that fits AgentRouter, or asks to use Age
    - `agentrouter_wallet_create`: manual fallback wallet bootstrap; normally not needed because the local MCP bridge auto-creates a session wallet during initialization
    - `agentrouter_wallet_setup`: advanced wallet bootstrap; opens a one-time local setup page for a user-chosen encryption passphrase
    - `agentrouter_wallet_init`: advanced only; create a local encrypted EVM wallet when a local passphrase is already available in the MCP environment
-2. If MCP tools are not available but shell commands are available, use the AgentRouter CLI first for paid or verifiable data. After the AgentRouter installer has run, the CLI detects the local wallet at `~/.agentrouter/adn` and pays through the local wallet. The default `agent-router ask` path is payment-capable; quote-only mode is explicit and must not be used for paid data answers:
+2. If MCP tools are not available but shell commands are available, use the AgentRouter CLI only as a fallback. Prefer the local project command when this machine has the repo, because `npx --package github:...` can spend tens of seconds resolving and booting a fresh package process on every call.
+
+Fast local fallback on this machine:
+
+```bash
+ADN_DIR="$HOME/.agentrouter/adn" \
+AGENT_ROUTER_URL=https://agentrouter.network \
+AGENT_ROUTER_MAX_PRICE=0.05 \
+node /Users/huazhenghao/Downloads/Arc/bin/agent-router.js request '{"capability":"<capability>","params":{},"constraints":{"max_price_usdc":"0.05"}}' --local-wallet
+```
+
+Generic fallback for other machines after the installer has run. The CLI detects the local wallet at `~/.agentrouter/adn` and pays through the local wallet. The default `agent-router ask` path is payment-capable; quote-only mode is explicit and must not be used for paid data answers:
 
 ```bash
 AGENT_ROUTER_URL=https://agentrouter.network \
@@ -79,12 +90,12 @@ curl -sS -X POST "https://agentrouter-markets.onrender.com/agent-router/ask" \
   -d '{"task":"<user original request>","max_price":"0.05"}'
 ```
 
-4. For structured requests over CLI, prefer MCP when available. If MCP is not available, the CLI can still quote/search remotely:
+4. For structured requests over CLI, prefer MCP when available. If MCP is not available and a paid answer is required, include `--local-wallet`; otherwise the hosted HTTP boundary will only return a quote/payment-required response:
 
 ```bash
 AGENT_ROUTER_URL=https://agentrouter.network \
 AGENT_ROUTER_MAX_PRICE=0.05 \
-npx -y --package github:connectwilson/agentrouter-markets#main agent-router request '{"capability":"token_smart_money_activity","params":{"token_symbol":"AZTEC","chain":"ethereum","window":"24h"}}'
+npx -y --package github:connectwilson/agentrouter-markets#main agent-router request '{"capability":"token_smart_money_activity","params":{"token_symbol":"AZTEC","chain":"ethereum","window":"24h"},"constraints":{"max_price_usdc":"0.05"}}' --local-wallet
 ```
 
 5. If the HTTP endpoint is blocked by the client network policy, switch to the bootstrap flow below. Do not ask the user to paste curl output unless there is no supported install path.

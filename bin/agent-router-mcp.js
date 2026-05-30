@@ -874,7 +874,11 @@ async function post(path, body) {
 
 async function request(path, options) {
   try {
-    const response = await fetch(`${baseUrl}${path}`, options);
+    const started = Date.now();
+    const response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      signal: options.signal || AbortSignal.timeout(httpTimeoutMs())
+    });
     const text = await response.text();
     const payload = text ? JSON.parse(text) : null;
     if (!response.ok) {
@@ -883,6 +887,7 @@ async function request(path, options) {
         status: "http_error",
         http_status: response.status,
         base_url: baseUrl,
+        elapsed_ms: Date.now() - started,
         payload
       };
     }
@@ -890,11 +895,18 @@ async function request(path, options) {
   } catch (error) {
     return {
       ok: false,
-      status: "transport_error",
+      status: error.name === "TimeoutError" || error.name === "AbortError" ? "transport_timeout" : "transport_error",
       base_url: baseUrl,
-      message: error.message
+      timeout_ms: httpTimeoutMs(),
+      message: error.name === "TimeoutError" || error.name === "AbortError"
+        ? `AgentRouter HTTP request timed out after ${httpTimeoutMs()}ms.`
+        : error.message
     };
   }
+}
+
+function httpTimeoutMs() {
+  return Number(process.env.AGENT_ROUTER_HTTP_TIMEOUT_MS || 15000);
 }
 
 function send(message) {

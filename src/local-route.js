@@ -620,7 +620,8 @@ async function postJson(baseUrl, path, body) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(httpTimeoutMs())
   });
   const payload = await response.json();
   if (!response.ok) {
@@ -636,7 +637,8 @@ async function postJsonAllowPayment(baseUrl, path, body) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(httpTimeoutMs())
   });
   const text = await response.text();
   let payload = null;
@@ -655,6 +657,10 @@ async function postJsonAllowPayment(baseUrl, path, body) {
     throw error;
   }
   return payload;
+}
+
+function httpTimeoutMs() {
+  return Number(process.env.AGENT_ROUTER_HTTP_TIMEOUT_MS || 15000);
 }
 
 function createRouteTiming() {

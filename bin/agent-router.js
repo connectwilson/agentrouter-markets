@@ -181,7 +181,9 @@ function localPaymentNotReadyResponse(readiness) {
 }
 
 async function get(path) {
-  const response = await fetch(`${baseUrl}${path}`);
+  const response = await fetch(`${baseUrl}${path}`, {
+    signal: AbortSignal.timeout(httpTimeoutMs())
+  });
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload?.error?.message || payload?.error?.code || `HTTP ${response.status}`);
@@ -195,7 +197,8 @@ async function post(path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(httpTimeoutMs())
   });
   const text = await response.text();
   let payload = null;
@@ -217,6 +220,10 @@ async function post(path, body) {
 function requireArg(value, name) {
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function httpTimeoutMs() {
+  return Number(process.env.AGENT_ROUTER_HTTP_TIMEOUT_MS || 15000);
 }
 
 function print(value) {
