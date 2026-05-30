@@ -193,6 +193,7 @@ const CAPABILITY_ALIASES = [
         token_address: { type: "string", description: "Optional contract address. AgentRouter may resolve it from token_symbol when omitted." },
         chain: { type: "string", enum: ["ethereum", "base", "arbitrum", "optimism", "solana", "bsc", "bnb", "hyperevm"] },
         window: { type: "string", description: "Requested time window, for example 24h, 1d, 7d." },
+        date: { type: "object", description: "Optional date range with from/to ISO dates. AgentRouter fills this from window when the provider expects dates." },
         pagination: { type: "object" }
       }
     },
@@ -987,15 +988,15 @@ function buildInput(manifest, intent) {
     ...(entry ? entry.defaultInput(intent) : {})
   };
   if (intent.capability === "token_smart_money_activity") {
-    return filterInputToManifestShape(input, manifest);
+    return filterInputToManifestShape(input, manifest, providerInputAllowlist(manifest, intent));
   }
   return input;
 }
 
-function filterInputToManifestShape(input, manifest) {
+function filterInputToManifestShape(input, manifest, extraAllowed = []) {
   const sampleKeys = new Set(Object.keys(manifest.sample_request || {}));
   const schemaKeys = new Set(Object.keys(manifest.input_schema?.properties || {}));
-  const allowed = new Set([...sampleKeys, ...schemaKeys]);
+  const allowed = new Set([...sampleKeys, ...schemaKeys, ...extraAllowed]);
   if (!allowed.size) return input;
   return Object.fromEntries(
     Object.entries(input).filter(([key]) => allowed.has(key))
@@ -1010,10 +1011,27 @@ function tokenSmartMoneyInput(intent) {
   };
   if (intent.token_address) input.token_address = intent.token_address;
   if (intent.token_symbol) input.token_symbol = intent.token_symbol;
-  if (/^\d+\s*h$/i.test(window) || window === "24h" || window === "1d") input.date = recentDateRange(1);
+  if (intent.date) input.date = intent.date;
+  else if (/^\d+\s*h$/i.test(window) || window === "24h" || window === "1d") input.date = recentDateRange(1);
   else if (/^\d+\s*d$/i.test(window)) input.date = recentDateRange(Number(window.match(/\d+/)?.[0] || 1));
   else input.timeframe = window;
   return input;
+}
+
+function providerInputAllowlist(manifest = {}, intent = {}) {
+  if (intent.capability !== "token_smart_money_activity") return [];
+  const surface = [
+    manifest.service_id,
+    manifest.title,
+    manifest.description_for_agent,
+    manifest.provider?.provider_id,
+    ...(manifest.capabilities || [])
+  ].join(" ").toLowerCase();
+  const extra = [];
+  if (/nansen|\/api\/v1\/tgm|who[-_\s]?bought|bought[-_\s]?sold/.test(surface)) {
+    extra.push("date", "pagination", "chain", "token_address", "token_symbol");
+  }
+  return extra;
 }
 
 async function resolveStructuredTokenIfNeeded(store, intent, constraints = {}, budget = {}) {

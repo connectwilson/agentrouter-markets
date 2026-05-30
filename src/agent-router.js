@@ -258,6 +258,8 @@ export function inferIntent(task) {
     delete input.limit;
     delete input.offset;
     input.chains = [chain || "ethereum"];
+    input.window = window || "24h";
+    input.date = windowToDateRange(input.window);
     input.pagination = { page: 1, per_page: limit };
   }
   if (wantsSmartMoneyActivity) {
@@ -267,6 +269,7 @@ export function inferIntent(task) {
     input.chain = chain || chainForAsset(token) || "ethereum";
     input.window = window || "24h";
     input.timeframe = windowToTimeframe(input.window);
+    input.date = windowToDateRange(input.window);
     input.pagination = { page: 1, per_page: limit };
   }
   if (wantsNetflow) {
@@ -277,6 +280,8 @@ export function inferIntent(task) {
     input.chain = chain || chainForAsset(input.asset) || "ethereum";
     input.chains = [input.chain];
     input.window = window || "24h";
+    input.date = windowToDateRange(input.window);
+    input.pagination = { page: 1, per_page: limit };
   }
   if (wantsLiquidation) {
     input.asset = token || "BTC";
@@ -332,7 +337,9 @@ export function buildServiceAwareInput(intent, manifestOrService = {}) {
     ...Object.keys(schemaProperties || {})
   ]);
   const inferred = intent.input || {};
-  if (!targetKeys.size) return { ...inferred };
+  if (!targetKeys.size) {
+    return stripEmptyValues(applyDataServiceInputDefaults({ ...inferred }, intent, manifestOrService, inferred, targetKeys));
+  }
 
   const input = { ...sample };
   for (const [key, value] of Object.entries(inferred)) {
@@ -387,6 +394,68 @@ export function buildServiceAwareInput(intent, manifestOrService = {}) {
     input.offset = inferred.offset || 0;
   }
 
+  return stripEmptyValues(applyDataServiceInputDefaults(input, intent, manifestOrService, inferred, targetKeys));
+}
+
+function applyDataServiceInputDefaults(input, intent, manifestOrService, inferred, targetKeys) {
+  const wantsDataWindow = wantsRoutedDataWindow(intent);
+  if (!wantsDataWindow) return input;
+  const chain = inferred.chain || inferred.chains?.[0] || intent.chain || chainForAsset(intent.token);
+  if (chain) {
+    if ((targetKeys.has("chain") || shouldForceProviderKey(manifestOrService, "chain")) && input.chain == null) {
+      input.chain = chain;
+    }
+    if ((targetKeys.has("chains") || shouldForceProviderKey(manifestOrService, "chains")) && input.chains == null) {
+      input.chains = [chain];
+    }
+  }
+  if (shouldForceProviderKey(manifestOrService, "date") && (input.date == null || isExampleValue(input.date))) {
+    input.date = inferred.date || windowToDateRange(inferred.window || input.window || "24h");
+  }
+  if ((targetKeys.has("pagination") || shouldForceProviderKey(manifestOrService, "pagination")) && input.pagination == null) {
+    input.pagination = inferred.pagination || { page: 1, per_page: inferred.limit || 5 };
+  }
+  if (input.pagination) {
+    input.pagination = {
+      ...input.pagination,
+      page: Number(input.pagination.page || 1),
+      per_page: Number(input.pagination.per_page || inferred.limit || 5)
+    };
+  }
+  return input;
+}
+
+function wantsRoutedDataWindow(intent = {}) {
+  return Boolean(
+    intent.wants_smart_money_activity ||
+    intent.wants_smart_money_netflow ||
+    intent.wants_netflow ||
+    ["token_smart_money_activity", "smart_money_netflow", "netflow"].includes(intent.capability)
+  );
+}
+
+function shouldForceProviderKey(manifestOrService = {}, key) {
+  const surface = [
+    manifestOrService.service_id,
+    manifestOrService.title,
+    manifestOrService.description_for_agent,
+    ...(manifestOrService.capabilities || []),
+    JSON.stringify(manifestOrService.sample_request || {}),
+    JSON.stringify(manifestOrService.input_schema?.properties || {})
+  ].join(" ").toLowerCase();
+  if (key === "date") {
+    return /nansen|\/api\/v1\/tgm|\/api\/v1\/smart-money|smart-money\/netflow|who[-_\s]?bought|bought[-_\s]?sold/.test(surface);
+  }
+  if (key === "pagination") {
+    return /nansen|smart[\s_-]?money|token[\s_-]?flow|flow[\s_-]?intelligence|net[\s_-]?flow|netflow/.test(surface);
+  }
+  if (key === "chain" || key === "chains") {
+    return /nansen|onchain|on-chain|token[\s_-]?flow|smart[\s_-]?money|net[\s_-]?flow|netflow/.test(surface);
+  }
+  return false;
+}
+
+function stripEmptyValues(input) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== null));
 }
 

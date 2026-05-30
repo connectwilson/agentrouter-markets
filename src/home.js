@@ -31,7 +31,7 @@ export function homeHtml({ auth = {} } = {}) {
       <header class="hero">
         <div class="dot-grid" aria-hidden="true"></div>
         <div class="shell wide-shell hero-center">
-          <h1>Agent-native execution, routing, and verification layer</h1>
+          <h1>Agent-native API routing layer</h1>
           <p class="lead">AgentRouter gives your agent access to verifiable premium data sources, per call, with no subscriptions.</p>
           <a class="hero-cta" href="/agent">Explore Data/APIs</a>
 

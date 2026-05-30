@@ -62,7 +62,20 @@ try {
   } else if (command === "capabilities") {
     print(await get("/capabilities"));
   } else if (command === "request") {
-    print(await post("/agent-router/request", JSON.parse(requireArg(commandArgs[0], "request_json"))));
+    const request = JSON.parse(requireArg(commandArgs[0], "request_json"));
+    if (localWalletRequested && !quoteOnlyRequested) {
+      const { routeCapabilityRequestWithLocalWallet } = await import("../src/local-route.js");
+      print(await routeCapabilityRequestWithLocalWallet({
+        baseUrl,
+        request,
+        budget: {
+          max_amount: request.constraints?.max_price_usdc || request.budget?.max_amount || process.env.AGENT_ROUTER_MAX_PRICE || "0.05",
+          currency: request.budget?.currency || "USDC"
+        }
+      }));
+    } else {
+      print(await post("/agent-router/request", request));
+    }
   } else if (command === "quote") {
     print(await post("/agent-router/quote", JSON.parse(requireArg(commandArgs[0], "request_json"))));
   } else if (command === "search") {
@@ -184,7 +197,15 @@ async function post(path, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
-  const payload = await response.json();
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    const error = new Error(`HTTP ${response.status} returned non-JSON response`);
+    error.payload = { raw: text.slice(0, 500) };
+    throw error;
+  }
   if (!response.ok) {
     const error = new Error(payload?.error?.message || payload?.error?.code || `HTTP ${response.status}`);
     error.payload = payload;

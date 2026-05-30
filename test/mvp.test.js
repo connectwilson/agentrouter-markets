@@ -31,11 +31,12 @@ const { createArcPaymentProof } = await import("../src/payment.js");
 const { sendArcUsdcTransfer } = await import("../src/arc-payment.js");
 const { getRequestBaseUrl, normalizeEndpoint } = await import("../src/http-utils.js");
 const { createMemoryStore } = await import("../src/store.js");
+const { quoteCapabilityRequest } = await import("../src/router.js");
 const { keccak256Hex } = await import("../src/keccak.js");
 const { currentPaymentBackend } = await import("../src/payment-adapter.js");
 const { invokePaidServiceWithLocalWallet } = await import("../src/local-invoke.js");
 const { diagnoseAgentRouter, formatDoctorResult, formatInstallResult, installAgentRouter, parseInstallArgs } = await import("../src/agentrouter-installer.js");
-const { inferIntent } = await import("../src/agent-router.js");
+const { buildServiceAwareInput, inferIntent } = await import("../src/agent-router.js");
 
 test.after(async () => {
   await fs.rm(runtimeRoot, { recursive: true, force: true });
@@ -104,6 +105,7 @@ test("home page and Provider Studio render separately", async () => {
     const homeHtml = await home.text();
     assert.match(homeHtml, /rel="icon"/);
     assert.match(homeHtml, /\/favicon\.png/);
+    assert.match(homeHtml, /Agent-native API routing layer/);
     assert.match(homeHtml, /Network snapshot/);
     assert.match(homeHtml, /Open provider dashboard/);
     assert.match(homeHtml, /Open agent API hub/);
@@ -228,6 +230,113 @@ test("AgentRouter natural-language parser maps HYPE smart-money requests to Hype
   assert.equal(intent.chain, "hyperevm");
   assert.equal(intent.input.chain, "hyperevm");
   assert.equal(intent.input.window, "24h");
+  assert.equal(typeof intent.input.date.from, "string");
+  assert.equal(typeof intent.input.date.to, "string");
+});
+
+test("AgentRouter fills date range for Nansen token-flow services even when manifest omits date", () => {
+  const intent = inferIntent("查 ETH 近 24 小时聪明钱 netflow");
+  const manifest = {
+    service_id: "nansen_tgm_flows",
+    title: "Nansen TGM who bought sold flows",
+    description_for_agent: "Use this Nansen service for token-level smart money flow intelligence and who bought/sold data.",
+    capabilities: ["nansen", "data_service", "token_god_mode", "token_flow", "smart_money"],
+    sample_request: {
+      chain: "ethereum",
+      token_address: "0x0000000000000000000000000000000000000000",
+      pagination: { page: 1, per_page: 10 }
+    },
+    input_schema: {
+      type: "object",
+      properties: {
+        chain: { type: "string" },
+        token_address: { type: "string" },
+        pagination: { type: "object" }
+      }
+    }
+  };
+  const input = buildServiceAwareInput({
+    ...intent,
+    input: {
+      ...intent.input,
+      token_address: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }, manifest);
+  assert.equal(input.chain, "ethereum");
+  assert.equal(input.token_address, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+  assert.deepEqual(input.pagination, { page: 1, per_page: 24 });
+  assert.equal(typeof input.date.from, "string");
+  assert.equal(typeof input.date.to, "string");
+});
+
+test("structured token smart-money quotes preserve Nansen date input before payment", () => {
+  const store = createMemoryStore();
+  const record = registerService(store, {
+    manifest_version: "agent_data_service_manifest_v1",
+    service_id: "nansen_tgm_flows_test",
+    provider: { provider_id: "provider_nansen_test" },
+    title: "Nansen TGM who bought sold flows",
+    description_for_agent: "Use this Nansen API service for token-level smart money flow intelligence and who bought/sold data.",
+    capabilities: ["nansen", "data_service", "token_god_mode", "token_data", "token_flow", "smart_money"],
+    input_schema: {
+      type: "object",
+      required: ["chain", "token_address"],
+      properties: {
+        chain: { type: "string" },
+        token_address: { type: "string" },
+        pagination: { type: "object" }
+      }
+    },
+    output_schema: {
+      type: "object",
+      properties: {
+        schema_version: { type: "string" },
+        data: { type: "object" }
+      }
+    },
+    sample_request: {
+      chain: "ethereum",
+      token_address: "0x0000000000000000000000000000000000000000",
+      pagination: { page: 1, per_page: 10 }
+    },
+    sample_response: {
+      schema_version: "agent_data_envelope_v1",
+      service_id: "nansen_tgm_flows_test",
+      request_id: "sample_req",
+      status: "success",
+      query: {},
+      data: { rows: [] },
+      metadata: { freshness_seconds: 60 },
+      summary: "Sample token flow data."
+    },
+    pricing: {
+      amount: "0.01",
+      currency: "USDC",
+      network: "arc-testnet",
+      protocol: "x402"
+    },
+    endpoint: {
+      url: "/provider/custom/nansen_tgm_flows_test",
+      method: "POST"
+    }
+  }, "http://127.0.0.1:8800");
+  record.verification_status = "verified";
+
+  const quote = quoteCapabilityRequest(store, {
+    capability: "token_smart_money_activity",
+    params: {
+      token_symbol: "ETH",
+      token_address: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      chain: "ethereum",
+      window: "24h"
+    },
+    constraints: { max_price_usdc: "0.05" }
+  });
+  assert.equal(quote.ok, true);
+  assert.equal(quote.selected_service.service_id, "nansen_tgm_flows_test");
+  assert.equal(quote.input.token_address, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+  assert.equal(typeof quote.input.date.from, "string");
+  assert.equal(typeof quote.input.date.to, "string");
 });
 
 test("wallet default path is stable outside temporary working directories", async () => {
@@ -3687,6 +3796,38 @@ test("agent-router ask uses local wallet instead of quote-only path when wallet 
     assert.equal(payload.status, "route_with_assumption");
     assert.equal(payload.local_payment.status, "success");
     assert.notEqual(payload.protocol?.invocation_policy, "quote_only_no_server_side_payment");
+    const log = await readPaymentLog();
+    assert.equal(log.at(-1).service_id, "btc_liquidation_max_pain_demo");
+  });
+});
+
+test("agent-router request --local-wallet pays structured requests with the local wallet", async () => {
+  await resetWalletForTests();
+  await withServer(async ({ baseUrl }) => {
+    await runCli(["wallet", "init"], { ADN_REGISTRY_URL: baseUrl });
+    const request = {
+      capability: "perp_liquidation_max_pain",
+      params: {
+        asset: "BTC",
+        market_type: "perpetual_futures",
+        window: "current"
+      },
+      constraints: {
+        max_price_usdc: "0.05"
+      }
+    };
+    const routed = await runAgentRouterCli(["request", JSON.stringify(request), "--local-wallet"], {
+      ADN_REGISTRY_URL: baseUrl
+    });
+    assert.equal(routed.code, 0, routed.stderr);
+    const payload = JSON.parse(routed.stdout);
+    assert.equal(payload.status, "paid_with_local_wallet");
+    assert.equal(payload.selected_service.service_id, "btc_liquidation_max_pain_demo");
+    assert.equal(payload.local_payment.status, "success");
+    assert.equal(payload.local_payment.amount, "0.02");
+    assert.equal(payload.data_returned, true);
+    assert.equal(payload.verification.schema_valid, true);
+    assert.equal(payload.evidence_recording.feedback.billing_status, "charged_success");
     const log = await readPaymentLog();
     assert.equal(log.at(-1).service_id, "btc_liquidation_max_pain_demo");
   });

@@ -85,6 +85,117 @@ export async function routeTaskWithLocalWallet({ baseUrl, task, constraints = {}
   };
 }
 
+export async function routeCapabilityRequestWithLocalWallet({ baseUrl, request = {}, budget = {} }) {
+  const connector = new DiscoveryConnector({ baseUrl });
+  const timing = createRouteTiming();
+  const normalizedBudget = {
+    max_amount: request.constraints?.max_price_usdc || request.budget?.max_amount || budget.max_amount || "0.05",
+    currency: request.budget?.currency || budget.currency || "USDC"
+  };
+  const requested = {
+    ...request,
+    budget: {
+      ...(request.budget || {}),
+      ...normalizedBudget
+    }
+  };
+  let quoted;
+  try {
+    quoted = await timing.measure("resolve_structured_route_ms", () => postJsonAllowPayment(baseUrl, "/agent-router/quote", requested));
+  } catch (error) {
+    return {
+      ok: false,
+      status: error.code || "structured_route_failed",
+      data_returned: false,
+      error: error.message,
+      payload: error.payload || null,
+      timing: timing.snapshot()
+    };
+  }
+  if (quoted.status === "quote_blocked" || quoted.quote?.would_pay === false) {
+    return {
+      ...quoted,
+      data_returned: false,
+      timing: timing.snapshot()
+    };
+  }
+  if (quoted.status !== "payment_required" && quoted.status !== "quoted") {
+    return {
+      ...quoted,
+      data_returned: false,
+      timing: timing.snapshot()
+    };
+  }
+  const serviceId = quoted.selected_service?.service_id;
+  if (!serviceId) {
+    return {
+      ...quoted,
+      ok: false,
+      status: "selected_service_missing",
+      data_returned: false,
+      timing: timing.snapshot()
+    };
+  }
+
+  let invocation;
+  try {
+    invocation = await timing.measure("local_paid_invoke_ms", () => invokePaidServiceWithLocalWallet({
+      baseUrl,
+      serviceId,
+      input: quoted.input || {},
+      budget: normalizedBudget,
+      request: {
+        capability: requested.capability,
+        params: requested.params || {},
+        constraints: requested.constraints || {},
+        budget: normalizedBudget,
+        consumer_context: {
+          ...(requested.consumer_context || {}),
+          source: requested.consumer_context?.source || "agentrouter_structured_request_local_wallet"
+        }
+      }
+    }));
+  } catch (error) {
+    return {
+      ...quoted,
+      ok: false,
+      status: error.code || "local_paid_invocation_failed",
+      data_returned: false,
+      error: error.message,
+      retryable: Boolean(error.retryable),
+      upstream_status: error.upstreamStatus || null,
+      payload: error.payload || null,
+      timing: timing.snapshot()
+    };
+  }
+
+  const manifest = await timing.measure("get_manifest_ms", () => connector.getManifest(serviceId));
+  const verification = timing.measureSync("verify_result_ms", () => verifyServiceResult({
+    result: invocation.result,
+    manifest,
+    intent: requested.params || {},
+    constraints: requested.constraints || {}
+  }));
+
+  return {
+    ...quoted,
+    ok: true,
+    status: "paid_with_local_wallet",
+    protocol: {
+      protocol_version: "agent_router_request_v1",
+      semantic_parser: "external_main_agent",
+      router_responsibility: "schema_validation_routing_quote_local_payment_invocation_verification_evidence"
+    },
+    result: invocation.result,
+    local_payment: invocation.local_payment,
+    evidence_recording: invocation.evidence_recording,
+    consumer_feedback_request: invocation.evidence_recording?.consumer_feedback_request || null,
+    verification,
+    data_returned: invocation.result?.status === "success",
+    timing: timing.snapshot()
+  };
+}
+
 async function routeTokenSmartMoneyActivityWithLocalWallet({ baseUrl, connector, task, intent, constraints, budget, timing }) {
   const maxAmount = constraints.max_price_usdc || budget.max_amount || "0.05";
   const currency = budget.currency || "USDC";
@@ -513,6 +624,31 @@ async function postJson(baseUrl, path, body) {
   });
   const payload = await response.json();
   if (!response.ok) {
+    const error = new Error(payload?.error?.message || payload?.error?.code || `HTTP ${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+async function postJsonAllowPayment(baseUrl, path, body) {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    const error = new Error(`HTTP ${response.status} returned non-JSON response.`);
+    error.status = response.status;
+    error.payload = { raw: text.slice(0, 500) };
+    throw error;
+  }
+  if (!response.ok && response.status !== 402) {
     const error = new Error(payload?.error?.message || payload?.error?.code || `HTTP ${response.status}`);
     error.status = response.status;
     error.payload = payload;
